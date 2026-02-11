@@ -1209,3 +1209,67 @@ body {
         width: 100%;
     }
 }
+
+/* Discovery Questions */
+.discovery-card {
+    margin-bottom: var(--space-6);
+}
+
+.discovery-questions {
+    padding: var(--space-4);
+}
+
+.discovery-group {
+    margin-bottom: var(--space-5);
+}
+
+.discovery-group:last-child {
+    margin-bottom: 0;
+}
+
+.discovery-category {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.discovery-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.discovery-item {
+    position: relative;
+    padding: var(--space-2) 0 var(--space-2) var(--space-6);
+    color: var(--gray-700);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.discovery-item:last-child {
+    border-bottom: none;
+}
+
+.discovery-item::before {
+    content: "?";
+    position: absolute;
+    left: 0;
+    top: var(--space-2);
+    width: 20px;
+    height: 20px;
+    background: var(--primary-light, #eef2ff);
+    color: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+}

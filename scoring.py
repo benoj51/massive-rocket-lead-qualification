@@ -39,10 +39,12 @@ def parse_revenue(revenue_str):
         number = float(match.group(1))
         suffix = match.group(2)
         multiplier = multipliers.get(suffix, 1)
-        return number * multiplier
+        result = number * multiplier
+        return result if result >= 0 else None
 
     try:
-        return float(revenue_str)
+        result = float(revenue_str)
+        return result if result >= 0 else None
     except:
         return None
 
@@ -120,6 +122,19 @@ def score_vertical(vertical_str):
     return best_score, matched_vertical
 
 
+def _has_keyword(text, keyword):
+    """Check if keyword is present without being negated (e.g., 'no braze', 'not using braze')."""
+    import re
+    # Check if keyword exists at all
+    if keyword not in text:
+        return False
+    # Check for negation patterns immediately preceding the keyword
+    negation_pattern = rf'(?:no|not|without|don\'t use|doesn\'t use|no longer using|removed)\s+(?:\w+\s+)?{re.escape(keyword)}'
+    if re.search(negation_pattern, text):
+        return False
+    return True
+
+
 def score_tech_stack(tech_data):
     """Score based on technology stack."""
     if not tech_data:
@@ -127,10 +142,10 @@ def score_tech_stack(tech_data):
 
     tech_lower = str(tech_data).lower()
 
-    has_braze = any(kw in tech_lower for kw in TECH_KEYWORDS["braze"])
-    has_snowflake = any(kw in tech_lower for kw in TECH_KEYWORDS["snowflake"])
+    has_braze = any(_has_keyword(tech_lower, kw) for kw in TECH_KEYWORDS["braze"])
+    has_snowflake = any(_has_keyword(tech_lower, kw) for kw in TECH_KEYWORDS["snowflake"])
     has_warehouse = has_snowflake or any(
-        kw in tech_lower for kw in TECH_KEYWORDS["data_warehouse"]
+        _has_keyword(tech_lower, kw) for kw in TECH_KEYWORDS["data_warehouse"]
     )
 
     if has_braze and has_snowflake:

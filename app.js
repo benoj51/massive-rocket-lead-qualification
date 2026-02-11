@@ -74,9 +74,10 @@ const ICP_CRITERIA = {
     region: {
         weight: 1,
         scores: {
-            nam_emea: 3, global: 3,
+            nam_emea: 3, global: 3, multi_region: 3,
             nam: 2, emea: 2,
-            apac: 1, other: 1
+            apac: 1, single_region: 1, other: 1,
+            non_english: 0
         }
     }
 };
@@ -115,7 +116,10 @@ const REGION_LABELS = {
     emea: "Europe (EMEA)",
     apac: "Asia Pacific (APAC)",
     nam_emea: "NAM + EMEA",
-    global: "Global / Multi-Region"
+    global: "Global / Multi-Region",
+    multi_region: "Multi-Region",
+    single_region: "Single Region",
+    non_english: "Non-English Market"
 };
 
 const COMPLEXITY_LABELS = {
@@ -151,11 +155,12 @@ function parseRevenue(revenueStr) {
         const number = parseFloat(match[1]);
         const suffix = match[2];
         const multiplier = multipliers[suffix] || 1;
-        return number * multiplier;
+        const result = number * multiplier;
+        return result >= 0 ? result : null;
     }
 
     const parsed = parseFloat(str);
-    return isNaN(parsed) ? null : parsed;
+    return isNaN(parsed) || parsed < 0 ? null : parsed;
 }
 
 function parseEmployees(employeeStr) {
@@ -179,7 +184,7 @@ function parseEmployees(employeeStr) {
     }
 
     const parsed = parseInt(str);
-    return isNaN(parsed) ? null : parsed;
+    return isNaN(parsed) || parsed < 0 ? null : parsed;
 }
 
 // ============================================
@@ -197,14 +202,22 @@ function scoreNumericCriterion(value, config) {
     return { score: 0, label: "Out of range" };
 }
 
+function hasKeyword(text, keyword) {
+    if (!text.includes(keyword)) return false;
+    const negationPattern = new RegExp(
+        `(?:no|not|without|don't use|doesn't use|no longer using|removed)\\s+(?:\\w+\\s+)?${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`
+    );
+    return !negationPattern.test(text);
+}
+
 function scoreTechStack(techData) {
     if (!techData) return { score: 0, label: "Unknown" };
 
     const techLower = techData.toString().toLowerCase();
 
-    const hasBraze = TECH_KEYWORDS.braze.some(kw => techLower.includes(kw));
-    const hasSnowflake = TECH_KEYWORDS.snowflake.some(kw => techLower.includes(kw));
-    const hasWarehouse = hasSnowflake || TECH_KEYWORDS.data_warehouse.some(kw => techLower.includes(kw));
+    const hasBraze = TECH_KEYWORDS.braze.some(kw => hasKeyword(techLower, kw));
+    const hasSnowflake = TECH_KEYWORDS.snowflake.some(kw => hasKeyword(techLower, kw));
+    const hasWarehouse = hasSnowflake || TECH_KEYWORDS.data_warehouse.some(kw => hasKeyword(techLower, kw));
 
     if (hasBraze && hasSnowflake) {
         return { score: 3, label: "Braze + Snowflake" };
@@ -362,11 +375,8 @@ function checkHardDisqualifiers(companyData) {
     }
 
     const techStack = (companyData.techStack || "").toLowerCase();
-    if (techStack.includes("no braze") || (!techStack.includes("braze") && techStack.length > 0)) {
-        // Only flag if we have tech data but no braze
-        if (techStack.length > 5 && !techStack.includes("braze")) {
-            disqualifiers.push("No Braze detected in known stack");
-        }
+    if (techStack.includes("no braze")) {
+        disqualifiers.push("No Braze and no plans to adopt");
     }
 
     return disqualifiers;
@@ -427,6 +437,109 @@ function generateNextSteps(result, companyData) {
     }
 
     return steps;
+}
+
+function generateDiscoveryQuestions(result, companyData) {
+    const questions = [];
+    const breakdown = result.breakdown;
+
+    // --- Universal opener questions ---
+    questions.push({
+        category: "Engagement & Pain Points",
+        items: [
+            "What prompted you to explore working with an agency partner right now?",
+            "What does success look like for your CRM/lifecycle marketing in the next 12 months?"
+        ]
+    });
+
+    // --- Tech stack questions (adapt based on what we know) ---
+    const techQuestions = [];
+    if (breakdown.techStack.rawScore === 0) {
+        techQuestions.push("What marketing and engagement platforms are you currently using?");
+        techQuestions.push("Have you evaluated Braze or similar customer engagement platforms?");
+        techQuestions.push("How are you currently orchestrating cross-channel messaging (email, push, in-app)?");
+    } else if (breakdown.techStack.rawScore === 1) {
+        techQuestions.push("How is your Braze implementation performing against your goals?");
+        techQuestions.push("What data warehouse or CDP are you using alongside Braze?");
+        techQuestions.push("Are there gaps in your current Braze setup that limit campaign sophistication?");
+    } else if (breakdown.techStack.rawScore >= 2) {
+        techQuestions.push("How well integrated is your Braze + data warehouse pipeline today?");
+        techQuestions.push("Are you able to activate real-time behavioral data in your messaging?");
+        techQuestions.push("What's your biggest technical bottleneck in your current engagement stack?");
+    }
+    if (techQuestions.length > 0) {
+        questions.push({ category: "Tech Stack & Infrastructure", items: techQuestions });
+    }
+
+    // --- Data maturity questions ---
+    const dataQuestions = [
+        "How unified is your customer data across channels (web, app, POS, email)?",
+        "Who owns the customer data strategy — marketing, engineering, or a dedicated data team?"
+    ];
+    if (companyData.complexity === "multi_brand_multi_market" || companyData.complexity === "multi_brand") {
+        dataQuestions.push("How do you handle customer identity across your different brands?");
+        dataQuestions.push("Is customer data shared across brands or siloed?");
+    }
+    if (companyData.complexity === "multi_market" || companyData.complexity === "multi_brand_multi_market") {
+        dataQuestions.push("How do you manage data privacy compliance across different regions (GDPR, CCPA)?");
+    }
+    questions.push({ category: "Data & Customer Intelligence", items: dataQuestions });
+
+    // --- Budget & decision process ---
+    const budgetQuestions = [
+        "What's the timeline for making a decision on this initiative?",
+        "Is there allocated budget for this project, or are we building the business case together?"
+    ];
+    if (result.status === "borderline") {
+        budgetQuestions.push("Who else is involved in the evaluation and decision process?");
+        budgetQuestions.push("Are you evaluating other agencies or partners for this work?");
+    }
+    questions.push({ category: "Budget & Decision Process", items: budgetQuestions });
+
+    // --- Vertical-specific questions ---
+    const verticalQuestions = [];
+    const vertical = (companyData.vertical || "").toLowerCase();
+    if (vertical === "qsr" || vertical === "delivery" || vertical === "convenience") {
+        verticalQuestions.push("How are you driving loyalty program engagement and repeat purchases?");
+        verticalQuestions.push("What role does your mobile app play in the customer journey?");
+        verticalQuestions.push("How are you personalizing offers based on order history and preferences?");
+    } else if (vertical === "retail") {
+        verticalQuestions.push("How are you bridging the online and in-store customer experience?");
+        verticalQuestions.push("What does your abandoned cart and browse recovery strategy look like?");
+        verticalQuestions.push("How are you segmenting and personalizing across the customer lifecycle?");
+    } else if (vertical === "fintech") {
+        verticalQuestions.push("How are you onboarding new customers and driving product adoption?");
+        verticalQuestions.push("What's your approach to re-engaging dormant accounts?");
+        verticalQuestions.push("How do compliance requirements impact your messaging strategy?");
+    } else if (vertical === "travel") {
+        verticalQuestions.push("How are you nurturing customers between bookings to drive repeat travel?");
+        verticalQuestions.push("What does your pre-trip and post-trip engagement look like?");
+        verticalQuestions.push("How are you using loyalty tier data in your messaging?");
+    } else if (vertical === "telecom") {
+        verticalQuestions.push("What does your churn prevention strategy look like today?");
+        verticalQuestions.push("How are you driving upsell/cross-sell across product lines?");
+    } else if (vertical === "media") {
+        verticalQuestions.push("How are you reducing subscriber churn and driving content engagement?");
+        verticalQuestions.push("What does your reactivation strategy look like for lapsed users?");
+    } else if (vertical === "healthcare") {
+        verticalQuestions.push("How do HIPAA/regulatory requirements shape your engagement strategy?");
+        verticalQuestions.push("What does patient/member engagement look like beyond transactional messaging?");
+    }
+    if (verticalQuestions.length > 0) {
+        questions.push({ category: "Industry-Specific", items: verticalQuestions });
+    }
+
+    // --- Stakeholder & organizational questions ---
+    const orgQuestions = [
+        "Who are the key stakeholders we should include in future conversations?",
+        "How is your marketing team structured — centralized or distributed across business units?"
+    ];
+    if (breakdown.complexity.rawScore >= 2) {
+        orgQuestions.push("How do you coordinate marketing strategy across your different brands/regions?");
+    }
+    questions.push({ category: "Stakeholders & Organization", items: orgQuestions });
+
+    return questions;
 }
 
 // ============================================
@@ -619,6 +732,20 @@ function displayResults(data, scoreResult) {
             <span class="next-step-text">${step}</span>
         </div>
     `).join("");
+
+    // Update discovery questions
+    const discoveryQuestions = generateDiscoveryQuestions(scoreResult, data);
+    const discoveryContainer = document.getElementById("discovery-questions");
+    if (discoveryContainer) {
+        discoveryContainer.innerHTML = discoveryQuestions.map(group => `
+            <div class="discovery-group">
+                <h4 class="discovery-category">${group.category}</h4>
+                <ul class="discovery-list">
+                    ${group.items.map(q => `<li class="discovery-item">${q}</li>`).join("")}
+                </ul>
+            </div>
+        `).join("");
+    }
 }
 
 function exportReport() {
@@ -658,6 +785,12 @@ ${checkHardDisqualifiers(data).map(d => `• ${d}`).join("\n") || "None identifi
 NEXT STEPS
 ----------
 ${generateNextSteps(result, data).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+DISCOVERY QUESTIONS
+-------------------
+${generateDiscoveryQuestions(result, data).map(group =>
+    `${group.category}:\n${group.items.map(q => `  - ${q}`).join("\n")}`
+).join("\n\n")}
 
 ---
 Generated by Massive Rocket Lead Qualification Platform
@@ -921,23 +1054,25 @@ function applyResearchToForm() {
         document.getElementById("tech-stack").value = researchData.tech_stack;
     }
 
-    // Map vertical
+    // Map vertical (handles multiple naming conventions from research API)
     const verticalMap = {
-        "QSR": "qsr",
-        "Retail": "retail",
-        "Travel & Hospitality": "travel",
-        "Fintech": "fintech",
-        "Delivery": "delivery",
-        "Convenience": "convenience",
-        "Telecom": "telecom",
-        "Media & Entertainment": "media",
-        "Healthcare": "healthcare",
-        "SaaS/Technology": "saas",
-        "Manufacturing": "manufacturing"
+        "qsr": "qsr", "quick service restaurant": "qsr", "fast food": "qsr",
+        "retail": "retail", "e-commerce": "retail", "ecommerce": "retail",
+        "travel": "travel", "travel & hospitality": "travel", "hospitality": "travel",
+        "fintech": "fintech", "financial services": "fintech", "banking": "fintech",
+        "delivery": "delivery", "logistics": "delivery",
+        "convenience": "convenience", "c-store": "convenience",
+        "telecom": "telecom", "telecommunications": "telecom",
+        "media": "media", "media & entertainment": "media", "entertainment": "media",
+        "healthcare": "healthcare",
+        "smart home": "smart_home", "smart home / iot": "smart_home", "iot": "smart_home",
+        "saas": "saas", "saas / technology": "saas", "saas/technology": "saas", "technology": "saas", "software": "saas",
+        "manufacturing": "manufacturing"
     };
 
     if (researchData.vertical) {
-        const verticalKey = verticalMap[researchData.vertical] || "other";
+        const verticalLower = researchData.vertical.toLowerCase().trim();
+        const verticalKey = verticalMap[verticalLower] || "other";
         document.getElementById("vertical").value = verticalKey;
     }
 
@@ -996,8 +1131,22 @@ document.addEventListener("DOMContentLoaded", () => {
         companyData = collectFormData();
 
         if (!companyData.companyName) {
-            alert("Please enter a company name");
+            showNotification("Please enter a company name.", "error");
             return;
+        }
+
+        // Warn if key qualification fields are missing (non-blocking)
+        const missing = [];
+        if (!companyData.vertical) missing.push("Industry Vertical");
+        if (!companyData.region) missing.push("Region");
+        if (!companyData.revenue) missing.push("Revenue");
+        if (!companyData.employees) missing.push("Employee Count");
+
+        if (missing.length > 0) {
+            const proceed = confirm(
+                `The following fields are empty: ${missing.join(", ")}.\n\nScoring will be less accurate without them. Continue anyway?`
+            );
+            if (!proceed) return;
         }
 
         updateBrandPreview(companyData);

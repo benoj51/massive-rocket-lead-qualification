@@ -122,6 +122,7 @@ def qualify_lead(
         "analysis": {
             "fit_summary": generate_fit_summary(company_data, score_result, disqualifiers, signals),
             "next_steps": generate_next_steps(final_status, score_result, disqualifiers),
+            "discovery_questions": generate_discovery_questions(final_status, score_result, company_data),
             "stakeholder_targets": generate_stakeholder_targets(company_data)
         },
         "metadata": {
@@ -210,6 +211,99 @@ def generate_next_steps(status: str, score_result: Dict, disqualifiers: list) ->
     return steps
 
 
+def generate_discovery_questions(status: str, score_result: Dict, company_data: Dict) -> list:
+    """Generate tailored discovery questions based on lead profile."""
+    questions = []
+
+    # Universal openers
+    questions.append({
+        "category": "Engagement & Pain Points",
+        "items": [
+            "What prompted you to explore working with an agency partner right now?",
+            "What does success look like for your CRM/lifecycle marketing in the next 12 months?"
+        ]
+    })
+
+    # Tech stack questions
+    tech_items = []
+    tech_score = score_result["breakdown"].get("tech_stack", {}).get("raw_score", 0)
+    if tech_score == 0:
+        tech_items.append("What marketing and engagement platforms are you currently using?")
+        tech_items.append("Have you evaluated Braze or similar customer engagement platforms?")
+        tech_items.append("How are you currently orchestrating cross-channel messaging (email, push, in-app)?")
+    elif tech_score == 1:
+        tech_items.append("How is your Braze implementation performing against your goals?")
+        tech_items.append("What data warehouse or CDP are you using alongside Braze?")
+        tech_items.append("Are there gaps in your current Braze setup that limit campaign sophistication?")
+    else:
+        tech_items.append("How well integrated is your Braze + data warehouse pipeline today?")
+        tech_items.append("Are you able to activate real-time behavioral data in your messaging?")
+        tech_items.append("What's your biggest technical bottleneck in your current engagement stack?")
+    questions.append({"category": "Tech Stack & Infrastructure", "items": tech_items})
+
+    # Data questions
+    data_items = [
+        "How unified is your customer data across channels (web, app, POS, email)?",
+        "Who owns the customer data strategy — marketing, engineering, or a dedicated data team?"
+    ]
+    complexity = str(company_data.get("complexity", "")).lower()
+    if "multi" in complexity and "brand" in complexity:
+        data_items.append("How do you handle customer identity across your different brands?")
+    if "multi" in complexity and "market" in complexity:
+        data_items.append("How do you manage data privacy compliance across different regions (GDPR, CCPA)?")
+    questions.append({"category": "Data & Customer Intelligence", "items": data_items})
+
+    # Budget & decision
+    budget_items = [
+        "What's the timeline for making a decision on this initiative?",
+        "Is there allocated budget for this project, or are we building the business case together?"
+    ]
+    if status == "borderline":
+        budget_items.append("Who else is involved in the evaluation and decision process?")
+        budget_items.append("Are you evaluating other agencies or partners for this work?")
+    questions.append({"category": "Budget & Decision Process", "items": budget_items})
+
+    # Vertical-specific questions
+    vertical = str(company_data.get("vertical", "")).lower()
+    vert_items = []
+    if any(v in vertical for v in ["qsr", "quick service", "restaurant", "delivery", "convenience"]):
+        vert_items.append("How are you driving loyalty program engagement and repeat purchases?")
+        vert_items.append("What role does your mobile app play in the customer journey?")
+        vert_items.append("How are you personalizing offers based on order history and preferences?")
+    elif any(v in vertical for v in ["retail", "ecommerce", "e-commerce"]):
+        vert_items.append("How are you bridging the online and in-store customer experience?")
+        vert_items.append("What does your abandoned cart and browse recovery strategy look like?")
+        vert_items.append("How are you segmenting and personalizing across the customer lifecycle?")
+    elif any(v in vertical for v in ["fintech", "financial", "banking"]):
+        vert_items.append("How are you onboarding new customers and driving product adoption?")
+        vert_items.append("What's your approach to re-engaging dormant accounts?")
+        vert_items.append("How do compliance requirements impact your messaging strategy?")
+    elif any(v in vertical for v in ["travel", "hospitality", "airline", "hotel"]):
+        vert_items.append("How are you nurturing customers between bookings to drive repeat travel?")
+        vert_items.append("What does your pre-trip and post-trip engagement look like?")
+        vert_items.append("How are you using loyalty tier data in your messaging?")
+    elif any(v in vertical for v in ["telecom"]):
+        vert_items.append("What does your churn prevention strategy look like today?")
+        vert_items.append("How are you driving upsell/cross-sell across product lines?")
+    elif any(v in vertical for v in ["media", "entertainment"]):
+        vert_items.append("How are you reducing subscriber churn and driving content engagement?")
+        vert_items.append("What does your reactivation strategy look like for lapsed users?")
+    elif any(v in vertical for v in ["healthcare"]):
+        vert_items.append("How do HIPAA/regulatory requirements shape your engagement strategy?")
+        vert_items.append("What does patient/member engagement look like beyond transactional messaging?")
+    if vert_items:
+        questions.append({"category": "Industry-Specific", "items": vert_items})
+
+    # Stakeholder questions
+    org_items = [
+        "Who are the key stakeholders we should include in future conversations?",
+        "How is your marketing team structured — centralized or distributed across business units?"
+    ]
+    questions.append({"category": "Stakeholders & Organization", "items": org_items})
+
+    return questions
+
+
 def generate_stakeholder_targets(company_data: Dict) -> list:
     """Generate target stakeholder roles to identify."""
     targets = [
@@ -275,6 +369,15 @@ FIT ANALYSIS:
     print("📋 RECOMMENDED NEXT STEPS:")
     for i, step in enumerate(analysis["next_steps"], 1):
         print(f"   {i}. {step}")
+
+    if analysis.get("discovery_questions"):
+        print(f"""
+{'─'*60}
+💬 DISCOVERY QUESTIONS:""")
+        for group in analysis["discovery_questions"]:
+            print(f"\n  [{group['category']}]")
+            for q in group["items"]:
+                print(f"    • {q}")
 
     print(f"""
 {'─'*60}
