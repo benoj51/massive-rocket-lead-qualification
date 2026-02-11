@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Massive Rocket | Lead Qualification Platform</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🚀</span>
+                    <span class="logo-text">Massive Rocket</span>
+                </div>
+                <nav class="nav">
+                    <a href="#" class="nav-link active">Qualify Lead</a>
+                    <a href="#why-mr" class="nav-link">Why Massive Rocket</a>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Step Indicator -->
+            <div class="step-indicator">
+                <div class="step active" data-step="1">
+                    <span class="step-number">1</span>
+                    <span class="step-label">Enter Company</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="2">
+                    <span class="step-number">2</span>
+                    <span class="step-label">Confirm Brand</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="3">
+                    <span class="step-number">3</span>
+                    <span class="step-label">View Results</span>
+                </div>
+            </div>
+
+            <!-- Step 1: Enter Company -->
+            <section id="step-1" class="step-section active">
+                <div class="card">
+                    <div class="card-header">
+                        <h1>Qualify a New Lead</h1>
+                        <p class="subtitle">Enter company details to assess ICP fit</p>
+                    </div>
+                    <form id="company-form" class="form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="company-name">Company Name *</label>
+                                <input type="text" id="company-name" placeholder="e.g., Chipotle" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="company-url">Website URL</label>
+                                <input type="text" id="company-url" placeholder="e.g., chipotle.com">
+                            </div>
+                        </div>
+
+                        <!-- Research Button -->
+                        <div class="research-section">
+                            <button type="button" class="btn btn-research" id="btn-research">
+                                <svg class="btn-icon btn-icon-left" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                                </svg>
+                                Research Company with AI
+                            </button>
+                            <span class="research-hint">Auto-fill revenue, employees, and more using AI research</span>
+                        </div>
+
+                        <!-- Research Results Panel (hidden by default) -->
+                        <div class="research-results hidden" id="research-results">
+                            <div class="research-header">
+                                <h3>Research Results</h3>
+                                <span class="research-confidence" id="research-confidence">High Confidence</span>
+                            </div>
+                            <p class="research-description" id="research-description"></p>
+                            <div class="research-grid" id="research-grid">
+                                <!-- Results will be populated here -->
+                            </div>
+                            <div class="research-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-dismiss-research">Dismiss</button>
+                                <button type="button" class="btn btn-primary btn-sm" id="btn-apply-research">Apply to Form</button>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="revenue">Annual Revenue</label>
+                                <input type="text" id="revenue" placeholder="e.g., $2.5B or £500M">
+                            </div>
+                            <div class="form-group">
+                                <label for="employees">Employee Count</label>
+                                <input type="text" id="employees" placeholder="e.g., 5000 or 1000-5000">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vertical">Industry Vertical</label>
+                                <select id="vertical">
+                                    <option value="">Select industry...</option>
+                                    <optgroup label="High Priority">
+                                        <option value="qsr">QSR / Quick Service Restaurant</option>
+                                        <option value="retail">Retail / E-commerce</option>
+                                        <option value="travel">Travel & Hospitality</option>
+                                        <option value="fintech">Fintech / Financial Services</option>
+                                        <option value="delivery">Delivery / Logistics</option>
+                                        <option value="convenience">Convenience / C-Store</option>
+                                    </optgroup>
+                                    <optgroup label="Medium Priority">
+                                        <option value="telecom">Telecom</option>
+                                        <option value="media">Media & Entertainment</option>
+                                        <option value="healthcare">Healthcare</option>
+                                        <option value="smart_home">Smart Home / IoT</option>
+                                    </optgroup>
+                                    <optgroup label="Other">
+                                        <option value="saas">SaaS / Technology</option>
+                                        <option value="manufacturing">Manufacturing</option>
+                                        <option value="other">Other</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="region">Primary Region</label>
+                                <select id="region">
+                                    <option value="">Select region...</option>
+                                    <option value="nam">North America (NAM)</option>
+                                    <option value="emea">Europe (EMEA)</option>
+                                    <option value="apac">Asia Pacific (APAC)</option>
+                                    <option value="nam_emea">NAM + EMEA</option>
+                                    <option value="global">Global / Multi-Region</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="tech-stack">Known Tech Stack</label>
+                            <input type="text" id="tech-stack" placeholder="e.g., Braze, Snowflake, Segment">
+                            <span class="form-hint">Separate multiple tools with commas</span>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="complexity">Organizational Complexity</label>
+                                <select id="complexity">
+                                    <option value="">Select complexity...</option>
+                                    <option value="multi_brand_multi_market">Multi-Brand + Multi-Market</option>
+                                    <option value="multi_brand">Multi-Brand</option>
+                                    <option value="multi_market">Multi-Market / Global</option>
+                                    <option value="enterprise">Enterprise / Large</option>
+                                    <option value="single">Single Brand / Region</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="source">Lead Source</label>
+                                <input type="text" id="source" placeholder="e.g., Braze referral, Inbound">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-large">
+                            Research & Preview Brand
+                            <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Step 2: Confirm Brand -->
+            <section id="step-2" class="step-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h1>Confirm Brand Details</h1>
+                        <p class="subtitle">Review the information below before qualification</p>
+                    </div>
+
+                    <div class="brand-preview">
+                        <div class="brand-header">
+                            <div class="brand-logo" id="brand-logo">
+                                <span class="brand-initial">C</span>
+                            </div>
+                            <div class="brand-info">
+                                <h2 id="preview-company-name">Company Name</h2>
+                                <a id="preview-url" href="#" target="_blank" class="brand-url">company.com</a>
+                            </div>
+                        </div>
+
+                        <div class="preview-grid">
+                            <div class="preview-item">
+                                <span class="preview-label">Revenue</span>
+                                <span class="preview-value" id="preview-revenue">—</span>
+                            </div>
+                            <div class="preview-item">
+                                <span class="preview-label">Employees</span>
+                                <span class="preview-value" id="preview-employees">—</span>
+                            </div>
+                            <div class="preview-item">
+                                <span class="preview-label">Vertical</span>
+                                <span class="preview-value" id="preview-vertical">—</span>
+                            </div>
+                            <div class="preview-item">
+                                <span class="preview-label">Region</span>
+                                <span class="preview-value" id="preview-region">—</span>
+                            </div>
+                            <div class="preview-item full-width">
+                                <span class="preview-label">Tech Stack</span>
+                                <div class="tech-tags" id="preview-tech-stack">
+                                    <span class="tech-tag">—</span>
+                                </div>
+                            </div>
+                            <div class="preview-item">
+                                <span class="preview-label">Complexity</span>
+                                <span class="preview-value" id="preview-complexity">—</span>
+                            </div>
+                            <div class="preview-item">
+                                <span class="preview-label">Source</span>
+                                <span class="preview-value" id="preview-source">—</span>
+                            </div>
+                        </div>
+
+                        <div class="confirmation-box">
+                            <div class="confirmation-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M12 8v4M12 16h.01"/>
+                                </svg>
+                            </div>
+                            <div class="confirmation-text">
+                                <strong>Please confirm this is the correct brand</strong>
+                                <p>This qualification will be scored against Massive Rocket's ICP criteria. Make sure the company details are accurate before proceeding.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-secondary" id="btn-back">
+                            <svg class="btn-icon btn-icon-left" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd" />
+                            </svg>
+                            Edit Details
+                        </button>
+                        <button type="button" class="btn btn-primary btn-large" id="btn-confirm">
+                            Confirm & Qualify
+                            <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: Results -->
+            <section id="step-3" class="step-section">
+                <div class="results-container">
+                    <!-- Score Card -->
+                    <div class="card score-card">
+                        <div class="score-header">
+                            <div class="score-company">
+                                <div class="brand-logo small" id="result-logo">
+                                    <span class="brand-initial">C</span>
+                                </div>
+                                <div>
+                                    <h2 id="result-company-name">Company Name</h2>
+                                    <span class="score-status" id="result-status">Qualify In</span>
+                                </div>
+                            </div>
+                            <div class="score-display">
+                                <span class="score-number" id="result-score">8.2</span>
+                                <span class="score-max">/10</span>
+                            </div>
+                        </div>
+
+                        <div class="score-breakdown" id="score-breakdown">
+                            <!-- Score items will be injected here -->
+                        </div>
+
+                        <!-- Signals -->
+                        <div class="signals-section" id="signals-section">
+                            <!-- Signals will be injected here -->
+                        </div>
+                    </div>
+
+                    <!-- Why Massive Rocket -->
+                    <div class="card why-mr-card" id="why-mr">
+                        <div class="card-header">
+                            <h2>Why Massive Rocket?</h2>
+                            <p class="subtitle">How we create value for brands like this</p>
+                        </div>
+
+                        <div class="value-prop">
+                            <blockquote class="master-vp">
+                                "We turn fragmented customer data and under-used data platforms into a growth engine that execs can steer and teams can run."
+                            </blockquote>
+                        </div>
+
+                        <div class="pillars">
+                            <div class="pillar">
+                                <div class="pillar-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7c-2 0-3 1-3 3z"/>
+                                        <path d="M8 12h8M12 8v8"/>
+                                    </svg>
+                                </div>
+                                <h3>Data Foundations</h3>
+                                <p>Unify and govern customer data across warehouse, CDP, CRM, apps, web, POS and partners into an actionable layer.</p>
+                            </div>
+                            <div class="pillar">
+                                <div class="pillar-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                        <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
+                                    </svg>
+                                </div>
+                                <h3>Engagement Stack</h3>
+                                <p>Architect and run the engagement stack (Braze + Snowflake + adjacent tools) as one operating model, not disconnected projects.</p>
+                            </div>
+                            <div class="pillar">
+                                <div class="pillar-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M3 3v18h18"/>
+                                        <path d="M18 9l-5 5-4-4-3 3"/>
+                                    </svg>
+                                </div>
+                                <h3>Measurement & Decisioning</h3>
+                                <p>Link engagement and loyalty to revenue, margin and LTV—not just open rates. Build experimentation into the stack.</p>
+                            </div>
+                            <div class="pillar">
+                                <div class="pillar-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                                        <circle cx="9" cy="7" r="4"/>
+                                        <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                                    </svg>
+                                </div>
+                                <h3>Talent & Capacity</h3>
+                                <p>Senior architects and hands-on specialists (Braze, Snowflake, data, CRM, loyalty) that clients struggle to hire and retain.</p>
+                            </div>
+                        </div>
+
+                        <div class="differentiators">
+                            <h3>What Sets Us Apart</h3>
+                            <div class="diff-grid">
+                                <div class="diff-item">
+                                    <span class="diff-check">✓</span>
+                                    <span>Tech-agnostic: works with packaged CDP, warehouse-first, or hybrid setups</span>
+                                </div>
+                                <div class="diff-item">
+                                    <span class="diff-check">✓</span>
+                                    <span>Cross-industry expertise: QSR, Convenience, Healthcare, Finance, Sports</span>
+                                </div>
+                                <div class="diff-item">
+                                    <span class="diff-check">✓</span>
+                                    <span>Set clients up to own more over time—no black-box setups</span>
+                                </div>
+                                <div class="diff-item">
+                                    <span class="diff-check">✓</span>
+                                    <span>Global, regional and local team execution without fragmenting customer view</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Next Steps -->
+                    <div class="card next-steps-card">
+                        <div class="card-header">
+                            <h2>Recommended Next Steps</h2>
+                        </div>
+                        <div class="next-steps" id="next-steps">
+                            <!-- Next steps will be injected here -->
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn btn-secondary" id="btn-new-lead">
+                                <svg class="btn-icon btn-icon-left" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                                </svg>
+                                Qualify Another Lead
+                            </button>
+                            <button class="btn btn-notion" id="btn-sync-notion">
+                                <svg class="btn-icon btn-icon-left" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M4.5 2A2.5 2.5 0 002 4.5v11A2.5 2.5 0 004.5 18h11a2.5 2.5 0 002.5-2.5v-11A2.5 2.5 0 0015.5 2h-11zM5 5.5A.5.5 0 015.5 5h5a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-5a.5.5 0 01-.5-.5v-9zM12 5h2.5a.5.5 0 01.5.5v4a.5.5 0 01-.5.5H12V5z"/>
+                                </svg>
+                                Save to Notion
+                            </button>
+                            <button class="btn btn-primary" id="btn-export">
+                                <svg class="btn-icon btn-icon-left" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                                Export Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Massive Rocket Lead Qualification Platform</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
