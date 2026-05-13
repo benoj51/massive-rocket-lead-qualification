@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Massive Rocket — Lead Qualification</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface-2: #1a1a24;
+    --border: #2a2a3a;
+    --border-strong: #3a3a4d;
+    --text: #e8e8f0;
+    --text-dim: #9898aa;
+    --text-muted: #6a6a80;
+    --accent: #ff4d2a;
+    --accent-dim: #b3361d;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #ef4444;
+    --blue: #60a5fa;
+    --shadow: 0 8px 24px rgba(0,0,0,.32);
+    --radius: 12px;
+    --pad: 20px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; line-height: 1.45; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; gap: 24px;
+    padding: 14px 24px;
+    background: rgba(10,10,15,.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  header.top .brand {
+    font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 13px;
+    color: var(--text); display: flex; align-items: center; gap: 10px;
+  }
+  header.top .brand .dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 16px var(--accent); }
+  header.top nav { display: flex; gap: 4px; margin-left: auto; }
+  header.top nav button {
+    background: transparent; color: var(--text-dim); border: 1px solid transparent;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    font-weight: 600;
+  }
+  header.top nav button.active { background: var(--surface); color: var(--text); border-color: var(--border); }
+  header.top nav button:hover { color: var(--text); }
+  header.top .health { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+  header.top .health .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); margin-left: 6px; }
+  header.top .health .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
+  header.top .health .pill.warn { color: var(--yellow); border-color: rgba(251,191,36,.3); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--pad);
+    margin-bottom: 18px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+  .card h3 { margin: 18px 0 10px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+  .row { display: grid; gap: 14px; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 720px) {
+    .row-2, .row-3 { grid-template-columns: 1fr; }
+  }
+
+  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+
+  input[type="text"], input[type="url"], textarea, select {
+    width: 100%; background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; font-family: var(--sans);
+    transition: border-color .15s, background .15s;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); background: #1f1f2b; }
+  textarea { resize: vertical; min-height: 60px; }
+
+  button.btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #fff; border: 0;
+    padding: 10px 18px; border-radius: 8px; font-weight: 600;
+    cursor: pointer; font-size: 14px; transition: filter .15s, transform .05s;
+  }
+  button.btn:hover { filter: brightness(1.08); }
+  button.btn:active { transform: translateY(1px); }
+  button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; }
+  button.btn.ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  button.btn.ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+  button.btn.success { background: var(--green); color: #07120a; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  /* Discovered field tiles ------------------------------------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .tile {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; position: relative;
+  }
+  .tile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
+  .tile .val { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--text); }
+  .tile input { background: transparent; border: 0; padding: 0; margin-top: 4px; font-size: 14px; color: var(--text); font-weight: 500; }
+  .tile input:focus { background: rgba(255,77,42,.08); border-radius: 4px; padding: 2px 4px; margin: 2px -4px 0; }
+  .tile .badge {
+    position: absolute; top: 8px; right: 10px; font-size: 9px; font-family: var(--mono);
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tile.auto::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 10px;
+    box-shadow: 0 0 0 1px var(--green) inset;
+    animation: pulse-green 1.6s ease-out 1;
+    opacity: 0;
+  }
+  @keyframes pulse-green {
+    0% { opacity: .9; box-shadow: 0 0 0 1px var(--green) inset, 0 0 18px rgba(74,222,128,.45); }
+    100% { opacity: 0; box-shadow: 0 0 0 1px var(--green) inset; }
+  }
+  .tile.manual .badge { color: var(--accent); }
+
+  /* Score dashboard -------------------------------------------- */
+  .score-grid { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: center; }
+  @media (max-width: 720px) { .score-grid { grid-template-columns: 1fr; } }
+  .score-big {
+    text-align: center; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px 16px;
+  }
+  .score-big .num { font-size: 64px; font-weight: 700; line-height: 1; font-family: var(--mono); }
+  .score-big .num .out { font-size: 22px; color: var(--text-muted); }
+  .score-big .badge { display: inline-block; margin-top: 12px; padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .badge.qualify_in { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
+  .badge.borderline { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
+  .badge.qualify_out { background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+  .num.qualify_in { color: var(--green); }
+  .num.borderline { color: var(--yellow); }
+  .num.qualify_out { color: var(--red); }
+  .opp-tag { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+  .opp-tag strong { color: var(--text); }
+
+  .chart-wrap { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+
+  /* MEDDICC ---------------------------------------------------- */
+  .meddicc { display: grid; gap: 10px; }
+  .meddicc-row {
+    display: grid; grid-template-columns: 200px 1fr 200px; gap: 10px; align-items: center;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  }
+  @media (max-width: 720px) {
+    .meddicc-row { grid-template-columns: 1fr; }
+  }
+  .meddicc-row .key { font-size: 12px; font-weight: 600; color: var(--text); }
+  .meddicc-row .key small { display: block; font-weight: 400; color: var(--text-muted); margin-top: 2px; font-size: 11px; }
+  .meddicc-row input { background: transparent; border: 0; padding: 0; font-size: 13px; color: var(--text); }
+  .meddicc-row input::placeholder { color: var(--text-muted); }
+  .meddicc-row .status-toggle {
+    display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2px;
+  }
+  .status-toggle button {
+    flex: 1; background: transparent; color: var(--text-muted); border: 0;
+    padding: 5px 8px; font-size: 11px; cursor: pointer; border-radius: 6px;
+    font-weight: 500;
+  }
+  .status-toggle button.on.not_started { background: var(--surface-2); color: var(--text-dim); }
+  .status-toggle button.on.in_progress { background: rgba(251,191,36,.2); color: var(--yellow); }
+  .status-toggle button.on.confirmed { background: rgba(74,222,128,.2); color: var(--green); }
+
+  /* Tags ------------------------------------------------------- */
+  .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; }
+  .tag.signal { background: rgba(74,222,128,.10); color: var(--green); border-color: rgba(74,222,128,.3); }
+  .tag.dq { background: rgba(239,68,68,.10); color: var(--red); border-color: rgba(239,68,68,.3); }
+
+  /* Stakeholder table ----------------------------------------- */
+  table.stakeholders, table.pipeline {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  table.stakeholders th, table.stakeholders td,
+  table.pipeline th, table.pipeline td {
+    text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border);
+  }
+  table.stakeholders th, table.pipeline th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600;
+    cursor: pointer; user-select: none;
+  }
+  table.pipeline th:hover { color: var(--text); }
+  table.stakeholders tr:hover, table.pipeline tr:hover { background: var(--surface-2); }
+  .priority-p1 { color: var(--accent); font-weight: 600; }
+  .priority-p2 { color: var(--yellow); font-weight: 600; }
+  .priority-p3 { color: var(--text-dim); font-weight: 600; }
+
+  /* Next steps list ------------------------------------------- */
+  ol.next-steps { padding-left: 20px; }
+  ol.next-steps li { margin: 6px 0; }
+
+  /* Filters ---------------------------------------------------- */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 6px 14px; border-radius: 999px; font-size: 12px; cursor: pointer;
+    font-weight: 500;
+  }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip:hover:not(.active) { color: var(--text); border-color: var(--border-strong); }
+
+  /* Toasts ---------------------------------------------------- */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 100;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; font-size: 13px; box-shadow: var(--shadow);
+    max-width: 360px; opacity: 0; pointer-events: none; transform: translateY(8px);
+    transition: opacity .2s, transform .2s;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-color: rgba(239,68,68,.5); }
+  .toast.success { border-color: rgba(74,222,128,.5); }
+  .toast a { color: var(--accent); }
+
+  /* Empty / loading states ----------------------------------- */
+  .empty { text-align: center; padding: 32px 16px; color: var(--text-muted); }
+  .empty .big { font-size: 32px; margin-bottom: 8px; opacity: .4; }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.25); border-top-color: #fff;
+    animation: spin .8s linear infinite; display: inline-block; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .muted { color: var(--text-muted); font-size: 12px; }
+  .stub-warning { font-size: 11px; padding: 6px 10px; border-radius: 6px; background: rgba(251,191,36,.1); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); margin-top: 10px; display: inline-block; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><span class="dot"></span> MR · Lead Qualification</div>
+  <nav>
+    <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
+    <button id="nav-pipeline" type="button">Pipeline</button>
+  </nav>
+  <div class="health" id="health-bar"></div>
+</header>
+
+<main>
+  <!-- QUALIFY VIEW ============================================= -->
+  <section id="view-qualify" class="view active">
+
+    <div class="card">
+      <h2>1 · Input</h2>
+      <div class="row row-2">
+        <div>
+          <label>Company name</label>
+          <input id="in-name" type="text" placeholder="e.g. Deliveroo" />
+        </div>
+        <div>
+          <label>Company URL</label>
+          <input id="in-url" type="url" placeholder="e.g. deliveroo.co.uk" />
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top: 14px;">
+        <button id="btn-qualify" class="btn" type="button">Research &amp; Qualify</button>
+        <button class="btn ghost demo" type="button" data-name="Deliveroo" data-url="deliveroo.co.uk">Demo: Deliveroo</button>
+        <button class="btn ghost demo" type="button" data-name="Restaurant Brands International" data-url="rbi.com">Demo: RBI</button>
+        <button class="btn ghost demo" type="button" data-name="Yum! Brands" data-url="yum.com">Demo: Yum!</button>
+        <button class="btn ghost demo" type="button" data-name="IHG Hotels &amp; Resorts" data-url="ihg.com">Demo: IHG</button>
+        <button id="btn-clear" class="btn ghost" type="button">Clear</button>
+      </div>
+    </div>
+
+    <div id="results" style="display: none;">
+
+      <div class="card">
+        <h2>2 · Auto-Discovery</h2>
+        <p class="muted" id="stub-banner" style="display:none;"></p>
+        <div class="tiles" id="tiles"></div>
+        <div class="btn-row" style="margin-top: 14px;">
+          <button id="btn-rescore" class="btn ghost" type="button">Re-score with overrides</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3 · ICP Score</h2>
+        <div class="score-grid">
+          <div class="score-big">
+            <div class="num" id="score-num">0<span class="out">/10</span></div>
+            <div class="badge" id="score-badge">—</div>
+            <div class="opp-tag" id="score-opp"></div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="score-chart" height="220"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>4 · MEDDICC</h2>
+        <div class="meddicc" id="meddicc"></div>
+      </div>
+
+      <div class="card">
+        <h2>5 · Fit Analysis</h2>
+        <h3>Summary <span id="fit-source" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:11px;"></span></h3>
+        <p id="fit-summary" style="margin: 0 0 12px;"></p>
+
+        <div class="row row-2">
+          <div>
+            <h3>Positive Signals</h3>
+            <div class="tag-list" id="signals"></div>
+          </div>
+          <div>
+            <h3>Hard Disqualifiers</h3>
+            <div class="tag-list" id="disqualifiers"></div>
+          </div>
+        </div>
+
+        <h3>Recommended Next Steps</h3>
+        <ol class="next-steps" id="next-steps"></ol>
+
+        <h3>Stakeholder Targets</h3>
+        <table class="stakeholders" id="stakeholders-table">
+          <thead><tr><th>Name</th><th>Title</th><th>Priority</th><th>Why</th><th>LinkedIn</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>6 · Push to Notion</h2>
+        <div class="row row-2" style="margin-bottom: 12px;">
+          <div>
+            <label>Sales Stage</label>
+            <select id="sel-stage">
+              <option value="">—</option>
+              <option>Intro Call</option>
+              <option>Discovery</option>
+              <option>Technical Fit</option>
+              <option>Proposal</option>
+              <option>Negotiation</option>
+              <option>Legal/Procurement</option>
+              <option>Verbal Commit</option>
+              <option>Signature</option>
+            </select>
+          </div>
+          <div>
+            <label>Owner</label>
+            <select id="sel-owner">
+              <option>Ben Ojuolape</option>
+              <option>Unassigned</option>
+            </select>
+          </div>
+        </div>
+        <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the Lead Qualification Tracker.</p>
+        <div class="btn-row">
+          <button id="btn-notion" class="btn" type="button">Push to Notion</button>
+          <span id="notion-result" class="muted"></span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- PIPELINE VIEW =========================================== -->
+  <section id="view-pipeline" class="view">
+    <div class="card">
+      <h2>Pipeline</h2>
+      <div class="filters" id="pipeline-filters">
+        <button class="chip active" data-filter="all" type="button">All</button>
+        <button class="chip" data-filter="qualify_in" type="button">Qualified</button>
+        <button class="chip" data-filter="borderline" type="button">Borderline</button>
+        <button class="chip" data-filter="qualify_out" type="button">Qualified Out</button>
+        <button class="chip" data-filter="active" type="button">Active only</button>
+        <button class="btn ghost" id="btn-export-csv" type="button" style="margin-left:auto;">⇣ Export CSV</button>
+        <button class="btn ghost" id="btn-refresh-pipeline" type="button">↻ Refresh</button>
+      </div>
+      <table class="pipeline" id="pipeline-table">
+        <thead>
+          <tr>
+            <th data-sort="company">Company</th>
+            <th data-sort="icp_normalised">ICP</th>
+            <th data-sort="status">Status</th>
+            <th data-sort="sales_stage">Stage</th>
+            <th data-sort="vertical">Vertical</th>
+            <th data-sort="opportunity_type">Opp Type</th>
+            <th data-sort="owner">Owner</th>
+            <th>Next step</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="pipeline-empty" class="empty" style="display:none;">
+        <div class="big">⌁</div>
+        <div>No leads loaded yet.</div>
+        <div class="muted" style="margin-top: 4px;">Click ↻ Refresh once Notion is configured.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- State ------------------------------------------------------------
+  const state = {
+    currentResult: null,     // last qualify() payload
+    overrides: {},           // user edits to discovered fields
+    chart: null,
+    pipeline: { rows: [], filter: 'all', sort: { key: 'icp_normalised', dir: 'desc' } },
+    authRequired: null,      // unknown until /api/health checked
+    authToken: null,
+  };
+
+  // Stable mapping of orchestrator `discovered` keys -> UI tile config.
+  const TILES = [
+    { key: 'revenue',          label: 'Revenue',         readonly: false, override: 'revenue' },
+    { key: 'employees',        label: 'Employees',       readonly: false, override: 'employees' },
+    { key: 'vertical',         label: 'Vertical',        readonly: false, override: 'vertical' },
+    { key: 'tech_stack',       label: 'Tech Stack',      readonly: false, override: 'tech_stack' },
+    { key: 'complexity',       label: 'Complexity',      readonly: false, override: 'complexity' },
+    { key: 'region',           label: 'Region',          readonly: false, override: 'region' },
+    { key: 'deal_size_label',  label: 'Est. Deal Size',  readonly: true },
+    { key: 'incumbent_agency', label: 'Incumbent Agency',readonly: false, override: 'incumbent_agency' },
+  ];
+
+  const MEDDICC_ROWS = [
+    { key: 'metrics',           label: 'Metrics',           hint: 'Quantifiable outcomes the prospect wants.' },
+    { key: 'economic_buyer',    label: 'Economic Buyer',    hint: 'Who signs off on budget.' },
+    { key: 'decision_criteria', label: 'Decision Criteria', hint: "What they'll evaluate us on." },
+    { key: 'decision_process',  label: 'Decision Process',  hint: 'Steps + stakeholders to signature.' },
+    { key: 'identify_pain',     label: 'Identify Pain',     hint: 'Core pain driving the initiative.' },
+    { key: 'champion',          label: 'Champion',          hint: 'Internal advocate.' },
+  ];
+
+  // ---- Utilities --------------------------------------------------------
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const fmt = (v) => (v === null || v === undefined || v === '') ? '—' : String(v);
+
+  const toast = (msg, kind = '') => {
+    const el = $('#toast');
+    el.className = `toast show ${kind}`;
+    el.innerHTML = msg;
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => el.className = 'toast', 4200);
+  };
+
+  function authHeaders() {
+    const t = state.authToken;
+    return t ? { 'Authorization': `Bearer ${t}` } : {};
+  }
+
+  async function jsonFetch(url, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {}, authHeaders());
+    const resp = await fetch(url, Object.assign({}, opts, { headers }));
+    let body;
+    try { body = await resp.json(); }
+    catch { body = { error: resp.statusText }; }
+    if (resp.status === 401) {
+      // Token rejected or missing — force re-prompt.
+      localStorage.removeItem('mr-auth-token');
+      state.authToken = null;
+      await ensureAuth(true);
+      // Retry once with the new token.
+      const retry = await fetch(url, Object.assign({}, opts, { headers: Object.assign({}, opts.headers || {}, authHeaders()) }));
+      try { body = await retry.json(); } catch { body = { error: retry.statusText }; }
+      if (!retry.ok) throw Object.assign(new Error(body.error || retry.statusText), { body, status: retry.status });
+      return body;
+    }
+    if (!resp.ok) throw Object.assign(new Error(body.error || resp.statusText), { body, status: resp.status });
+    return body;
+  }
+
+  async function ensureAuth(force = false) {
+    // /api/health is always open; use it to discover whether auth is required.
+    let needsAuth = state.authRequired;
+    if (needsAuth === null) {
+      try {
+        const h = await fetch('/api/health').then(r => r.json());
+        needsAuth = !!(h.auth && h.auth.required);
+        state.authRequired = needsAuth;
+      } catch { needsAuth = false; state.authRequired = false; }
+    }
+    if (!needsAuth) return;
+    let token = state.authToken || localStorage.getItem('mr-auth-token');
+    while (force || !token) {
+      const input = window.prompt('Massive Rocket Lead Qualifier — access token');
+      if (!input) {
+        toast('Access token required to continue.', 'error');
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      token = input.trim();
+      localStorage.setItem('mr-auth-token', token);
+      force = false;
+    }
+    state.authToken = token;
+  }
+
+  function signOut() {
+    localStorage.removeItem('mr-auth-token');
+    state.authToken = null;
+    location.reload();
+  }
+
+  // ---- View switching ---------------------------------------------------
+  function switchView(name) {
+    $$('.view').forEach(v => v.classList.remove('active'));
+    $(`#view-${name}`).classList.add('active');
+    $$('header.top nav button').forEach(b => b.classList.remove('active'));
+    $(`#nav-${name}`).classList.add('active');
+    if (name === 'pipeline') refreshPipeline();
+  }
+
+  // ---- Health -----------------------------------------------------------
+  async function refreshHealth() {
+    try {
+      const h = await jsonFetch('/api/health');
+      const apolloLive = h.apollo?.mode === 'live';
+      const notionOk = h.notion?.configured && h.notion?.target_present;
+      const authReq = !!(h.auth && h.auth.required);
+      const signOut = authReq ? ` · <a href="#" id="link-signout" style="color:var(--text-muted);">sign out</a>` : '';
+      $('#health-bar').innerHTML =
+        `Apollo <span class="pill ${apolloLive ? 'ok' : 'warn'}">${h.apollo?.mode || '?'}</span>` +
+        ` · Notion <span class="pill ${notionOk ? 'ok' : 'warn'}">${notionOk ? 'configured' : 'missing'}</span>` +
+        signOut;
+      const so = document.getElementById('link-signout');
+      if (so) so.addEventListener('click', (e) => { e.preventDefault(); window.signOutHandler(); });
+    } catch {
+      $('#health-bar').innerHTML = `<span class="pill warn">offline</span>`;
+    }
+  }
+  window.signOutHandler = signOut;
+
+  // ---- Qualify flow -----------------------------------------------------
+  async function runQualify(forceOverrides = null) {
+    const name = $('#in-name').value.trim();
+    const url = $('#in-url').value.trim();
+    if (!name || !url) { toast('Please provide both name and URL.', 'error'); return; }
+
+    const btn = $('#btn-qualify');
+    const original = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span> Researching…';
+    btn.disabled = true;
+
+    try {
+      const overrides = forceOverrides ?? state.overrides;
+      const result = await jsonFetch('/api/qualify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, overrides }),
+      });
+      state.currentResult = result;
+      renderResult(result, !forceOverrides);
+      $('#results').style.display = 'block';
+      window.scrollTo({ top: $('#results').offsetTop - 60, behavior: 'smooth' });
+    } catch (e) {
+      console.error(e);
+      toast(`Research failed: ${e.message || e}`, 'error');
+    } finally {
+      btn.innerHTML = original;
+      btn.disabled = false;
+    }
+  }
+
+  // ---- Renderers --------------------------------------------------------
+  function renderResult(result, pulse = true) {
+    renderTiles(result, pulse);
+    renderScore(result);
+    renderMeddicc(result);
+    renderFit(result);
+    renderStakeholders(result);
+    renderStubBanner(result);
+  }
+
+  function renderStubBanner(result) {
+    const stub = result?.discovered?.stub;
+    const reason = result?.company?.apollo?._stub_reason;
+    const el = $('#stub-banner');
+    if (stub) {
+      el.style.display = 'block';
+      el.innerHTML = `<span class="stub-warning">Stubbed data — ${reason || 'no Apollo fixture, no API key'}</span>`;
+    } else { el.style.display = 'none'; }
+  }
+
+  function renderTiles(result, pulse) {
+    const d = result.discovered || {};
+    const tilesEl = $('#tiles');
+    tilesEl.innerHTML = '';
+    TILES.forEach(tile => {
+      const div = document.createElement('div');
+      const userOverridden = tile.override && state.overrides[tile.override] != null && state.overrides[tile.override] !== '';
+      const isAuto = !userOverridden && d[tile.key] != null && d[tile.key] !== '';
+      div.className = `tile ${pulse && isAuto ? 'auto' : ''} ${userOverridden ? 'manual' : ''}`;
+      const value = userOverridden ? state.overrides[tile.override] : fmt(d[tile.key]);
+      const editable = !tile.readonly;
+      div.innerHTML = `
+        <span class="lbl">${tile.label}</span>
+        ${editable
+          ? `<input type="text" value="${escapeAttr(value === '—' ? '' : value)}" placeholder="—" data-key="${tile.override}" />`
+          : `<span class="val">${escapeHtml(value)}</span>`}
+        <span class="badge">${userOverridden ? 'MANUAL' : (isAuto ? 'AUTO' : '—')}</span>
+      `;
+      if (editable) {
+        const input = div.querySelector('input');
+        input.addEventListener('change', () => {
+          const v = input.value.trim();
+          if (v === '') delete state.overrides[tile.override];
+          else state.overrides[tile.override] = v;
+          // Re-render tiles immediately for feedback (no rescore yet).
+          renderTiles(state.currentResult, false);
+        });
+      }
+      tilesEl.appendChild(div);
+    });
+  }
+
+  function renderScore(result) {
+    const s = result.score || {};
+    const status = s.status || 'borderline';
+    $('#score-num').className = `num ${status}`;
+    $('#score-num').innerHTML = `${s.normalized_score ?? 0}<span class="out">/10</span>`;
+    $('#score-badge').className = `badge ${status}`;
+    $('#score-badge').textContent = s.status_display || '—';
+    const opp = result.opportunity || {};
+    $('#score-opp').innerHTML = opp.label ? `<strong>${escapeHtml(opp.label)}</strong> — ${escapeHtml(opp.description || '')}` : '';
+
+    const labels = [], data = [], max = [];
+    const breakdown = s.breakdown || {};
+    for (const k of Object.keys(breakdown)) {
+      labels.push(prettyKey(k) + ' · ' + (breakdown[k].value || ''));
+      data.push(breakdown[k].weighted || 0);
+      max.push(breakdown[k].max_weighted || 0);
+    }
+
+    const ctx = $('#score-chart').getContext('2d');
+    if (state.chart) state.chart.destroy();
+    state.chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Scored',
+            data,
+            backgroundColor: '#ff4d2a',
+            borderRadius: 4,
+          },
+          {
+            label: 'Max',
+            data: max.map((m, i) => m - data[i]),
+            backgroundColor: 'rgba(255,255,255,.06)',
+            borderRadius: 4,
+          },
+        ],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            stacked: true, beginAtZero: true,
+            grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#9898aa' },
+          },
+          y: {
+            stacked: true,
+            grid: { display: false }, ticks: { color: '#e8e8f0', font: { size: 11 } },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const i = ctx.dataIndex;
+                if (ctx.datasetIndex === 0) return `Scored ${data[i]}/${max[i]} pts`;
+                return null;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function renderMeddicc(result) {
+    const m = result.meddicc || {};
+    const el = $('#meddicc');
+    el.innerHTML = '';
+    MEDDICC_ROWS.forEach(row => {
+      const entry = m[row.key] || { value: '', status: 'not_started' };
+      const div = document.createElement('div');
+      div.className = 'meddicc-row';
+      div.innerHTML = `
+        <div class="key">${row.label}<small>${row.hint}</small></div>
+        <input type="text" placeholder="Capture finding…" value="${escapeAttr(entry.value || '')}" data-meddicc-value="${row.key}" />
+        <div class="status-toggle">
+          <button type="button" data-meddicc-status="${row.key}" data-val="not_started">Not started</button>
+          <button type="button" data-meddicc-status="${row.key}" data-val="in_progress">In progress</button>
+          <button type="button" data-meddicc-status="${row.key}" data-val="confirmed">Confirmed</button>
+        </div>
+      `;
+      const toggle = (val) => {
+        div.querySelectorAll('[data-meddicc-status]').forEach(b => {
+          b.classList.toggle('on', b.dataset.val === val);
+          b.classList.toggle(val, b.dataset.val === val);
+          // remove other status classes
+          ['not_started','in_progress','confirmed'].forEach(c => { if (c !== val) b.classList.remove(c); });
+        });
+        if (!state.currentResult.meddicc[row.key]) state.currentResult.meddicc[row.key] = {};
+        state.currentResult.meddicc[row.key].status = val;
+      };
+      toggle(entry.status || 'not_started');
+      div.querySelector('input').addEventListener('input', (ev) => {
+        if (!state.currentResult.meddicc[row.key]) state.currentResult.meddicc[row.key] = {};
+        state.currentResult.meddicc[row.key].value = ev.target.value;
+      });
+      div.querySelectorAll('[data-meddicc-status]').forEach(b => {
+        b.addEventListener('click', () => toggle(b.dataset.val));
+      });
+      el.appendChild(div);
+    });
+  }
+
+  function renderFit(result) {
+    $('#fit-summary').textContent = result.fit_summary || '—';
+    const src = result.fit_summary_source;
+    $('#fit-source').textContent = src === 'ai' ? '· AI-generated' : (src === 'heuristic' ? '· heuristic' : '');
+    $('#signals').innerHTML = (result.signals || []).map(s => `<span class="tag signal">${escapeHtml(s)}</span>`).join('') || '<span class="muted">None detected.</span>';
+    $('#disqualifiers').innerHTML = (result.disqualifiers || []).map(s => `<span class="tag dq">${escapeHtml(s)}</span>`).join('') || '<span class="muted">None detected.</span>';
+    $('#next-steps').innerHTML = (result.next_steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+  }
+
+  function renderStakeholders(result) {
+    const tbody = $('#stakeholders-table tbody');
+    const rows = result.stakeholders || [];
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="muted">No stakeholders returned by Apollo. Run a manual LinkedIn search.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(s => `
+      <tr>
+        <td>${escapeHtml(s.name || '—')}</td>
+        <td>${escapeHtml(s.title || '—')}</td>
+        <td><span class="priority-${(s.priority||'').toLowerCase()}">${escapeHtml(s.priority || '—')}</span></td>
+        <td>${escapeHtml(s.why || '')}</td>
+        <td>${s.linkedin_url ? `<a href="${escapeAttr(s.linkedin_url)}" target="_blank" rel="noopener">view</a>` : '—'}</td>
+      </tr>
+    `).join('');
+  }
+
+  // ---- Notion push ------------------------------------------------------
+  async function pushToNotion() {
+    if (!state.currentResult) return;
+    const btn = $('#btn-notion');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Pushing…';
+    // Capture the AE's stage + owner choices into the payload before push.
+    state.currentResult.sales_stage = $('#sel-stage').value || null;
+    state.currentResult.owner = $('#sel-owner').value || 'Ben Ojuolape';
+    try {
+      const res = await jsonFetch('/api/notion/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state.currentResult),
+      });
+      const verb = res.action === 'updated' ? 'Updated' : 'Created';
+      const link = res.url ? `<a href="${res.url}" target="_blank" rel="noopener">open in Notion ↗</a>` : '';
+      $('#notion-result').innerHTML = `${verb} · ${link}`;
+      btn.classList.add('success'); btn.innerHTML = `✓ ${verb}`;
+      toast(`${verb} in Notion. ${link}`, 'success');
+      setTimeout(() => { btn.classList.remove('success'); btn.innerHTML = 'Push to Notion'; }, 3000);
+    } catch (e) {
+      toast(`Notion push failed: ${e.body?.error || e.message}`, 'error');
+      btn.innerHTML = 'Push to Notion';
+    } finally { btn.disabled = false; }
+  }
+
+  // ---- Pipeline ---------------------------------------------------------
+  async function refreshPipeline() {
+    try {
+      const data = await jsonFetch('/api/pipeline?limit=100');
+      state.pipeline.rows = data.rows || [];
+      renderPipeline();
+    } catch (e) {
+      console.error(e);
+      $('#pipeline-table tbody').innerHTML = '';
+      $('#pipeline-empty').style.display = 'block';
+      $('#pipeline-empty').innerHTML = `<div class="big">⚠</div><div>${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function renderPipeline() {
+    const f = state.pipeline.filter;
+    let rows = [...state.pipeline.rows];
+    if (f === 'active') rows = rows.filter(r => r.status !== 'Disqualified');
+    else if (f === 'qualify_in') rows = rows.filter(r => r.status === 'Qualified');
+    else if (f === 'borderline') rows = rows.filter(r => r.status === 'Researching');
+    else if (f === 'qualify_out') rows = rows.filter(r => r.status === 'Disqualified');
+
+    const { key, dir } = state.pipeline.sort;
+    rows.sort((a, b) => {
+      const av = a[key] ?? ''; const bv = b[key] ?? '';
+      if (typeof av === 'number' || typeof bv === 'number') {
+        return dir === 'asc' ? (av || 0) - (bv || 0) : (bv || 0) - (av || 0);
+      }
+      return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+
+    const tbody = $('#pipeline-table tbody');
+    if (rows.length === 0) {
+      tbody.innerHTML = '';
+      $('#pipeline-empty').style.display = 'block';
+      $('#pipeline-empty').innerHTML = '<div class="big">∅</div><div>No leads match this filter.</div>';
+      return;
+    }
+    $('#pipeline-empty').style.display = 'none';
+    tbody.innerHTML = rows.map(r => {
+      const score = r.icp_normalised;
+      const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+      const company = r.company_url ? `<a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.company || '—')}</a>` : escapeHtml(r.company || '—');
+      return `
+        <tr>
+          <td>${company}</td>
+          <td><strong class="num ${cls}" style="font-size:14px;font-family:var(--mono);">${score ?? '—'}</strong></td>
+          <td>${escapeHtml(r.status || '—')}</td>
+          <td>${escapeHtml(r.sales_stage || '—')}</td>
+          <td>${escapeHtml(r.vertical || '—')}</td>
+          <td>${escapeHtml(r.opportunity_type || '—')}</td>
+          <td>${escapeHtml(r.owner || '—')}</td>
+          <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml((r.next_steps || '').split('\n')[0])}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ---- Helpers ----------------------------------------------------------
+  function prettyKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+  function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  // ---- Wire ------------------------------------------------------------
+  document.addEventListener('DOMContentLoaded', async () => {
+    await ensureAuth();
+    $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
+    $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
+    $('#btn-qualify').addEventListener('click', () => { state.overrides = {}; runQualify({}); });
+    $('#btn-rescore').addEventListener('click', () => runQualify(state.overrides));
+    $('#btn-clear').addEventListener('click', () => {
+      $('#in-name').value = ''; $('#in-url').value = '';
+      state.currentResult = null; state.overrides = {};
+      $('#results').style.display = 'none';
+    });
+    $('#btn-notion').addEventListener('click', pushToNotion);
+    $('#btn-refresh-pipeline').addEventListener('click', refreshPipeline);
+    $('#btn-export-csv').addEventListener('click', async () => {
+      // Bearer auth requires a fetch + blob roundtrip rather than a plain <a download>.
+      try {
+        const resp = await fetch('/api/pipeline/export.csv', { headers: authHeaders() });
+        if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'mr-pipeline.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) { toast(`CSV export failed: ${e.message}`, 'error'); }
+    });
+    $$('.demo').forEach(b => b.addEventListener('click', () => {
+      $('#in-name').value = b.dataset.name;
+      $('#in-url').value = b.dataset.url;
+    }));
+    $$('#pipeline-filters .chip').forEach(c => c.addEventListener('click', () => {
+      $$('#pipeline-filters .chip').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+      state.pipeline.filter = c.dataset.filter;
+      renderPipeline();
+    }));
+    $$('#pipeline-table th[data-sort]').forEach(th => th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (state.pipeline.sort.key === key) {
+        state.pipeline.sort.dir = state.pipeline.sort.dir === 'asc' ? 'desc' : 'asc';
+      } else { state.pipeline.sort = { key, dir: 'desc' }; }
+      renderPipeline();
+    }));
+    refreshHealth();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "organization": {
+    "id": "fixture_deliveroo",
+    "name": "Deliveroo",
+    "website_url": "https://deliveroo.co.uk",
+    "primary_domain": "deliveroo.co.uk",
+    "linkedin_url": "https://www.linkedin.com/company/deliveroo",
+    "founded_year": 2013,
+    "short_description": "Deliveroo is an online food delivery company operating in markets across Europe, the Middle East and Asia, connecting consumers with restaurants and grocery stores.",
+    "industry": "Food Delivery",
+    "keywords": ["food delivery", "logistics", "last mile", "grocery", "marketplace", "on-demand", "qsr"],
+    "annual_revenue": 2400000000,
+    "annual_revenue_printed": "$2.4B",
+    "estimated_num_employees": 4200,
+    "country": "United Kingdom",
+    "state": "England",
+    "city": "London",
+    "current_technologies": [
+      {"name": "Braze"},
+      {"name": "Snowflake"},
+      {"name": "Segment"},
+      {"name": "Looker"},
+      {"name": "Google BigQuery"},
+      {"name": "Amplitude"},
+      {"name": "Iterable"}
+    ]
+  },
+  "people": [
+    {
+      "id": "fixture_p1",
+      "name": "Stub VP Marketing",
+      "first_name": "Stub",
+      "last_name": "VP Marketing",
+      "title": "VP Marketing",
+      "seniority": "vp",
+      "linkedin_url": "https://www.linkedin.com/in/stub-vp-marketing",
+      "email_status": "verified",
+      "city": "London",
+      "country": "United Kingdom",
+      "departments": ["marketing"],
+      "functions": ["marketing"]
+    },
+    {
+      "id": "fixture_p2",
+      "name": "Stub Director CRM",
+      "first_name": "Stub",
+      "last_name": "Director CRM",
+      "title": "Director, CRM & Lifecycle",
+      "seniority": "director",
+      "linkedin_url": "https://www.linkedin.com/in/stub-director-crm",
+      "email_status": "guessed",
+      "city": "London",
+      "country": "United Kingdom",
+      "departments": ["marketing"],
+      "functions": ["marketing", "lifecycle"]
+    },
+    {
+      "id": "fixture_p3",
+      "name": "Stub Head of Growth",
+      "first_name": "Stub",
+      "last_name": "Head of Growth",
+      "title": "Head of Growth",
+      "seniority": "head",
+      "linkedin_url": "https://www.linkedin.com/in/stub-head-of-growth",
+      "email_status": "unverified",
+      "city": "London",
+      "country": "United Kingdom",
+      "departments": ["growth"],
+      "functions": ["growth", "marketing"]
+    }
+  ]
+}

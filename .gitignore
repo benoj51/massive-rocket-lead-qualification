@@ -27,3 +27,10 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+
+# Runtime cache (Apollo responses, Notion query cache)
+cache/
+
+# Generated qualification reports
+report_*.html
+
