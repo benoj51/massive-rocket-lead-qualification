@@ -1,0 +1,7 @@
+flask>=3.0,<4.0
+flask-cors>=4.0
+gunicorn>=22.0
+requests>=2.32
+python-dotenv>=1.0
+notion-client>=2.2
+anthropic>=0.40

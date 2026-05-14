@@ -1,493 +1,447 @@
 """
-Massive Rocket Notion Sync Module
-Syncs lead qualification data to Notion database.
+Notion sync for the Lead Qualification Tracker.
 
-Setup:
-1. Create a Notion integration at https://www.notion.so/my-integrations
-2. Share your database with the integration
-3. Set NOTION_API_KEY environment variable
-4. Set NOTION_DATABASE_ID environment variable (or pass as argument)
+Talks to the Notion REST API directly (not via notion-client) so we get
+first-class support for the 2025-09+ data-source-aware endpoints.
 
-Database Schema (recommended):
-- Company Name (title)
-- URL (url)
-- ICP Score (number)
-- Status (select: Qualify In, Borderline, Qualify Out)
-- Vertical (select)
-- Revenue (text)
-- Employees (text)
-- Tech Stack (multi-select)
-- Region (select)
-- Fit Summary (text)
-- Next Steps (text)
-- Qualified Date (date)
-- Positive Signals (multi-select)
-- Disqualifiers (multi-select)
+Public surface:
+    NotionSync(data_source_id=..., api_key=...)
+        .upsert(payload)         -- create or update a tracker page from the qualify() payload
+        .list_pipeline(limit=50) -- read the DB for the Pipeline view in the UI
+        .resolve_database_id()   -- fetch the parent DB id for a given data source
+
+The payload shape consumed by upsert() is exactly what qualify_service.qualify()
+returns.
 """
+from __future__ import annotations
 
 import os
-import json
-from datetime import datetime
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+from typing import Any
 
-# Try to import notion-client, provide helpful error if not available
-try:
-    from notion_client import Client
-    NOTION_AVAILABLE = True
-except ImportError:
-    NOTION_AVAILABLE = False
+import requests
 
+NOTION_API = "https://api.notion.com/v1"
+DEFAULT_VERSION = "2025-09-03"
+DEFAULT_TIMEOUT = 30
+
+
+class NotionSyncError(RuntimeError):
+    """Wraps any non-2xx response from Notion with the upstream body."""
+
+
+# --- Field mapping helpers -------------------------------------------------
+
+_STATUS_MAP = {
+    "qualify_in": "Qualified",
+    "borderline": "Researching",
+    "qualify_out": "Disqualified",
+}
+
+_OPPORTUNITY_MAP = {
+    "retention": "Retention",
+    "retention_light": "Retention Light",
+    "migration": "Migration",
+    "augmentation": "Augmentation",
+    "greenfield": "Greenfield",
+    "unknown": "Unknown",
+}
+
+_STACK_CONFIDENCE_MAP = {
+    "confirmed": "Confirmed",
+    "inferred": "Inferred",
+    "speculated": "Speculated",
+    "unknown": "Unknown",
+}
+
+
+def _rich_text(content: str, *, limit: int = 1900) -> list[dict]:
+    """Notion rich_text values are capped at 2000 chars per block. Truncate cleanly."""
+    if not content:
+        return []
+    return [{"type": "text", "text": {"content": str(content)[:limit]}}]
+
+
+def _title(content: str) -> list[dict]:
+    return [{"type": "text", "text": {"content": str(content or "")[:200]}}]
+
+
+def _select(value: str | None) -> dict | None:
+    if not value:
+        return None
+    return {"select": {"name": value}}
+
+
+def _verticals_for_notion(vertical_label: str) -> str:
+    """Coerce scorer's vertical label into a known Notion select option."""
+    if not vertical_label:
+        return "Other"
+    s = vertical_label.lower()
+    if "qsr" in s or "quick service" in s or "fast food" in s:
+        return "QSR"
+    if "roadside" in s or "fuel" in s or "petrol" in s or "gas station" in s:
+        return "Roadside Convenience"
+    if "delivery" in s:
+        return "Delivery"
+    if "convenience" in s or "c-store" in s:
+        return "C-store"
+    if "retail" in s or "ecommerce" in s or "e-commerce" in s:
+        return "Retail"
+    if "travel" in s or "hospitality" in s or "hotel" in s or "airline" in s:
+        return "Travel"
+    if "fintech" in s or "financial" in s or "bank" in s:
+        return "Fintech"
+    if "telecom" in s:
+        return "Telecom"
+    if "media" in s or "entertainment" in s or "gaming" in s:
+        return "Media"
+    if "health" in s or "pharma" in s:
+        return "Healthcare"
+    if "saas" in s or "software" in s:
+        return "SaaS"
+    return "Other"
+
+
+def _payload_to_properties(payload: dict) -> dict[str, Any]:
+    """Translate the qualify() payload into Notion property values."""
+    company = payload.get("company") or {}
+    score = payload.get("score") or {}
+    discovered = payload.get("discovered") or {}
+    opp = payload.get("opportunity") or {}
+    meddicc = payload.get("meddicc") or {}
+
+    status_key = score.get("status") or "borderline"
+    opp_key = opp.get("type") or score.get("opportunity_type") or "unknown"
+    stack_confidence_key = (discovered.get("stack_confidence") or "confirmed").lower()
+
+    revenue_display = discovered.get("revenue") or ""
+    if isinstance(revenue_display, (int, float)):
+        revenue_display = f"${revenue_display:,.0f}"
+
+    employees_display = discovered.get("employees")
+    employees_display = "" if employees_display is None else f"{employees_display:,}"
+
+    deal_size_label = discovered.get("deal_size_label") or ""
+
+    props: dict[str, Any] = {
+        "Company": {"title": _title(company.get("name") or "Unknown")},
+        "URL": {"url": company.get("url") or None},
+        "ICP Score": {"number": float(score.get("total_weighted") or 0)},
+        "ICP Normalised": {"number": float(score.get("normalized_score") or 0)},
+        "Status": _select(_STATUS_MAP.get(status_key, "Researching")),
+        "Vertical": _select(_verticals_for_notion(score.get("breakdown", {}).get("vertical", {}).get("value", ""))),
+        "Opportunity Type": _select(_OPPORTUNITY_MAP.get(opp_key, "Unknown")),
+        "Stack Confidence": _select(_STACK_CONFIDENCE_MAP.get(stack_confidence_key, "Confirmed")),
+        "Revenue": {"rich_text": _rich_text(revenue_display)},
+        "Employees": {"rich_text": _rich_text(employees_display)},
+        "Tech Stack": {"rich_text": _rich_text(discovered.get("tech_stack", ""))},
+        "Region": {"rich_text": _rich_text(discovered.get("region", ""))},
+        "Deal Size": {"rich_text": _rich_text(deal_size_label)},
+        "Complexity": {"rich_text": _rich_text(discovered.get("complexity", ""))},
+        "Fit Summary": {"rich_text": _rich_text(payload.get("fit_summary", ""))},
+        "Next Steps": {"rich_text": _rich_text("\n".join(f"• {s}" for s in (payload.get("next_steps") or [])))},
+        "Positive Signals": {"rich_text": _rich_text(", ".join(payload.get("signals") or []))},
+        "Disqualifiers": {"rich_text": _rich_text(", ".join(payload.get("disqualifiers") or []))},
+        "Qualified Date": {"date": {"start": datetime.now(timezone.utc).date().isoformat()}},
+        "Owner": _select(payload.get("owner") or "Ben Ojuolape"),
+    }
+
+    # Sales Stage — optional; only set when the AE has picked one.
+    sales_stage = payload.get("sales_stage")
+    if sales_stage:
+        props["Sales Stage"] = {"select": {"name": sales_stage}}
+
+    # MEDDICC — only set if the AE filled it in.
+    meddicc_score = 0
+    meddicc_score_map = {"not_started": 0, "in_progress": 1, "confirmed": 3}
+    for prop_name, key in (
+        ("Metrics", "metrics"),
+        ("Economic Buyer", "economic_buyer"),
+        ("Decision Criteria", "decision_criteria"),
+        ("Decision Process", "decision_process"),
+        ("Identify Pain", "identify_pain"),
+        ("Champion", "champion"),
+    ):
+        entry = meddicc.get(key) or {}
+        n = meddicc_score_map.get((entry.get("status") or "not_started"), 0)
+        meddicc_score += n
+        props[prop_name] = {"number": n}
+    props["MEDDICC Score"] = {"number": meddicc_score}
+
+    # Drop None-valued select properties — Notion 400s on them.
+    return {k: v for k, v in props.items() if v is not None}
+
+
+# --- Page content blocks ---------------------------------------------------
+
+_MEDDICC_FIELDS = (
+    ("metrics",           "Metrics"),
+    ("economic_buyer",    "Economic Buyer"),
+    ("decision_criteria", "Decision Criteria"),
+    ("decision_process",  "Decision Process"),
+    ("identify_pain",     "Identify Pain"),
+    ("champion",          "Champion"),
+)
+_STATUS_ICON = {"not_started": "○", "in_progress": "◐", "confirmed": "●"}
+
+
+def _meddicc_blocks(payload: dict) -> list[dict]:
+    """Render the AE's MEDDICC notes + statuses as page-body blocks.
+
+    Called on both create (inline in `_page_blocks`) and update (appended via
+    /blocks/{id}/children, so each push leaves an audit-trail entry).
+    """
+    meddicc = payload.get("meddicc") or {}
+    if not any((meddicc.get(k) or {}).get("value") or (meddicc.get(k) or {}).get("status") not in (None, "not_started")
+               for k, _ in _MEDDICC_FIELDS):
+        return []
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    blocks: list[dict] = [
+        {"object": "block", "type": "heading_3",
+         "heading_3": {"rich_text": _rich_text(f"MEDDICC Notes — {stamp}")}},
+    ]
+    for key, label in _MEDDICC_FIELDS:
+        entry = meddicc.get(key) or {}
+        status = entry.get("status") or "not_started"
+        note = (entry.get("value") or "").strip()
+        line = f"{_STATUS_ICON[status]} {label} ({status.replace('_',' ')}): {note or '—'}"
+        blocks.append({
+            "object": "block", "type": "bulleted_list_item",
+            "bulleted_list_item": {"rich_text": _rich_text(line)},
+        })
+    return blocks
+
+
+def _page_blocks(payload: dict) -> list[dict]:
+    score = payload.get("score") or {}
+    breakdown = score.get("breakdown") or {}
+    stakeholders = payload.get("stakeholders") or []
+
+    blocks: list[dict] = [
+        {
+            "object": "block", "type": "heading_2",
+            "heading_2": {"rich_text": _rich_text("Qualification Summary")},
+        },
+        {
+            "object": "block", "type": "callout",
+            "callout": {
+                "rich_text": _rich_text(
+                    f"ICP {score.get('normalized_score', 0)}/10 — "
+                    f"{score.get('status_display', 'Unknown')} — "
+                    f"{score.get('opportunity_label', '')}"
+                ),
+                "icon": {"emoji": "📊"},
+            },
+        },
+        {
+            "object": "block", "type": "heading_3",
+            "heading_3": {"rich_text": _rich_text("Score Breakdown")},
+        },
+    ]
+    for criterion, data in breakdown.items():
+        name = criterion.replace("_", " ").title()
+        blocks.append({
+            "object": "block", "type": "bulleted_list_item",
+            "bulleted_list_item": {
+                "rich_text": _rich_text(
+                    f"{name}: {data.get('value', 'N/A')} — {data.get('weighted', 0)}/{data.get('max_weighted', 0)} pts"
+                )
+            },
+        })
+
+    if payload.get("fit_summary"):
+        blocks.extend([
+            {"object": "block", "type": "heading_3",
+             "heading_3": {"rich_text": _rich_text("Fit Analysis")}},
+            {"object": "block", "type": "paragraph",
+             "paragraph": {"rich_text": _rich_text(payload["fit_summary"])}},
+        ])
+
+    if payload.get("next_steps"):
+        blocks.append({"object": "block", "type": "heading_3",
+                       "heading_3": {"rich_text": _rich_text("Next Steps")}})
+        for step in payload["next_steps"]:
+            blocks.append({
+                "object": "block", "type": "to_do",
+                "to_do": {"rich_text": _rich_text(step), "checked": False},
+            })
+
+    if stakeholders:
+        blocks.append({"object": "block", "type": "heading_3",
+                       "heading_3": {"rich_text": _rich_text("Stakeholder Targets")}})
+        for s in stakeholders[:10]:
+            line = f"{s.get('name')} — {s.get('title')} [{s.get('priority')}] — {s.get('why')}"
+            blocks.append({
+                "object": "block", "type": "bulleted_list_item",
+                "bulleted_list_item": {"rich_text": _rich_text(line)},
+            })
+
+    # MEDDICC notes (only if the AE filled anything in).
+    blocks.extend(_meddicc_blocks(payload))
+
+    return blocks
+
+
+# --- Pipeline view helper --------------------------------------------------
+
+def _extract_text(prop: dict | None) -> str:
+    if not prop:
+        return ""
+    if prop.get("type") == "title":
+        return "".join(t.get("plain_text", "") for t in prop.get("title", []))
+    if prop.get("type") == "rich_text":
+        return "".join(t.get("plain_text", "") for t in prop.get("rich_text", []))
+    if prop.get("type") == "url":
+        return prop.get("url") or ""
+    if prop.get("type") == "select":
+        return (prop.get("select") or {}).get("name", "") or ""
+    if prop.get("type") == "number":
+        n = prop.get("number")
+        return "" if n is None else str(n)
+    if prop.get("type") == "date":
+        d = prop.get("date") or {}
+        return d.get("start") or ""
+    return ""
+
+
+def _row_from_page(page: dict) -> dict:
+    props = page.get("properties") or {}
+    return {
+        "id": page.get("id"),
+        "url": page.get("url"),
+        "company": _extract_text(props.get("Company")),
+        "company_url": _extract_text(props.get("URL")),
+        "icp_normalised": props.get("ICP Normalised", {}).get("number"),
+        "icp_score": props.get("ICP Score", {}).get("number"),
+        "status": _extract_text(props.get("Status")),
+        "sales_stage": _extract_text(props.get("Sales Stage")),
+        "vertical": _extract_text(props.get("Vertical")),
+        "opportunity_type": _extract_text(props.get("Opportunity Type")),
+        "owner": _extract_text(props.get("Owner")),
+        "next_steps": _extract_text(props.get("Next Steps")),
+        "last_edited": page.get("last_edited_time"),
+    }
+
+
+# --- The sync class --------------------------------------------------------
 
 class NotionSync:
-    """Handles syncing lead qualification data to Notion."""
+    """REST client targeting the new data-source-aware Notion API."""
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        database_id: Optional[str] = None
+        api_key: str | None = None,
+        data_source_id: str | None = None,
+        database_id: str | None = None,
+        api_version: str | None = None,
     ):
-        """
-        Initialize Notion sync.
-
-        Args:
-            api_key: Notion API key (or set NOTION_API_KEY env var)
-            database_id: Notion database ID (or set NOTION_DATABASE_ID env var)
-        """
-        if not NOTION_AVAILABLE:
-            raise ImportError(
-                "notion-client not installed. Run: pip install notion-client"
-            )
-
-        self.api_key = api_key or os.environ.get("NOTION_API_KEY")
-        self.database_id = database_id or os.environ.get("NOTION_DATABASE_ID")
-
+        self.api_key = api_key or os.environ.get("NOTION_API_KEY", "")
+        self.data_source_id = data_source_id or os.environ.get("NOTION_DATA_SOURCE_ID", "")
+        self.database_id = database_id or os.environ.get("NOTION_DATABASE_ID", "")
+        self.api_version = api_version or os.environ.get("NOTION_API_VERSION", DEFAULT_VERSION)
         if not self.api_key:
-            raise ValueError(
-                "Notion API key required. Set NOTION_API_KEY environment variable "
-                "or pass api_key parameter."
-            )
+            raise ValueError("NOTION_API_KEY is required.")
+        if not (self.data_source_id or self.database_id):
+            raise ValueError("Either NOTION_DATA_SOURCE_ID or NOTION_DATABASE_ID is required.")
 
-        if not self.database_id:
-            raise ValueError(
-                "Notion database ID required. Set NOTION_DATABASE_ID environment "
-                "variable or pass database_id parameter."
-            )
-
-        self.client = Client(auth=self.api_key)
-
-    def create_page_properties(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert qualification result to Notion page properties."""
-        company = result.get("company", {})
-        icp = result.get("icp_score", {})
-        qual = result.get("qualification", {})
-        analysis = result.get("analysis", {})
-        data = result.get("data", {})
-
-        # Map status to Notion select values
-        status_map = {
-            "qualify_in": "Qualify In",
-            "borderline": "Borderline",
-            "qualify_out": "Qualify Out"
+    # ---- HTTP plumbing ----
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Notion-Version": self.api_version,
+            "Content-Type": "application/json",
         }
 
-        properties = {
-            # Title (Company Name)
-            "Company Name": {
-                "title": [{"text": {"content": company.get("name", "Unknown")}}]
-            },
-            # URL
-            "URL": {
-                "url": company.get("url", "")
-            },
-            # ICP Score (number)
-            "ICP Score": {
-                "number": icp.get("score", 0)
-            },
-            # Status (select)
-            "Status": {
-                "select": {"name": status_map.get(qual.get("status"), "Unknown")}
-            },
-            # Qualified Date
-            "Qualified Date": {
-                "date": {"start": datetime.now().isoformat()[:10]}
-            }
-        }
+    def _request(self, method: str, path: str, *, json_body: dict | None = None) -> dict:
+        url = f"{NOTION_API}{path}"
+        resp = requests.request(method, url, headers=self._headers(), json=json_body, timeout=DEFAULT_TIMEOUT)
+        if not resp.ok:
+            raise NotionSyncError(f"Notion {method} {path} {resp.status_code}: {resp.text[:400]}")
+        return resp.json()
 
-        # Optional fields (only add if data exists)
-        if data.get("vertical"):
-            properties["Vertical"] = {
-                "select": {"name": data["vertical"]}
-            }
+    # ---- Public ----
+    def resolve_database_id(self) -> str:
+        """Look up the parent DB id for our data source, cache on self."""
+        if self.database_id:
+            return self.database_id
+        ds = self._request("GET", f"/data_sources/{self.data_source_id}")
+        parent = ds.get("parent") or {}
+        db_id = parent.get("database_id")
+        if not db_id:
+            raise NotionSyncError("Data source has no parent database_id; check the data source ID is correct.")
+        self.database_id = db_id
+        return db_id
 
-        if data.get("revenue"):
-            properties["Revenue"] = {
-                "rich_text": [{"text": {"content": data["revenue"]}}]
-            }
+    def _parent(self) -> dict:
+        if self.data_source_id:
+            return {"type": "data_source_id", "data_source_id": self.data_source_id}
+        return {"database_id": self.database_id}
 
-        if data.get("employees"):
-            properties["Employees"] = {
-                "rich_text": [{"text": {"content": str(data["employees"])}}]
-            }
+    def _find_existing(self, company_name: str, company_url: str) -> dict | None:
+        if not (company_name or company_url):
+            return None
+        filters: list[dict] = []
+        if company_name:
+            filters.append({"property": "Company", "title": {"equals": company_name}})
+        if company_url:
+            filters.append({"property": "URL", "url": {"equals": company_url}})
+        body = {"filter": {"or": filters}, "page_size": 1} if len(filters) > 1 else {"filter": filters[0], "page_size": 1}
 
-        if data.get("tech_stack"):
-            # Multi-select for tech stack
-            tech_list = [t.strip() for t in data["tech_stack"].split(",") if t.strip()]
-            properties["Tech Stack"] = {
-                "multi_select": [{"name": tech} for tech in tech_list[:10]]  # Limit to 10
-            }
-
-        if data.get("region"):
-            properties["Region"] = {
-                "select": {"name": data["region"]}
-            }
-
-        if analysis.get("fit_summary"):
-            # Truncate to 2000 chars for Notion
-            summary = analysis["fit_summary"][:2000]
-            properties["Fit Summary"] = {
-                "rich_text": [{"text": {"content": summary}}]
-            }
-
-        if analysis.get("next_steps"):
-            steps_text = "\n".join(f"• {step}" for step in analysis["next_steps"])[:2000]
-            properties["Next Steps"] = {
-                "rich_text": [{"text": {"content": steps_text}}]
-            }
-
-        if qual.get("positive_signals"):
-            properties["Positive Signals"] = {
-                "multi_select": [
-                    {"name": signal[:100]} for signal in qual["positive_signals"][:5]
-                ]
-            }
-
-        if qual.get("hard_disqualifiers"):
-            properties["Disqualifiers"] = {
-                "multi_select": [
-                    {"name": dq[:100]} for dq in qual["hard_disqualifiers"][:5]
-                ]
-            }
-
-        return properties
-
-    def create_page_content(self, result: Dict[str, Any]) -> List[Dict]:
-        """Create Notion page content blocks."""
-        company = result.get("company", {})
-        icp = result.get("icp_score", {})
-        qual = result.get("qualification", {})
-        analysis = result.get("analysis", {})
-
-        blocks = []
-
-        # Header
-        blocks.append({
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": {
-                "rich_text": [{"type": "text", "text": {"content": "Qualification Summary"}}]
-            }
-        })
-
-        # Score callout
-        score = icp.get("score", 0)
-        status = qual.get("status_display", "Unknown")
-        blocks.append({
-            "object": "block",
-            "type": "callout",
-            "callout": {
-                "rich_text": [{"type": "text", "text": {"content": f"ICP Score: {score}/10 — {status}"}}],
-                "icon": {"emoji": "📊"}
-            }
-        })
-
-        # Score breakdown
-        blocks.append({
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": {
-                "rich_text": [{"type": "text", "text": {"content": "Score Breakdown"}}]
-            }
-        })
-
-        breakdown = icp.get("breakdown", {})
-        for criterion, data in breakdown.items():
-            name = criterion.replace("_", " ").title()
-            blocks.append({
-                "object": "block",
-                "type": "bulleted_list_item",
-                "bulleted_list_item": {
-                    "rich_text": [{
-                        "type": "text",
-                        "text": {"content": f"{name}: {data.get('value', 'N/A')} ({data.get('weighted', 0)}/{data.get('max_weighted', 0)} pts)"}
-                    }]
-                }
-            })
-
-        # Fit Analysis
-        if analysis.get("fit_summary"):
-            blocks.append({
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [{"type": "text", "text": {"content": "Fit Analysis"}}]
-                }
-            })
-            blocks.append({
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [{"type": "text", "text": {"content": analysis["fit_summary"]}}]
-                }
-            })
-
-        # Next Steps
-        if analysis.get("next_steps"):
-            blocks.append({
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [{"type": "text", "text": {"content": "Next Steps"}}]
-                }
-            })
-            for step in analysis["next_steps"]:
-                blocks.append({
-                    "object": "block",
-                    "type": "to_do",
-                    "to_do": {
-                        "rich_text": [{"type": "text", "text": {"content": step}}],
-                        "checked": False
-                    }
-                })
-
-        # Stakeholder Targets
-        if analysis.get("stakeholder_targets"):
-            blocks.append({
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [{"type": "text", "text": {"content": "Stakeholder Targets"}}]
-                }
-            })
-            for target in analysis["stakeholder_targets"][:5]:
-                blocks.append({
-                    "object": "block",
-                    "type": "bulleted_list_item",
-                    "bulleted_list_item": {
-                        "rich_text": [{
-                            "type": "text",
-                            "text": {"content": f"{target['role']} [{target['priority']}] - {target['why']}"}
-                        }]
-                    }
-                })
-
-        return blocks
-
-    def sync(self, result: Dict[str, Any], update_existing: bool = True) -> Dict:
-        """
-        Sync qualification result to Notion.
-
-        Args:
-            result: Qualification result from qualify_lead()
-            update_existing: If True, update existing page; if False, always create new
-
-        Returns:
-            Notion page object
-        """
-        company_name = result.get("company", {}).get("name", "")
-        url = result.get("company", {}).get("url", "")
-
-        # Check for existing page
-        existing_page = None
-        if update_existing and (company_name or url):
-            existing_page = self._find_existing_page(company_name, url)
-
-        properties = self.create_page_properties(result)
-
-        if existing_page:
-            # Update existing page
-            page = self.client.pages.update(
-                page_id=existing_page["id"],
-                properties=properties
-            )
-            print(f"✓ Updated existing Notion page: {company_name}")
+        if self.data_source_id:
+            data = self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
         else:
-            # Create new page
-            page = self.client.pages.create(
-                parent={"database_id": self.database_id},
-                properties=properties,
-                children=self.create_page_content(result)
+            data = self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
+        results = data.get("results") or []
+        return results[0] if results else None
+
+    def upsert(self, payload: dict) -> dict:
+        """Create or update a tracker page. Returns {action, page_id, url}."""
+        company = payload.get("company") or {}
+        name = company.get("name", "")
+        url = company.get("url", "")
+        existing = self._find_existing(name, url)
+        properties = _payload_to_properties(payload)
+        if existing:
+            page = self._request(
+                "PATCH",
+                f"/pages/{existing['id']}",
+                json_body={"properties": properties},
             )
-            print(f"✓ Created new Notion page: {company_name}")
-
-        return page
-
-    def _find_existing_page(
-        self,
-        company_name: str,
-        url: str
-    ) -> Optional[Dict]:
-        """Find existing page by company name or URL."""
-        try:
-            # Search by company name
-            response = self.client.databases.query(
-                database_id=self.database_id,
-                filter={
-                    "property": "Company Name",
-                    "title": {"equals": company_name}
-                }
-            )
-
-            if response["results"]:
-                return response["results"][0]
-
-            # Search by URL if name didn't match
-            if url:
-                response = self.client.databases.query(
-                    database_id=self.database_id,
-                    filter={
-                        "property": "URL",
-                        "url": {"equals": url}
-                    }
-                )
-
-                if response["results"]:
-                    return response["results"][0]
-
-        except Exception as e:
-            print(f"Warning: Could not search for existing page: {e}")
-
-        return None
-
-
-def sync_to_notion(
-    result: Dict[str, Any],
-    api_key: Optional[str] = None,
-    database_id: Optional[str] = None
-) -> Dict:
-    """
-    Convenience function to sync qualification result to Notion.
-
-    Args:
-        result: Qualification result from qualify_lead()
-        api_key: Notion API key (optional, uses env var if not provided)
-        database_id: Notion database ID (optional, uses env var if not provided)
-
-    Returns:
-        Notion page object
-    """
-    syncer = NotionSync(api_key=api_key, database_id=database_id)
-    return syncer.sync(result)
-
-
-def setup_database(api_key: Optional[str] = None, parent_page_id: Optional[str] = None) -> str:
-    """
-    Create a new Notion database with the correct schema.
-
-    Args:
-        api_key: Notion API key
-        parent_page_id: Parent page to create database under
-
-    Returns:
-        Database ID
-    """
-    if not NOTION_AVAILABLE:
-        raise ImportError("notion-client not installed. Run: pip install notion-client")
-
-    api_key = api_key or os.environ.get("NOTION_API_KEY")
-    if not api_key:
-        raise ValueError("Notion API key required")
-
-    if not parent_page_id:
-        raise ValueError("Parent page ID required to create database")
-
-    client = Client(auth=api_key)
-
-    database = client.databases.create(
-        parent={"type": "page_id", "page_id": parent_page_id},
-        title=[{"type": "text", "text": {"content": "Lead Qualification Tracker"}}],
-        properties={
-            "Company Name": {"title": {}},
-            "URL": {"url": {}},
-            "ICP Score": {"number": {"format": "number"}},
-            "Status": {
-                "select": {
-                    "options": [
-                        {"name": "Qualify In", "color": "green"},
-                        {"name": "Borderline", "color": "yellow"},
-                        {"name": "Qualify Out", "color": "red"}
-                    ]
-                }
+            # Append a fresh MEDDICC notes section on update so the AE's
+            # latest captures aren't lost (we can't replace children in place).
+            meddicc_extra = _meddicc_blocks(payload)
+            if meddicc_extra:
+                try:
+                    self._request(
+                        "PATCH",
+                        f"/blocks/{existing['id']}/children",
+                        json_body={"children": meddicc_extra},
+                    )
+                except NotionSyncError:
+                    # Don't block the upsert on a block-append failure.
+                    pass
+            return {"action": "updated", "page_id": page.get("id"), "url": page.get("url")}
+        page = self._request(
+            "POST",
+            "/pages",
+            json_body={
+                "parent": self._parent(),
+                "properties": properties,
+                "children": _page_blocks(payload),
             },
-            "Vertical": {
-                "select": {
-                    "options": [
-                        {"name": "QSR / Fast Food", "color": "orange"},
-                        {"name": "Retail", "color": "blue"},
-                        {"name": "Travel & Hospitality", "color": "purple"},
-                        {"name": "Fintech", "color": "green"},
-                        {"name": "Delivery", "color": "pink"},
-                        {"name": "Media & Entertainment", "color": "red"},
-                        {"name": "Telecom", "color": "gray"},
-                        {"name": "Other", "color": "default"}
-                    ]
-                }
-            },
-            "Revenue": {"rich_text": {}},
-            "Employees": {"rich_text": {}},
-            "Tech Stack": {"multi_select": {}},
-            "Region": {
-                "select": {
-                    "options": [
-                        {"name": "NAM", "color": "blue"},
-                        {"name": "EMEA", "color": "green"},
-                        {"name": "APAC", "color": "purple"},
-                        {"name": "Multi-Region", "color": "orange"},
-                        {"name": "Global", "color": "red"}
-                    ]
-                }
-            },
-            "Fit Summary": {"rich_text": {}},
-            "Next Steps": {"rich_text": {}},
-            "Qualified Date": {"date": {}},
-            "Positive Signals": {"multi_select": {}},
-            "Disqualifiers": {"multi_select": {}},
-            "Lead Source": {"rich_text": {}},
-            "Owner": {"people": {}}
-        }
-    )
+        )
+        return {"action": "created", "page_id": page.get("id"), "url": page.get("url")}
 
-    print(f"✓ Created Notion database: {database['id']}")
-    print(f"  Set NOTION_DATABASE_ID={database['id']}")
-
-    return database["id"]
+    def list_pipeline(self, *, limit: int = 50) -> list[dict]:
+        """Return pipeline rows for the UI's Pipeline view."""
+        body = {"page_size": min(limit, 100), "sorts": [{"property": "ICP Normalised", "direction": "descending"}]}
+        if self.data_source_id:
+            data = self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
+        else:
+            data = self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
+        return [_row_from_page(p) for p in (data.get("results") or [])]
 
 
-if __name__ == "__main__":
-    print("Notion Sync Module")
-    print("-" * 40)
-
-    if not NOTION_AVAILABLE:
-        print("⚠️  notion-client not installed")
-        print("   Run: pip install notion-client")
-    else:
-        print("✓ notion-client is available")
-
-    api_key = os.environ.get("NOTION_API_KEY")
-    db_id = os.environ.get("NOTION_DATABASE_ID")
-
-    print(f"\nEnvironment:")
-    print(f"  NOTION_API_KEY: {'✓ Set' if api_key else '✗ Not set'}")
-    print(f"  NOTION_DATABASE_ID: {'✓ Set' if db_id else '✗ Not set'}")
-
-    if not api_key:
-        print("\nTo set up Notion integration:")
-        print("  1. Go to https://www.notion.so/my-integrations")
-        print("  2. Create a new integration")
-        print("  3. Copy the API key")
-        print("  4. Run: export NOTION_API_KEY='your-key-here'")
-
-    if not db_id:
-        print("\nTo set up the database:")
-        print("  1. Create a new page in Notion")
-        print("  2. Share it with your integration")
-        print("  3. Run: python notion_sync.py --setup <parent-page-id>")
+def sync_to_notion(payload: dict) -> dict:
+    """Module-level convenience for one-shot calls."""
+    return NotionSync().upsert(payload)

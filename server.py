@@ -1,490 +1,304 @@
 """
-Massive Rocket Lead Qualification Server
-Simple Flask server to handle Notion API integration securely.
+Massive Rocket Lead Qualification Server.
 
-Setup:
-    pip install flask flask-cors notion-client python-dotenv
+Flask app powering the team-facing qualification UI. Serves qualify.html and
+exposes a small JSON API:
 
-    Create a .env file with:
-        NOTION_API_KEY=your-notion-api-key
-        NOTION_DATABASE_ID=your-database-id
+    GET  /                  - qualify.html
+    GET  /api/health        - service + integration status
+    POST /api/qualify       - run end-to-end qualification (Apollo + scoring)
+    POST /api/notion/sync   - push (or update) the result to Notion
+    GET  /api/pipeline      - list all leads in the Notion tracker
 
-Run:
-    python server.py
+HubSpot enrichment lives in legacy_hubspot.py for the post-CEO rollout — not
+wired into the server today.
 """
+from __future__ import annotations
 
+import csv
+import hmac
+import io
+import logging
 import os
-import json
-from datetime import datetime
-from flask import Flask, request, jsonify
+import traceback
+
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
-# Load environment variables
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# Try to import notion-client
+import ai_summary
+import apollo
+import audit
+import hubspot_sync
+import qualify_service
+import slack_digest
+from notion_sync import NotionSync, NotionSyncError
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("mr.qualify")
+
+app = Flask(__name__, static_folder=None)
+CORS(app)
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Read the UI once at startup so we (a) avoid file-handle leaks under the test
+# client and (b) skip a disk read on every page load.
 try:
-    from notion_client import Client
-    NOTION_AVAILABLE = True
-except ImportError:
-    NOTION_AVAILABLE = False
-    print("Warning: notion-client not installed. Run: pip install notion-client")
-
-app = Flask(__name__)
-CORS(app)  # Enable CORS for local development
-
-# Notion configuration
-NOTION_API_KEY = os.environ.get("NOTION_API_KEY")
-NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
+    with open(os.path.join(HERE, "qualify.html"), "r", encoding="utf-8") as _f:
+        _QUALIFY_HTML = _f.read()
+except OSError:
+    _QUALIFY_HTML = "<!doctype html><h1>qualify.html missing</h1>"
 
 
-def get_notion_client():
-    """Get Notion client instance."""
-    if not NOTION_AVAILABLE:
-        raise Exception("notion-client not installed. Run: pip install notion-client")
-    if not NOTION_API_KEY:
-        raise Exception("NOTION_API_KEY not set in environment")
-    return Client(auth=NOTION_API_KEY)
+# ---- Auth -----------------------------------------------------------------
+# Shared-secret gate. If APP_AUTH_TOKEN is set, every /api/* request must
+# include either `Authorization: Bearer <token>` or `?token=<token>`. The
+# HTML entrypoint stays open so the UI can render the auth prompt.
+# Leave APP_AUTH_TOKEN unset in dev to disable.
+
+AUTH_TOKEN = os.environ.get("APP_AUTH_TOKEN", "").strip()
 
 
-def create_notion_properties(data):
-    """Convert lead data to Notion page properties."""
-
-    # Map status to Notion select values
-    status_map = {
-        "qualify_in": "Qualify In",
-        "borderline": "Borderline",
-        "qualify_out": "Qualify Out"
-    }
-
-    properties = {
-        "Company Name": {
-            "title": [{"text": {"content": data.get("companyName", "Unknown")}}]
-        },
-        "ICP Score": {
-            "number": data.get("normalizedScore", 0)
-        },
-        "Status": {
-            "select": {"name": status_map.get(data.get("status"), "Unknown")}
-        },
-        "Qualified Date": {
-            "date": {"start": datetime.now().isoformat()[:10]}
-        }
-    }
-
-    # URL
-    if data.get("companyUrl"):
-        url = data["companyUrl"]
-        if not url.startswith("http"):
-            url = f"https://{url}"
-        properties["URL"] = {"url": url}
-
-    # Vertical
-    vertical_map = {
-        "qsr": "QSR / Fast Food",
-        "retail": "Retail",
-        "travel": "Travel & Hospitality",
-        "fintech": "Fintech",
-        "delivery": "Delivery",
-        "convenience": "Convenience",
-        "telecom": "Telecom",
-        "media": "Media & Entertainment",
-        "healthcare": "Healthcare",
-        "smart_home": "Smart Home / IoT",
-        "saas": "SaaS / Technology",
-        "manufacturing": "Manufacturing"
-    }
-    if data.get("vertical"):
-        properties["Vertical"] = {
-            "select": {"name": vertical_map.get(data["vertical"], "Other")}
-        }
-
-    # Revenue
-    if data.get("revenue"):
-        properties["Revenue"] = {
-            "rich_text": [{"text": {"content": data["revenue"]}}]
-        }
-
-    # Employees
-    if data.get("employees"):
-        properties["Employees"] = {
-            "rich_text": [{"text": {"content": str(data["employees"])}}]
-        }
-
-    # Tech Stack
-    if data.get("techStack"):
-        tech_list = [t.strip() for t in data["techStack"].split(",") if t.strip()]
-        properties["Tech Stack"] = {
-            "multi_select": [{"name": tech} for tech in tech_list[:10]]
-        }
-
-    # Region
-    region_map = {
-        "nam": "NAM",
-        "emea": "EMEA",
-        "apac": "APAC",
-        "nam_emea": "Multi-Region",
-        "global": "Global"
-    }
-    if data.get("region"):
-        properties["Region"] = {
-            "select": {"name": region_map.get(data["region"], "Other")}
-        }
-
-    # Fit Summary
-    if data.get("fitSummary"):
-        properties["Fit Summary"] = {
-            "rich_text": [{"text": {"content": data["fitSummary"][:2000]}}]
-        }
-
-    # Next Steps
-    if data.get("nextSteps"):
-        steps_text = "\n".join(f"• {step}" for step in data["nextSteps"])
-        properties["Next Steps"] = {
-            "rich_text": [{"text": {"content": steps_text[:2000]}}]
-        }
-
-    # Positive Signals
-    if data.get("positiveSignals"):
-        properties["Positive Signals"] = {
-            "multi_select": [{"name": s[:100]} for s in data["positiveSignals"][:5]]
-        }
-
-    # Disqualifiers
-    if data.get("disqualifiers"):
-        properties["Disqualifiers"] = {
-            "multi_select": [{"name": d[:100]} for d in data["disqualifiers"][:5]]
-        }
-
-    # Lead Source
-    if data.get("source"):
-        properties["Lead Source"] = {
-            "rich_text": [{"text": {"content": data["source"]}}]
-        }
-
-    return properties
+def _request_token() -> str:
+    auth_hdr = request.headers.get("Authorization", "")
+    if auth_hdr.lower().startswith("bearer "):
+        return auth_hdr[7:].strip()
+    return request.args.get("token", "").strip()
 
 
-def create_notion_content(data):
-    """Create Notion page content blocks."""
-    blocks = []
+@app.before_request
+def _require_auth():
+    if not AUTH_TOKEN:
+        return None  # Auth disabled
+    # Only gate API surface; HTML + health are open.
+    if not request.path.startswith("/api/"):
+        return None
+    if request.path == "/api/health":
+        return None
+    if request.method == "OPTIONS":
+        return None
+    presented = _request_token()
+    if not presented or not hmac.compare_digest(presented, AUTH_TOKEN):
+        return jsonify({"error": "unauthorized", "code": "auth_required"}), 401
+    return None
 
-    # Header
-    blocks.append({
-        "object": "block",
-        "type": "heading_2",
-        "heading_2": {
-            "rich_text": [{"type": "text", "text": {"content": "Qualification Summary"}}]
-        }
-    })
 
-    # Score callout
-    score = data.get("normalizedScore", 0)
-    status = data.get("statusDisplay", "Unknown")
-    emoji = "✅" if "qualify_in" in data.get("status", "") else "⚠️" if "borderline" in data.get("status", "") else "❌"
+# ---- Routes ---------------------------------------------------------------
 
-    blocks.append({
-        "object": "block",
-        "type": "callout",
-        "callout": {
-            "rich_text": [{"type": "text", "text": {"content": f"ICP Score: {score}/10 — {emoji} {status}"}}],
-            "icon": {"emoji": "📊"}
-        }
-    })
-
-    # Score breakdown
-    blocks.append({
-        "object": "block",
-        "type": "heading_3",
-        "heading_3": {
-            "rich_text": [{"type": "text", "text": {"content": "Score Breakdown"}}]
-        }
-    })
-
-    breakdown = data.get("breakdown", {})
-    criteria_labels = {
-        "revenue": "Revenue",
-        "employees": "Employees",
-        "vertical": "Vertical",
-        "techStack": "Tech Stack",
-        "complexity": "Complexity",
-        "dealSize": "Deal Size",
-        "region": "Region"
-    }
-
-    for key, label in criteria_labels.items():
-        item = breakdown.get(key, {})
-        value = item.get("value", "N/A")
-        weighted = item.get("weighted", 0)
-        max_weighted = item.get("maxWeighted", 0)
-
-        blocks.append({
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": {
-                "rich_text": [{
-                    "type": "text",
-                    "text": {"content": f"{label}: {value} ({weighted}/{max_weighted} pts)"}
-                }]
-            }
-        })
-
-    # Next Steps
-    if data.get("nextSteps"):
-        blocks.append({
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": {
-                "rich_text": [{"type": "text", "text": {"content": "Next Steps"}}]
-            }
-        })
-
-        for step in data["nextSteps"]:
-            blocks.append({
-                "object": "block",
-                "type": "to_do",
-                "to_do": {
-                    "rich_text": [{"type": "text", "text": {"content": step}}],
-                    "checked": False
-                }
-            })
-
-    # Massive Rocket Value Proposition
-    blocks.append({
-        "object": "block",
-        "type": "divider",
-        "divider": {}
-    })
-
-    blocks.append({
-        "object": "block",
-        "type": "heading_3",
-        "heading_3": {
-            "rich_text": [{"type": "text", "text": {"content": "Why Massive Rocket?"}}]
-        }
-    })
-
-    blocks.append({
-        "object": "block",
-        "type": "quote",
-        "quote": {
-            "rich_text": [{
-                "type": "text",
-                "text": {"content": "We turn fragmented customer data and under-used data platforms into a growth engine that execs can steer and teams can run."}
-            }]
-        }
-    })
-
-    blocks.append({
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {
-            "rich_text": [{
-                "type": "text",
-                "text": {"content": "Key pillars: Data Foundations • Engagement Stack • Measurement & Decisioning • Talent & Capacity"}
-            }]
-        }
-    })
-
-    return blocks
+@app.route("/", methods=["GET"])
+def index():
+    return Response(_QUALIFY_HTML, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/api/health", methods=["GET"])
-def health_check():
-    """Health check endpoint."""
+def health():
+    notion_configured = bool(os.environ.get("NOTION_API_KEY"))
+    notion_target = os.environ.get("NOTION_DATA_SOURCE_ID") or os.environ.get("NOTION_DATABASE_ID")
     return jsonify({
-        "status": "ok",
-        "notion_available": NOTION_AVAILABLE,
-        "notion_configured": bool(NOTION_API_KEY and NOTION_DATABASE_ID)
+        "ok": True,
+        "service": "mr-qualification",
+        "apollo": apollo.healthcheck(),
+        "notion": {
+            "configured": notion_configured,
+            "data_source_id_set": bool(os.environ.get("NOTION_DATA_SOURCE_ID")),
+            "database_id_set": bool(os.environ.get("NOTION_DATABASE_ID")),
+            "target_present": bool(notion_target),
+            "api_version": os.environ.get("NOTION_API_VERSION", "2025-09-03"),
+        },
+        "auth": {"required": bool(AUTH_TOKEN)},
+        "ai": {"configured": ai_summary.is_configured()},
+        "slack": {"configured": slack_digest.is_configured()},
+        "hubspot": hubspot_sync.status(),
     })
 
 
-@app.route("/api/config", methods=["GET"])
-def get_config():
-    """Return client configuration (non-sensitive)."""
-    return jsonify({
-        "notion_configured": bool(NOTION_API_KEY and NOTION_DATABASE_ID),
-        "database_id_set": bool(NOTION_DATABASE_ID)
-    })
+def _actor() -> str:
+    """Best-effort actor identification. Falls back to 'anon'."""
+    return (request.headers.get("X-Actor") or "anon").strip()[:64]
 
 
-@app.route("/api/sync-to-notion", methods=["POST"])
-def sync_to_notion():
-    """Sync lead qualification data to Notion."""
+@app.route("/api/qualify", methods=["POST"])
+def api_qualify():
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    overrides = body.get("overrides") or {}
+    if not name or not url:
+        return jsonify({"error": "name and url are required"}), 400
     try:
-        if not NOTION_DATABASE_ID:
-            return jsonify({
-                "success": False,
-                "error": "NOTION_DATABASE_ID not configured on server"
-            }), 400
-
-        data = request.json
-        if not data:
-            return jsonify({
-                "success": False,
-                "error": "No data provided"
-            }), 400
-
-        client = get_notion_client()
-
-        # Check for existing page
-        existing_page = None
-        company_name = data.get("companyName", "")
-
-        if company_name:
-            try:
-                response = client.databases.query(
-                    database_id=NOTION_DATABASE_ID,
-                    filter={
-                        "property": "Company Name",
-                        "title": {"equals": company_name}
-                    }
-                )
-                if response["results"]:
-                    existing_page = response["results"][0]
-            except Exception as e:
-                print(f"Warning: Could not search for existing page: {e}")
-
-        properties = create_notion_properties(data)
-
-        if existing_page:
-            # Update existing page
-            page = client.pages.update(
-                page_id=existing_page["id"],
-                properties=properties
-            )
-            action = "updated"
-        else:
-            # Create new page
-            page = client.pages.create(
-                parent={"database_id": NOTION_DATABASE_ID},
-                properties=properties,
-                children=create_notion_content(data)
-            )
-            action = "created"
-
-        # Get page URL
-        page_url = page.get("url", "")
-
-        return jsonify({
-            "success": True,
-            "action": action,
-            "page_id": page["id"],
-            "page_url": page_url,
-            "message": f"Successfully {action} page for {company_name}"
-        })
-
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-@app.route("/api/setup-database", methods=["POST"])
-def setup_database():
-    """Create a new Notion database with the correct schema."""
-    try:
-        data = request.json
-        parent_page_id = data.get("parent_page_id")
-
-        if not parent_page_id:
-            return jsonify({
-                "success": False,
-                "error": "parent_page_id is required"
-            }), 400
-
-        client = get_notion_client()
-
-        database = client.databases.create(
-            parent={"type": "page_id", "page_id": parent_page_id},
-            title=[{"type": "text", "text": {"content": "Lead Qualification Tracker"}}],
-            properties={
-                "Company Name": {"title": {}},
-                "URL": {"url": {}},
-                "ICP Score": {"number": {"format": "number"}},
-                "Status": {
-                    "select": {
-                        "options": [
-                            {"name": "Qualify In", "color": "green"},
-                            {"name": "Borderline", "color": "yellow"},
-                            {"name": "Qualify Out", "color": "red"}
-                        ]
-                    }
-                },
-                "Vertical": {
-                    "select": {
-                        "options": [
-                            {"name": "QSR / Fast Food", "color": "orange"},
-                            {"name": "Retail", "color": "blue"},
-                            {"name": "Travel & Hospitality", "color": "purple"},
-                            {"name": "Fintech", "color": "green"},
-                            {"name": "Delivery", "color": "pink"},
-                            {"name": "Media & Entertainment", "color": "red"},
-                            {"name": "Telecom", "color": "gray"},
-                            {"name": "Other", "color": "default"}
-                        ]
-                    }
-                },
-                "Revenue": {"rich_text": {}},
-                "Employees": {"rich_text": {}},
-                "Tech Stack": {"multi_select": {}},
-                "Region": {
-                    "select": {
-                        "options": [
-                            {"name": "NAM", "color": "blue"},
-                            {"name": "EMEA", "color": "green"},
-                            {"name": "APAC", "color": "purple"},
-                            {"name": "Multi-Region", "color": "orange"},
-                            {"name": "Global", "color": "red"}
-                        ]
-                    }
-                },
-                "Fit Summary": {"rich_text": {}},
-                "Next Steps": {"rich_text": {}},
-                "Qualified Date": {"date": {}},
-                "Positive Signals": {"multi_select": {}},
-                "Disqualifiers": {"multi_select": {}},
-                "Lead Source": {"rich_text": {}},
-                "Owner": {"people": {}}
-            }
+        result = qualify_service.qualify(name, url, overrides=overrides)
+        audit.log_event(
+            "qualified",
+            actor=_actor(),
+            company=name,
+            url=url,
+            score=result["score"]["normalized_score"],
+            status=result["score"]["status"],
+            opportunity=result["score"].get("opportunity_type"),
         )
-
-        return jsonify({
-            "success": True,
-            "database_id": database["id"],
-            "database_url": database.get("url", ""),
-            "message": f"Database created. Set NOTION_DATABASE_ID={database['id']}"
-        })
-
+        return jsonify(result)
+    except apollo.ApolloError as e:
+        log.warning("Apollo failure for %s: %s", name, e)
+        audit.log_event("qualify_failed", actor=_actor(), company=name, reason=str(e)[:200])
+        return jsonify({"error": f"Apollo error: {e}"}), 502
     except Exception as e:
+        log.exception("Qualification crash for %s", name)
+        audit.log_event("qualify_crash", actor=_actor(), company=name, reason=str(e)[:200])
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/notion/sync", methods=["POST"])
+def api_notion_sync():
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "request body required"}), 400
+    company_name = (payload.get("company") or {}).get("name") or "?"
+    try:
+        sync = NotionSync()
+        result = sync.upsert(payload)
+        audit.log_event(
+            "notion_sync",
+            actor=_actor(),
+            company=company_name,
+            action=result.get("action"),
+            page_id=result.get("page_id"),
+            page_url=result.get("url"),
+        )
+        return jsonify(result)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Notion sync failure: %s", e)
+        audit.log_event("notion_sync_failed", actor=_actor(), company=company_name, reason=str(e)[:200])
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        log.exception("Notion sync crash")
+        audit.log_event("notion_sync_crash", actor=_actor(), company=company_name, reason=str(e)[:200])
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/audit", methods=["GET"])
+def api_audit():
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    limit = max(1, min(limit, 500))
+    since = request.args.get("since")
+    rows = audit.read_events(limit=limit, since=since)
+    return jsonify({"rows": rows, "count": len(rows), "summary": audit.summarise(rows)})
+
+
+@app.route("/api/pipeline/export.csv", methods=["GET"])
+def api_pipeline_csv():
+    try:
+        limit = int(request.args.get("limit", "500"))
+    except ValueError:
+        limit = 500
+    try:
+        sync = NotionSync()
+        rows = sync.list_pipeline(limit=limit)
+    except (NotionSyncError, ValueError) as e:
+        return jsonify({"error": str(e)}), 502
+    buf = io.StringIO()
+    cols = ["company", "icp_normalised", "status", "sales_stage", "vertical",
+            "opportunity_type", "owner", "company_url", "next_steps", "last_edited"]
+    writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({k: r.get(k, "") for k in cols})
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=mr-pipeline.csv"},
+    )
+
+
+@app.route("/api/hubspot/sync", methods=["POST"])
+def api_hubspot_sync():
+    """HubSpot write-back. Disabled by default — see hubspot_sync.is_enabled()."""
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "request body required"}), 400
+    company_name = (payload.get("company") or {}).get("name") or "?"
+    if not hubspot_sync.is_enabled():
+        # Don't 401/403 here — 503 is the honest signal: feature unavailable.
+        audit.log_event("hubspot_sync_blocked", actor=_actor(), company=company_name,
+                        reason="HUBSPOT_SYNC_ENABLED!=1 or HUBSPOT_API_KEY missing")
         return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+            "error": "HubSpot sync is disabled",
+            "code": "hubspot_disabled",
+            "status": hubspot_sync.status(),
+            "how_to_enable": "Set HUBSPOT_API_KEY and HUBSPOT_SYNC_ENABLED=1 in Railway variables, then redeploy. Awaiting CEO approval per the product brief.",
+        }), 503
+    try:
+        sync = hubspot_sync.HubSpotSync()
+        result = sync.upsert(payload)
+        audit.log_event(
+            "hubspot_sync",
+            actor=_actor(),
+            company=company_name,
+            action=result.get("action"),
+            company_id=result.get("company_id"),
+            props_written=result.get("props_written"),
+        )
+        return jsonify(result)
+    except (hubspot_sync.HubSpotSyncError, hubspot_sync.HubSpotSyncDisabled) as e:
+        log.warning("HubSpot sync failure: %s", e)
+        audit.log_event("hubspot_sync_failed", actor=_actor(), company=company_name, reason=str(e)[:200])
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/slack/digest", methods=["GET", "POST"])
+def api_slack_digest():
+    """Build (and optionally send) the weekly digest.
+
+    GET  ?send=0  -> returns the payload for preview, no Slack call.
+    POST ?send=1  -> posts to Slack if SLACK_WEBHOOK_URL is set.
+    """
+    send_flag = request.args.get("send", "0") == "1" and request.method == "POST"
+    try:
+        sync = NotionSync()
+        rows = sync.list_pipeline(limit=200)
+    except (NotionSyncError, ValueError) as e:
+        rows = []
+        log.warning("Slack digest: Notion read failed: %s", e)
+    events = audit.read_events(limit=200)
+    payload = slack_digest.build_digest(pipeline_rows=rows, audit_events=events)
+    result: dict = {"payload": payload, "slack_configured": slack_digest.is_configured()}
+    if send_flag:
+        result["send_result"] = slack_digest.send_digest(payload)
+        audit.log_event(
+            "slack_digest_sent",
+            actor=_actor(),
+            sent=result["send_result"]["sent"],
+            reason=result["send_result"]["reason"],
+        )
+    return jsonify(result)
+
+
+@app.route("/api/pipeline", methods=["GET"])
+def api_pipeline():
+    try:
+        limit = int(request.args.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    try:
+        sync = NotionSync()
+        rows = sync.list_pipeline(limit=limit)
+        return jsonify({"rows": rows, "count": len(rows)})
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Pipeline list failure: %s", e)
+        return jsonify({"error": str(e), "rows": []}), 502
+    except Exception as e:
+        log.exception("Pipeline list crash")
+        return jsonify({"error": str(e), "rows": []}), 500
 
 
 if __name__ == "__main__":
-    print("\n" + "=" * 50)
-    print("Massive Rocket Lead Qualification Server")
-    print("=" * 50)
-
-    print(f"\nNotion Status:")
-    print(f"  • notion-client installed: {'Yes' if NOTION_AVAILABLE else 'No'}")
-    print(f"  • NOTION_API_KEY: {'Set' if NOTION_API_KEY else 'Not set'}")
-    print(f"  • NOTION_DATABASE_ID: {'Set' if NOTION_DATABASE_ID else 'Not set'}")
-
-    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
-        print("\n⚠️  To enable Notion sync:")
-        print("  1. Create .env file with NOTION_API_KEY and NOTION_DATABASE_ID")
-        print("  2. Or set environment variables")
-
-    print("\n" + "-" * 50)
-    print("Starting server at http://localhost:5000")
-    print("-" * 50 + "\n")
-
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", "5050"))
+    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_DEBUG") == "1")

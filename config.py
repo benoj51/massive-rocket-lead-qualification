@@ -1,9 +1,22 @@
 """
 Massive Rocket ICP Configuration
 Defines scoring criteria, weights, and thresholds for lead qualification.
+
+Updated 7 April 2026: Recalibrated vertical tiers to MR delivery depth
+and win rate. Strict tech stack scoring (0 for unknown/speculated).
+Added opportunity type classification.
 """
 
-# ICP Scoring Criteria with weights
+# ═══════════════════════════════════════════════════════════════
+# ICP SCORING CRITERIA
+# ═══════════════════════════════════════════════════════════════
+# Each criterion produces a weighted score out of its max.
+# Total max = 51 points, normalised to 10-point scale.
+#
+# IMPORTANT: Vertical and Tech Stack now use direct weighted
+# scores (out of weight*3) to support non-integer tiers.
+# ═══════════════════════════════════════════════════════════════
+
 ICP_CRITERIA = {
     "revenue": {
         "weight": 3,
@@ -25,52 +38,94 @@ ICP_CRITERIA = {
     },
     "vertical": {
         "weight": 3,
-        "scores": {
-            "qsr": 3,
-            "quick service restaurant": 3,
-            "fast food": 3,
-            "retail": 3,
-            "e-commerce": 3,
-            "ecommerce": 3,
-            "travel": 3,
-            "hospitality": 3,
-            "hotel": 3,
-            "airline": 3,
-            "fintech": 3,
-            "financial services": 3,
-            "banking": 3,
-            "delivery": 3,
-            "food delivery": 3,
-            "convenience": 3,
-            "grocery": 2,
-            "telecom": 2,
-            "telecommunications": 2,
-            "media": 2,
-            "entertainment": 2,
-            "gaming": 2,
-            "healthcare": 2,
-            "insurance": 2,
-            "smart home": 2,
-            "iot": 2,
-            "saas": 1,
-            "technology": 1,
-            "software": 1,
-            "manufacturing": 1,
-            "automotive": 1,
-            "education": 0,
-            "government": 0,
-            "nonprofit": 0
+        # Vertical scoring uses DIRECT WEIGHTED scores (out of 9)
+        # calibrated to MR's actual delivery depth and win rate.
+        # Tier 1 (9/9): QSR, Roadside Convenience (Shell, Murphy USA, etc.)
+        # Tier 2 (7/9): Delivery, C-store / Convenience
+        # Tier 3 (6/9): Retail, Travel & Hospitality
+        # Tier 4 (5/9): Fintech, Telecom
+        # Tier 5 (3/9): Everything else
+        "tiers": {
+            # Tier 1: 9/9 -- MR's deepest expertise, highest win rate
+            "qsr": 9,
+            "quick service restaurant": 9,
+            "fast food": 9,
+            "roadside convenience": 9,
+            "fuel retail": 9,
+            "petrol station": 9,
+            "gas station": 9,
+            "truck stop": 9,
+            # Tier 2: 7/9 -- strong delivery track record
+            "delivery": 7,
+            "food delivery": 7,
+            "last mile": 7,
+            "c-store": 7,
+            "convenience store": 7,
+            "convenience": 7,
+            "grocery": 7,
+            # Tier 3: 6/9 -- proven capability, competitive market
+            "retail": 6,
+            "e-commerce": 6,
+            "ecommerce": 6,
+            "travel": 6,
+            "hospitality": 6,
+            "travel & hospitality": 6,
+            "hotel": 6,
+            "airline": 6,
+            # Tier 4: 5/9 -- capable but less differentiated
+            "fintech": 5,
+            "financial services": 5,
+            "banking": 5,
+            "telecom": 5,
+            "telecommunications": 5,
+            # Tier 5: 3/9 -- outside core ICP
+            "media": 3,
+            "entertainment": 3,
+            "gaming": 3,
+            "healthcare": 3,
+            "insurance": 3,
+            "smart home": 3,
+            "iot": 3,
+            "saas": 3,
+            "technology": 3,
+            "software": 3,
+            "manufacturing": 3,
+            "automotive": 3,
+            "education": 3,
+            "government": 3,
+            "nonprofit": 3,
         },
-        "default": 1
+        "default": 3  # Unknown vertical = Tier 5
     },
     "tech_stack": {
         "weight": 3,
-        "scores": {
-            "braze_snowflake": 3,
-            "braze_warehouse": 2,
-            "braze_only": 1,
-            "no_braze": 0
-        }
+        # Tech stack scoring uses DIRECT WEIGHTED scores (out of 9).
+        # STRICT RULE: Unknown/speculated tech stack = 0/9.
+        # Must be CONFIRMED data, not inferred from job ads or guesses.
+        #
+        # Opportunity types map to scores:
+        # Retention (Braze + Snowflake confirmed):    9/9
+        # Retention Light (Braze + other warehouse):  7/9
+        # Migration (SFMC/DBX + warehouse, no Braze): 5/9
+        # Augmentation (Braze only, no warehouse):    4/9
+        # Greenfield (no relevant CEP/CDP):           2/9
+        # Unknown/Speculated:                         0/9
+        "opportunity_scores": {
+            "retention": 9,         # Braze + Snowflake confirmed
+            "retention_light": 7,   # Braze + other warehouse confirmed
+            "migration": 5,         # Competitor stack (SFMC, DBX etc.) + warehouse
+            "augmentation": 4,      # Braze only, no warehouse
+            "greenfield": 2,        # No relevant marketing stack
+            "unknown": 0,           # Not confirmed -- NEVER speculate
+        },
+        # Competitor stacks that indicate migration opportunity
+        "competitor_ceps": [
+            "salesforce marketing cloud", "sfmc", "exacttarget",
+            "adobe campaign", "adobe experience platform", "aep",
+            "oracle responsys", "oracle eloqua",
+            "iterable", "klaviyo", "customer.io", "airship",
+            "leanplum", "onesignal", "pushwoosh",
+        ],
     },
     "complexity": {
         "weight": 2,
@@ -105,14 +160,44 @@ ICP_CRITERIA = {
 # Maximum possible weighted score
 MAX_WEIGHTED_SCORE = sum(c["weight"] * 3 for c in ICP_CRITERIA.values())  # 51 points
 
-# Qualification thresholds (normalized to 10)
+# Qualification thresholds (normalised to 10)
 THRESHOLDS = {
     "qualify_in": 7.0,
     "borderline_low": 5.0,
     "qualify_out": 5.0
 }
 
-# Hard disqualifiers
+# ═══════════════════════════════════════════════════════════════
+# OPPORTUNITY TYPES
+# ═══════════════════════════════════════════════════════════════
+
+OPPORTUNITY_TYPES = {
+    "retention": {
+        "label": "Retention",
+        "description": "Braze already in stack. Help them extract more value.",
+        "play": "Optimisation, personalisation uplift, Hightouch CDP layer"
+    },
+    "migration": {
+        "label": "Migration",
+        "description": "Competitor CEP in stack. Migrate to Braze.",
+        "play": "Migration roadmap, Braze implementation, data layer"
+    },
+    "greenfield": {
+        "label": "Greenfield",
+        "description": "No CEP/CDP in place. Net new implementation.",
+        "play": "Full Braze + Hightouch implementation from scratch"
+    },
+    "augmentation": {
+        "label": "Augmentation",
+        "description": "Braze in stack but needs added services.",
+        "play": "Hightouch CDP, analytics, advanced use cases"
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════
+# HARD DISQUALIFIERS
+# ═══════════════════════════════════════════════════════════════
+
 HARD_DISQUALIFIERS = [
     "No Braze and no plans to adopt",
     "Revenue under $50M",
@@ -124,7 +209,10 @@ HARD_DISQUALIFIERS = [
     "Non-English speaking market only"
 ]
 
-# Target tech stack keywords
+# ═══════════════════════════════════════════════════════════════
+# TECH STACK KEYWORDS
+# ═══════════════════════════════════════════════════════════════
+
 TECH_KEYWORDS = {
     "braze": ["braze", "braze.com"],
     "snowflake": ["snowflake", "snowflakecomputing"],
@@ -132,6 +220,11 @@ TECH_KEYWORDS = {
     "hightouch": ["hightouch", "hightouch.io"],
     "cdp": ["cdp", "customer data platform"],
     "data_warehouse": ["data warehouse", "bigquery", "redshift", "databricks", "synapse"],
+    "competitor_cep": [
+        "salesforce marketing cloud", "sfmc", "exacttarget",
+        "adobe campaign", "adobe experience platform",
+        "oracle responsys", "iterable", "klaviyo", "customer.io",
+    ],
     "amplitude": ["amplitude"],
     "mixpanel": ["mixpanel"],
     "mparticle": ["mparticle"],
@@ -139,24 +232,36 @@ TECH_KEYWORDS = {
     "census": ["census"]
 }
 
-# Target verticals for keyword matching
+# ═══════════════════════════════════════════════════════════════
+# VERTICAL KEYWORDS (for text detection)
+# ═══════════════════════════════════════════════════════════════
+
 VERTICAL_KEYWORDS = {
-    "qsr": ["quick service", "fast food", "restaurant chain", "qsr"],
+    "qsr": ["quick service", "fast food", "restaurant chain", "qsr", "burger", "pizza chain"],
+    "roadside_convenience": [
+        "fuel retail", "gas station", "petrol station", "truck stop",
+        "roadside", "fuel stop", "travel center", "travel centre",
+        "murphy usa", "shell", "bp", "exxon", "chevron", "pilot flying j",
+        "circle k", "wawa", "sheetz", "buc-ee",
+    ],
+    "delivery": ["delivery", "logistics", "food delivery", "last mile", "on-demand"],
+    "convenience": ["convenience store", "c-store", "corner shop", "mini mart"],
     "retail": ["retail", "retailer", "e-commerce", "ecommerce", "online store", "shopping"],
-    "travel": ["travel", "airline", "hotel", "hospitality", "booking", "vacation"],
+    "travel": ["travel", "airline", "hotel", "hospitality", "booking", "vacation", "resort"],
     "fintech": ["fintech", "financial", "banking", "payments", "insurance", "neobank"],
-    "delivery": ["delivery", "logistics", "food delivery", "last mile"],
-    "convenience": ["convenience store", "c-store", "petrol station", "gas station"],
     "telecom": ["telecom", "telecommunications", "mobile carrier", "wireless"],
     "media": ["media", "streaming", "entertainment", "gaming", "content"],
     "healthcare": ["healthcare", "health tech", "medical", "pharma"],
     "smart_home": ["smart home", "iot", "connected home", "home automation"]
 }
 
-# Positive signals for fast-track qualification
+# ═══════════════════════════════════════════════════════════════
+# SIGNALS
+# ═══════════════════════════════════════════════════════════════
+
 POSITIVE_SIGNALS = [
     "Incumbent agency is Merkle or Accenture",
-    "Braze + Snowflake already in stack",
+    "Braze + Snowflake already in stack (confirmed)",
     "Referred by Braze/Hightouch partner team",
     "Active RFP in progress",
     "Budget already allocated",
@@ -165,19 +270,77 @@ POSITIVE_SIGNALS = [
     "Existing Hightouch relationship"
 ]
 
-# Concern indicators
 CONCERN_INDICATORS = [
     "Long-term contract with competing vendor",
     "Recent agency change (last 6 months)",
     "Procurement process over 3 months",
     "Key stakeholder recently left",
     "Budget freeze announced",
-    "Merger/acquisition in progress"
+    "Merger/acquisition in progress",
+    "Tech stack unconfirmed (scored as 0)"
+]
+
+# ═══════════════════════════════════════════════════════════════
+# PARTNER TIERS
+# ═══════════════════════════════════════════════════════════════
+
+PARTNER_TIERS = {
+    "tier_1": ["braze", "hightouch"],
+    "tier_2": ["snowflake"],
+    "ancillary": ["voucherify", "mparticle", "segment", "bigquery", "aws", "azure"]
+}
+
+# ═══════════════════════════════════════════════════════════════
+# SALES STAGES
+# ═══════════════════════════════════════════════════════════════
+
+SALES_STAGES = [
+    "Intro Call",
+    "Discovery",
+    "Technical Fit",
+    "Proposal",
+    "Negotiation",
+    "Legal/Procurement",
+    "Verbal Commit",
+    "Signature"
 ]
 
 # Output formatting
 QUALIFICATION_STATUS = {
-    "qualify_in": "✅ QUALIFY IN",
-    "borderline": "⚠️ BORDERLINE",
-    "qualify_out": "❌ QUALIFY OUT"
+    "qualify_in": "QUALIFY IN",
+    "borderline": "BORDERLINE",
+    "qualify_out": "QUALIFY OUT"
 }
+
+# ═══════════════════════════════════════════════════════════════
+# CONTEXT QUESTIONS (asked before research)
+# ═══════════════════════════════════════════════════════════════
+
+CONTEXT_QUESTIONS = [
+    {
+        "key": "partner_source",
+        "question": "Which partner sourced this deal?",
+        "options": ["Braze", "Hightouch", "Snowflake", "Cold outreach", "Inbound", "Other"]
+    },
+    {
+        "key": "known_stack",
+        "question": "What do we already know about their tech stack?",
+        "options": [
+            "Confirmed Braze + Snowflake",
+            "Confirmed Braze + other warehouse",
+            "Confirmed Braze only",
+            "Confirmed competitor CEP (SFMC, DBX, etc.)",
+            "Nothing confirmed",
+        ]
+    },
+    {
+        "key": "stack_confidence",
+        "question": "How confident is the stack data?",
+        "options": ["Confirmed (partner/prospect told us)", "Inferred (job ads, tech detection)", "Unknown"]
+    },
+    {
+        "key": "partner_relationship",
+        "question": "Prospect's relationship with the sourcing partner?",
+        "options": ["Active customer", "In evaluation", "Lapsed", "No relationship", "Unknown"]
+    }
+]
