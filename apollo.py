@@ -273,7 +273,9 @@ def search_people(
     else:
         raise ValueError("search_people requires org_id or org_domain")
 
-    raw = _post(cfg, "/mixed_people/search", payload)
+    # /mixed_people/search was deprecated mid-2026; the current path is
+    # /mixed_people/api_search. Payload shape is unchanged.
+    raw = _post(cfg, "/mixed_people/api_search", payload)
     people = raw.get("people") or []
     return [_normalise_person(p) for p in people[:limit]]
 

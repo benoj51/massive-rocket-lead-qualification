@@ -249,11 +249,18 @@ def qualify(
     signals = identify_positive_signals(company_data)
     signals.extend(ov.extra_signals or [])
 
-    stakeholders_raw = apollo.search_people(
-        org_id=org.get("apollo_id"),
-        org_domain=org.get("domain") or url,
-        cfg=apollo_cfg,
-    )
+    # Stakeholder discovery is best-effort. Apollo's people endpoints have
+    # been less stable than org enrich (renames, rate limits) — letting a
+    # 502 from people search kill the score would be the wrong tradeoff.
+    try:
+        stakeholders_raw = apollo.search_people(
+            org_id=org.get("apollo_id"),
+            org_domain=org.get("domain") or url,
+            cfg=apollo_cfg,
+        )
+    except apollo.ApolloError as e:
+        stakeholders_raw = []
+        signals.append(f"Stakeholder lookup skipped (Apollo error: {str(e)[:120]})")
     stakeholders = [
         {
             "name": p["name"],
