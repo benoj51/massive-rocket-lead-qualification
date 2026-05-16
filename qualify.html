@@ -453,6 +453,16 @@
       <div id="pb-pricing-table" style="margin-top: 14px;"></div>
     </div>
 
+    <div id="pb-sow-card" class="card" style="display:none;">
+      <h2>Draft SOW</h2>
+      <p class="muted" style="margin: 0 0 10px;">Generate a snapshot Statement of Work from the current Apollo + scope + pricing state. Each click creates a new version. Earlier versions stay accessible.</p>
+      <div class="btn-row">
+        <button id="pb-draft-sow" class="btn" type="button">📝 Draft SOW</button>
+        <span id="pb-sow-status" class="muted"></span>
+      </div>
+      <div id="pb-sow-versions" style="margin-top: 14px;"></div>
+    </div>
+
     <div id="pb-validation-card" class="card" style="display:none;">
       <h2>Delivery validation</h2>
       <div id="pb-validation-banner" style="margin-bottom: 12px;"></div>
@@ -1184,6 +1194,8 @@
       renderStreamChips(); renderScopePanels();
       $('#pb-validation-card').style.display = 'none';
       $('#pb-pricing-card').style.display = 'none';
+      $('#pb-sow-card').style.display = 'none';
+      $('#pb-sow-versions').innerHTML = '';
       return;
     }
     try {
@@ -1201,6 +1213,8 @@
       renderScopePanels();
       statusToggleBindings();
       renderValidationBanner();
+      $('#pb-sow-card').style.display = 'block';
+      await refreshSowVersions();
     } catch (e) {
       toast(`Load failed: ${e.body?.error || e.message}`, 'error');
     }
@@ -1308,6 +1322,86 @@
     `;
   }
 
+  // ---- SOW (Draft Statement of Work) -----------------------------------
+  async function pbDraftSow() {
+    if (!pbState.currentLeadId) { toast('Save and validate scope first', 'error'); return; }
+    const status = pbState.current?.validation_status;
+    if (status !== 'validated') {
+      const proceed = window.confirm(
+        `Scope hasn't been validated by delivery (current: ${status || 'draft'}). ` +
+        `The SOW will include a "needs internal review" banner. Continue?`
+      );
+      if (!proceed) return;
+    }
+    const btn = $('#pb-draft-sow');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Drafting…';
+    try {
+      const data = await jsonFetch(`/api/sow/${encodeURIComponent(pbState.currentLeadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: 12 }),
+      });
+      toast(`SOW v${data.version} drafted`, 'success');
+      $('#pb-sow-status').textContent = `Latest: v${data.version}`;
+      await refreshSowVersions();
+      // Open the new version immediately
+      openSowInNewTab(pbState.currentLeadId, data.version);
+    } catch (e) {
+      toast(`Draft SOW failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false; btn.innerHTML = '📝 Draft SOW';
+    }
+  }
+
+  async function refreshSowVersions() {
+    if (!pbState.currentLeadId) { $('#pb-sow-versions').innerHTML = ''; return; }
+    try {
+      const data = await jsonFetch(`/api/sow/${encodeURIComponent(pbState.currentLeadId)}`);
+      const versions = data.versions || [];
+      const list = $('#pb-sow-versions');
+      if (!versions.length) {
+        list.innerHTML = '<div class="muted" style="font-size:12px;">No SOW versions yet. Click Draft SOW above to create the first one.</div>';
+        return;
+      }
+      list.innerHTML = `
+        <table class="stakeholders">
+          <thead><tr><th>Version</th><th>Generated</th><th>Net</th><th>Scope status</th><th></th></tr></thead>
+          <tbody>
+            ${versions.map(v => `
+              <tr>
+                <td>v${v.version}</td>
+                <td class="muted">${escapeHtml(v.generated_at || '—')}</td>
+                <td>${v.net_usd != null ? '$' + Math.round(v.net_usd).toLocaleString() : '—'}</td>
+                <td>${escapeHtml(v.validation_status_at_generation || '—')}</td>
+                <td style="text-align:right;">
+                  <button class="btn ghost" type="button" data-sow-open="${v.version}" style="padding:4px 10px;font-size:11px;">Open ↗</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      list.querySelectorAll('[data-sow-open]').forEach(b => {
+        b.addEventListener('click', () => openSowInNewTab(pbState.currentLeadId, parseInt(b.dataset.sowOpen, 10)));
+      });
+    } catch (e) { console.warn('sow versions', e); }
+  }
+
+  async function openSowInNewTab(leadId, version) {
+    try {
+      const resp = await fetch(`/api/sow/${encodeURIComponent(leadId)}/v${version}.html`, {
+        headers: authHeaders(),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const html = await resp.text();
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Revoke after a long delay so the new tab finishes loading before we yank the URL.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) { toast(`Open SOW failed: ${e.message}`, 'error'); }
+  }
+
   async function pbTransition(action) {
     if (!pbState.currentLeadId) { toast('Save the scope first', 'error'); return; }
     const notes = $('#pb-val-notes').value.trim();
@@ -1337,6 +1431,7 @@
     $('#pb-validate').addEventListener('click', () => pbTransition('validated'));
     $('#pb-reject').addEventListener('click', () => pbTransition('rejected'));
     $('#pb-reopen').addEventListener('click', () => pbTransition('draft'));
+    $('#pb-draft-sow').addEventListener('click', pbDraftSow);
     $('#btn-qualify').addEventListener('click', () => { state.overrides = {}; runQualify({}); });
     $('#btn-rescore').addEventListener('click', () => runQualify(state.overrides));
     $('#btn-clear').addEventListener('click', () => {

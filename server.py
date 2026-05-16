@@ -41,6 +41,8 @@ import project_store
 import qualify_service
 import scope as scope_module
 import slack_digest
+import sow
+import sow_store
 from notion_sync import NotionSync, NotionSyncError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -472,6 +474,59 @@ def api_pricing_preview():
         return jsonify(quote)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+
+# --- SOW (Statement of Work) ---------------------------------------------
+# Manual trigger only. Each POST snapshots the current state and increments
+# the version. Snapshots are immutable; re-clicking creates a new version.
+
+@app.route("/api/sow/<lead_id>", methods=["POST"])
+def api_sow_create(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    months = int(body.get("months") or 12)
+    discount_first = float(body.get("discount_first_half_pct", 0.15))
+    discount_second = float(body.get("discount_second_half_pct", 0.0))
+    try:
+        snapshot = sow.build_snapshot(
+            lead_id, months=months,
+            discount_first_half=discount_first,
+            discount_second_half=discount_second,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+    version = sow_store.save(lead_id, snapshot)
+    audit.log_event("sow_drafted", actor=_actor(), lead_id=lead_id, version=version,
+                    net_usd=snapshot["sections"]["investment"]["totals"]["net_usd"],
+                    validation_at_generation=snapshot.get("validation_status_at_generation"))
+    return jsonify({
+        "version": version,
+        "snapshot": snapshot,
+        "render_url": f"/api/sow/{lead_id}/v{version}.html",
+        "json_url": f"/api/sow/{lead_id}/v{version}.json",
+    })
+
+
+@app.route("/api/sow/<lead_id>", methods=["GET"])
+def api_sow_list(lead_id: str):
+    return jsonify({"versions": sow_store.list_versions(lead_id)})
+
+
+@app.route("/api/sow/<lead_id>/v<int:version>.json", methods=["GET"])
+def api_sow_get_json(lead_id: str, version: int):
+    snapshot = sow_store.load(lead_id, version)
+    if snapshot is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(snapshot)
+
+
+@app.route("/api/sow/<lead_id>/v<int:version>.html", methods=["GET"])
+def api_sow_get_html(lead_id: str, version: int):
+    snapshot = sow_store.load(lead_id, version)
+    if snapshot is None:
+        return Response("Not found", status=404)
+    html = sow.render_html(snapshot, version)
+    return Response(html, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/api/slack/digest", methods=["GET", "POST"])

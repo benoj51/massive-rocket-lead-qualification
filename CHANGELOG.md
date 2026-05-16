@@ -5,6 +5,70 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-15
+
+Draft SOW renderer. The fourth and final stage of the v0.4 vision —
+button-triggered (never auto-generated), snapshot-based, versioned.
+
+### Added
+- **`sow.py`** — `build_snapshot(lead_id)` freezes Apollo + scope + pricing
+  into an immutable dict; `render_html(snapshot, version)` emits a
+  print-friendly A4-styled HTML page with a built-in "Print / Save as PDF"
+  toolbar button.
+- **`sow_store.py`** — versioned per-lead storage at
+  `cache/sows/<lead_id>/v<n>.json`. Versions auto-increment; snapshots are
+  immutable (no overwrite path).
+- **SOW endpoints:**
+  - `POST /api/sow/<lead_id>` — generate a new version. Returns the
+    snapshot, version number, render URL, and json URL.
+  - `GET /api/sow/<lead_id>` — list all versions for a lead (newest first).
+  - `GET /api/sow/<lead_id>/v<n>.json` — get a specific snapshot.
+  - `GET /api/sow/<lead_id>/v<n>.html` — printable HTML rendering.
+- **Project Build UI: "Draft SOW" section** —
+  - Big button that POSTs to `/api/sow/<lead>`. Disabled while drafting.
+  - Confirmation prompt if scope hasn't been validated by delivery yet
+    (warns; doesn't block).
+  - Versions table below with Open buttons. Clicking Open fetches the HTML
+    with auth, converts to a blob URL, and opens in a new tab (keeps the
+    token out of browser history).
+- Every draft writes an audit event (`sow_drafted`) capturing version
+  number, net total, and scope validation status at generation time.
+
+### Design contract for SOWs
+- **Manual trigger only.** No auto-generation. AE explicitly clicks
+  "Draft SOW" each time.
+- **Snapshot in time.** Once a version is saved, changes to scope or
+  pricing don't propagate. To refresh, generate a new version.
+- **Immutable versions.** Each version is a separate file; the latest
+  is the highest integer in the lead's directory.
+- **Internal review banner.** If scope isn't `validated` at the time of
+  drafting, the rendered SOW includes a red "needs internal review"
+  notice at the top.
+
+### SOW template structure
+1. Cover (company, version, generated timestamp)
+2. Executive Summary
+3. Engagement Overview (background, industry, region, revenue, headcount)
+4. Scope of Work — per stream, lists only Qualified + Qualifying criteria
+   (Unqualified items are surfaced as "open questions for next call")
+5. Team & Phases (FTE × phase matrix from pricing)
+6. Investment (gross / discount / net + monthly schedule)
+7. Assumptions (5-line boilerplate)
+8. Out of Scope (4-line boilerplate)
+9. Term & Acceptance with dual signature blocks
+
+### Operational notes
+- SOW files live on ephemeral storage. Mount a Railway volume at `cache/`
+  to keep history across deploys (same fix as audit log + project store +
+  criteria store).
+- PDF generation uses the browser's print dialog rather than a server-
+  side rendering library, so no new dependencies and the AE can preview
+  before saving.
+
+### Tests
+- 118 total (up from 102). New: 5 store tests, 4 builder tests, 7
+  endpoint tests.
+
 ## [0.4.1] — 2026-05-15
 
 Editable scope criteria. The qualification framework is no longer a deploy
