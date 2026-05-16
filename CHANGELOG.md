@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-05-15
+
+Full MEDDPICC (8 criteria), pasted-notes capture, and AI-driven
+extraction so the AE doesn't fill 8 fields by hand.
+
+### Added
+- **MEDDPICC expanded to 8 criteria.** Paper Process and Competition
+  added to the qualification card. The original 6 (Metrics, Economic
+  Buyer, Decision Criteria, Decision Process, Identify Pain, Champion)
+  unchanged. All 8 render in the Notion page body; the existing 6
+  Notion *columns* still get written — Paper Process and Competition
+  ride in the page body only, so no Notion schema change needed.
+- **Notes & Transcripts section** in Qualify view (card "4 ·"). Big
+  textarea for pasting raw call notes / Gong / Fathom / Otter transcripts.
+- **Project Scope section** (card "6 ·"). One-paragraph freeform summary
+  of what the engagement actually is. Auto-fillable from notes; different
+  from the deep Project Build intake.
+- **`POST /api/lead/extract`** — pipes notes through Anthropic
+  (claude-haiku-4-5) and returns suggested MEDDPICC fills + project
+  scope summary. The endpoint:
+  - Requires `ANTHROPIC_API_KEY` env var (503 if absent)
+  - Respects "confirmed" MEDDPICC entries (won't overwrite)
+  - Returns null for fields it can't ground in the text (no
+    hallucination)
+- **"✨ Extract MEDDPICC + scope from notes" button** in the Notes card.
+  Merges AI suggestions into the current state, upgrading
+  "not_started" entries to "in_progress" so the AE knows to review.
+- Every extraction writes an audit event (`lead_notes_extracted`).
+- Notes + Project Scope both flow to Notion on push as page-body blocks
+  (Notes split at paragraph boundaries to respect Notion's per-block
+  text limit).
+
+### Changed
+- Section numbering in the Qualify view: Notes is now "4 ·", MEDDPICC
+  "5 ·", Project Scope "6 ·", Fit Analysis "7 ·", Push to Notion "8 ·".
+- `qualify()` payload now includes `notes: ""` and `project_scope: ""`
+  fields by default. Existing callers ignore the new keys.
+
+### Notes for the Notion DB
+- The MEDDICC Score column still reflects the original 6 criteria only
+  (max 18). To reflect all 8, either rename to "MEDDPICC Score" and add
+  Paper Process + Competition columns, or accept the current 6-of-8 cap.
+  We're not auto-adding properties to your DB without explicit consent.
+- Page body now carries all 8 MEDDPICC entries + Project Scope +
+  Notes/Transcript as separate sections.
+
+### Tests
+- 128 total (+10). New: MEDDPICC 8-key shape, notes/scope page block
+  rendering, text chunking, extract endpoint contract under
+  no-Anthropic-key conditions.
+
 ## [0.5.0] — 2026-05-15
 
 Draft SOW renderer. The fourth and final stage of the v0.4 vision —

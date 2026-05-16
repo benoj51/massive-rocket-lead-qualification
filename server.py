@@ -159,6 +159,28 @@ def api_qualify():
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+@app.route("/api/lead/extract", methods=["POST"])
+def api_lead_extract():
+    """Run Anthropic over notes/transcripts and return MEDDPICC + scope fills."""
+    body = request.get_json(silent=True) or {}
+    notes = (body.get("notes") or "").strip()
+    if not notes:
+        return jsonify({"error": "notes required"}), 400
+    if not ai_summary.is_configured():
+        return jsonify({"error": "AI extraction unavailable (ANTHROPIC_API_KEY not set)"}), 503
+    company_name = (body.get("company_name") or "").strip() or None
+    current = body.get("current_meddpicc") or {}
+    result = ai_summary.extract_from_notes(notes, company_name=company_name,
+                                           current_meddpicc=current)
+    if result is None:
+        return jsonify({"error": "extraction failed; check server logs"}), 502
+    audit.log_event("lead_notes_extracted", actor=_actor(),
+                    company=company_name or "",
+                    meddpicc_filled=len(result.get("meddpicc") or {}),
+                    project_scope_set=bool(result.get("project_scope")))
+    return jsonify(result)
+
+
 @app.route("/api/notion/sync", methods=["POST"])
 def api_notion_sync():
     payload = request.get_json(silent=True)

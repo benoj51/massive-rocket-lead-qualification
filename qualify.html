@@ -307,12 +307,28 @@
       </div>
 
       <div class="card">
-        <h2>4 · MEDDPICC</h2>
+        <h2>4 · Notes &amp; Transcripts</h2>
+        <p class="muted" style="margin: 0 0 10px;">Paste call notes, Gong/Fathom transcripts, or any context. Click ✨ to extract MEDDPICC entries and a project scope summary from the text.</p>
+        <textarea id="notes-text" rows="6" placeholder="Paste your raw notes here…" style="font-family: var(--mono); font-size: 12px;"></textarea>
+        <div class="btn-row" style="margin-top: 10px;">
+          <button id="btn-extract-notes" class="btn ghost" type="button">✨ Extract MEDDPICC + scope from notes</button>
+          <span id="extract-status" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>5 · MEDDPICC</h2>
         <div class="meddicc" id="meddicc"></div>
       </div>
 
       <div class="card">
-        <h2>5 · Fit Analysis</h2>
+        <h2>6 · Project Scope</h2>
+        <p class="muted" style="margin: 0 0 10px;">One-paragraph summary of what the engagement is. Auto-fillable from notes above. The detailed scope intake lives in Project Build.</p>
+        <textarea id="project-scope-text" rows="3" placeholder="e.g. CRM Build migration from SFMC to Braze + Hightouch CDP layer, ~25 campaigns, 4 markets."></textarea>
+      </div>
+
+      <div class="card">
+        <h2>7 · Fit Analysis</h2>
         <h3>Summary <span id="fit-source" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:11px;"></span></h3>
         <p id="fit-summary" style="margin: 0 0 12px;"></p>
 
@@ -338,7 +354,7 @@
       </div>
 
       <div class="card">
-        <h2>6 · Push to Notion</h2>
+        <h2>8 · Push to Notion</h2>
         <div class="row row-2" style="margin-bottom: 12px;">
           <div>
             <label>Sales Stage</label>
@@ -534,9 +550,12 @@
     { key: 'economic_buyer',    label: 'Economic Buyer',    hint: 'Who signs off on budget.' },
     { key: 'decision_criteria', label: 'Decision Criteria', hint: "What they'll evaluate us on." },
     { key: 'decision_process',  label: 'Decision Process',  hint: 'Steps + stakeholders to signature.' },
+    { key: 'paper_process',     label: 'Paper Process',     hint: 'Procurement, legal, contracting steps.' },
     { key: 'identify_pain',     label: 'Identify Pain',     hint: 'Core pain driving the initiative.' },
     { key: 'champion',          label: 'Champion',          hint: 'Internal advocate.' },
+    { key: 'competition',       label: 'Competition',       hint: 'Who else they are evaluating.' },
   ];
+  const MEDDPICC_KEYS = MEDDICC_ROWS.map(r => r.key);
 
   // ---- Utilities --------------------------------------------------------
   const $ = (sel) => document.querySelector(sel);
@@ -678,6 +697,68 @@
     renderFit(result);
     renderStakeholders(result);
     renderStubBanner(result);
+    // Restore notes + project scope if persisted on the result
+    $('#notes-text').value = result.notes || '';
+    $('#project-scope-text').value = result.project_scope || '';
+  }
+
+  function bindNotesAndScopeSync() {
+    $('#notes-text').addEventListener('input', (e) => {
+      if (state.currentResult) state.currentResult.notes = e.target.value;
+    });
+    $('#project-scope-text').addEventListener('input', (e) => {
+      if (state.currentResult) state.currentResult.project_scope = e.target.value;
+    });
+  }
+
+  async function extractFromNotes() {
+    const notes = $('#notes-text').value.trim();
+    if (!notes) { toast('Paste some notes first.', 'error'); return; }
+    if (!state.currentResult) { toast('Qualify a lead first so the AI has context.', 'error'); return; }
+    const btn = $('#btn-extract-notes');
+    const original = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Extracting…';
+    $('#extract-status').textContent = '';
+    try {
+      const company = state.currentResult.company || {};
+      const data = await jsonFetch('/api/lead/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes,
+          company_name: company.name,
+          url: company.url,
+          current_meddpicc: state.currentResult.meddicc || {},
+        }),
+      });
+      // Merge extracted MEDDPICC into state, keeping any AE-confirmed entries
+      const extracted = data.meddpicc || {};
+      for (const [key, suggestion] of Object.entries(extracted)) {
+        const existing = state.currentResult.meddicc?.[key] || {};
+        // Don't overwrite Confirmed entries; only fill empty ones or upgrade not_started
+        if (existing.status === 'confirmed') continue;
+        state.currentResult.meddicc[key] = {
+          value: suggestion.value || existing.value || '',
+          status: existing.status === 'not_started' || !existing.status ? 'in_progress' : existing.status,
+        };
+      }
+      if (data.project_scope) {
+        // Only auto-fill if user hasn't typed anything
+        const current = $('#project-scope-text').value.trim();
+        if (!current) {
+          $('#project-scope-text').value = data.project_scope;
+          state.currentResult.project_scope = data.project_scope;
+        }
+      }
+      renderMeddicc(state.currentResult);
+      const filled = Object.keys(extracted).length;
+      $('#extract-status').textContent = `Filled ${filled} MEDDPICC entries${data.project_scope ? ' + scope summary' : ''}`;
+      toast(`Extracted ${filled} MEDDPICC entries${data.project_scope ? ' + scope summary' : ''}`, 'success');
+    } catch (e) {
+      toast(`Extraction failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false; btn.innerHTML = original;
+    }
   }
 
   function renderStubBanner(result) {
@@ -1440,6 +1521,8 @@
       $('#results').style.display = 'none';
     });
     $('#btn-notion').addEventListener('click', pushToNotion);
+    $('#btn-extract-notes').addEventListener('click', extractFromNotes);
+    bindNotesAndScopeSync();
     $('#btn-refresh-pipeline').addEventListener('click', refreshPipeline);
     $('#btn-export-csv').addEventListener('click', async () => {
       // Bearer auth requires a fetch + blob roundtrip rather than a plain <a download>.

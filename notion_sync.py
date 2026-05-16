@@ -179,8 +179,10 @@ _MEDDICC_FIELDS = (
     ("economic_buyer",    "Economic Buyer"),
     ("decision_criteria", "Decision Criteria"),
     ("decision_process",  "Decision Process"),
+    ("paper_process",     "Paper Process"),
     ("identify_pain",     "Identify Pain"),
     ("champion",          "Champion"),
+    ("competition",       "Competition"),
 )
 _STATUS_ICON = {"not_started": "○", "in_progress": "◐", "confirmed": "●"}
 
@@ -279,7 +281,50 @@ def _page_blocks(payload: dict) -> list[dict]:
     # MEDDICC notes (only if the AE filled anything in).
     blocks.extend(_meddicc_blocks(payload))
 
+    # Project scope summary
+    project_scope = (payload.get("project_scope") or "").strip()
+    if project_scope:
+        blocks.append({"object": "block", "type": "heading_3",
+                       "heading_3": {"rich_text": _rich_text("Project Scope")}})
+        blocks.append({"object": "block", "type": "paragraph",
+                       "paragraph": {"rich_text": _rich_text(project_scope)}})
+
+    # Notes / transcript
+    notes = (payload.get("notes") or "").strip()
+    if notes:
+        blocks.append({"object": "block", "type": "heading_3",
+                       "heading_3": {"rich_text": _rich_text("Notes & Transcript")}})
+        # Notion paragraphs cap at ~2000 chars per rich_text node, so split
+        # long notes into multiple paragraphs.
+        for chunk in _chunk_text(notes, 1900):
+            blocks.append({"object": "block", "type": "paragraph",
+                           "paragraph": {"rich_text": _rich_text(chunk, limit=1900)}})
+
     return blocks
+
+
+def _chunk_text(text: str, size: int) -> list[str]:
+    """Split text into roughly `size`-char chunks at paragraph boundaries where possible."""
+    if len(text) <= size:
+        return [text]
+    chunks: list[str] = []
+    buf = ""
+    for paragraph in text.split("\n\n"):
+        if len(buf) + len(paragraph) + 2 > size and buf:
+            chunks.append(buf.strip())
+            buf = paragraph
+        else:
+            buf = (buf + "\n\n" + paragraph) if buf else paragraph
+    if buf.strip():
+        chunks.append(buf.strip())
+    # If a single paragraph was still too long, hard-cut it.
+    out: list[str] = []
+    for c in chunks:
+        while len(c) > size:
+            out.append(c[:size])
+            c = c[size:]
+        out.append(c)
+    return out
 
 
 # --- Pipeline view helper --------------------------------------------------

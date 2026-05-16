@@ -94,3 +94,114 @@ def generate_fit_summary(payload: dict) -> str | None:
 
 def is_configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+
+# ---------------------------------------------------------------------------
+# Note extraction: turn raw call notes / transcripts into structured fills
+# ---------------------------------------------------------------------------
+
+_MEDDPICC_KEYS = [
+    "metrics", "economic_buyer", "decision_criteria", "decision_process",
+    "paper_process", "identify_pain", "champion", "competition",
+]
+
+_EXTRACT_SYSTEM_PROMPT = """You read raw sales call notes or transcripts and
+extract structured qualification data for an internal CRM agency (Massive
+Rocket). You return ONE JSON object only, no preamble, no markdown fences.
+
+Schema:
+{
+  "meddpicc": {
+    "metrics":           {"value": "<short phrase or null>"},
+    "economic_buyer":    {"value": "<name + title, or null>"},
+    "decision_criteria": {"value": "<comma-separated criteria, or null>"},
+    "decision_process":  {"value": "<short summary, or null>"},
+    "paper_process":     {"value": "<procurement/legal notes, or null>"},
+    "identify_pain":     {"value": "<core pain, or null>"},
+    "champion":          {"value": "<name + title, or null>"},
+    "competition":       {"value": "<vendors mentioned, or null>"}
+  },
+  "project_scope": "<one short paragraph summarising what MR would deliver, or null>"
+}
+
+Rules:
+- Only fill values you can ground in the text. Use null for everything else.
+- Keep values brief — phrases, not paragraphs.
+- No marketing tone. No em-dashes. Plain English.
+- If the text doesn't mention something, return null. Don't guess.
+"""
+
+
+def extract_from_notes(notes: str, *, company_name: str | None = None,
+                       current_meddpicc: dict | None = None) -> dict | None:
+    """Return {meddpicc: {...}, project_scope: str} extracted from the notes.
+
+    Returns None if Anthropic isn't configured or the call fails.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        log.warning("anthropic SDK not installed; extraction unavailable.")
+        return None
+
+    notes = (notes or "").strip()
+    if not notes:
+        return None
+    if len(notes) > 60_000:
+        notes = notes[:60_000]
+
+    context_prefix = ""
+    if company_name:
+        context_prefix += f"Company: {company_name}\n"
+    if current_meddpicc:
+        # Show the AE's existing entries so the model doesn't overwrite confirmed ones.
+        confirmed = {k: v for k, v in current_meddpicc.items()
+                     if isinstance(v, dict) and v.get("status") == "confirmed" and v.get("value")}
+        if confirmed:
+            context_prefix += "Already confirmed (do not overwrite):\n"
+            for k, v in confirmed.items():
+                context_prefix += f"  {k}: {v.get('value')}\n"
+
+    user_msg = f"{context_prefix}\nNotes:\n{notes}"
+
+    try:
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_DEFAULT_MODEL,
+            max_tokens=900,
+            system=_EXTRACT_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip()
+        if text.startswith("```"):
+            # Strip a stray code fence if the model added one
+            text = text.strip("`").strip()
+            if text.lower().startswith("json"):
+                text = text[4:].lstrip()
+        data = json.loads(text)
+    except Exception as e:
+        log.warning("Note extraction call failed: %s", e)
+        return None
+
+    # Normalise + filter to known keys only.
+    meddpicc_out: dict[str, dict[str, Any]] = {}
+    for k in _MEDDPICC_KEYS:
+        entry = (data.get("meddpicc") or {}).get(k) or {}
+        value = entry.get("value")
+        if value and value != "null":
+            meddpicc_out[k] = {"value": str(value).strip()}
+    project_scope = data.get("project_scope")
+    if project_scope and str(project_scope).lower() != "null":
+        project_scope = str(project_scope).strip()
+    else:
+        project_scope = None
+
+    return {"meddpicc": meddpicc_out, "project_scope": project_scope}

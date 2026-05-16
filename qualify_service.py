@@ -333,14 +333,19 @@ def qualify(
         },
         "stakeholders": stakeholders,
         "meddicc": {
-            # Empty by default — UI lets the AE fill these in and PATCH to Notion.
+            # MEDDPICC — 8 criteria. Empty by default; UI fills in.
+            # Keyed as `meddicc` for backward payload-shape compatibility.
             "metrics": {"value": "", "status": "not_started"},
             "economic_buyer": {"value": "", "status": "not_started"},
             "decision_criteria": {"value": "", "status": "not_started"},
             "decision_process": {"value": "", "status": "not_started"},
+            "paper_process": {"value": "", "status": "not_started"},
             "identify_pain": {"value": "", "status": "not_started"},
             "champion": {"value": "", "status": "not_started"},
+            "competition": {"value": "", "status": "not_started"},
         },
+        "notes": "",
+        "project_scope": "",
     }
 
 
