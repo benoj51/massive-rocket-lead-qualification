@@ -349,6 +349,39 @@ def _extract_text(prop: dict | None) -> str:
     return ""
 
 
+def _page_to_detail(page: dict) -> dict:
+    """Flatten a Notion page into a compact dict for the edit drawer.
+    Returns every field the UI shows, plus metadata."""
+    props = page.get("properties") or {}
+    return {
+        "id": page.get("id"),
+        "url": page.get("url"),
+        "last_edited": page.get("last_edited_time"),
+        "created": page.get("created_time"),
+        "company": _extract_text(props.get("Company")),
+        "company_url": _extract_text(props.get("URL")),
+        "icp_score": props.get("ICP Score", {}).get("number"),
+        "icp_normalised": props.get("ICP Normalised", {}).get("number"),
+        "status": _extract_text(props.get("Status")),
+        "sales_stage": _extract_text(props.get("Sales Stage")),
+        "vertical": _extract_text(props.get("Vertical")),
+        "opportunity_type": _extract_text(props.get("Opportunity Type")),
+        "stack_confidence": _extract_text(props.get("Stack Confidence")),
+        "owner": _extract_text(props.get("Owner")),
+        "revenue": _extract_text(props.get("Revenue")),
+        "employees": _extract_text(props.get("Employees")),
+        "tech_stack": _extract_text(props.get("Tech Stack")),
+        "region": _extract_text(props.get("Region")),
+        "deal_size": _extract_text(props.get("Deal Size")),
+        "complexity": _extract_text(props.get("Complexity")),
+        "fit_summary": _extract_text(props.get("Fit Summary")),
+        "next_steps": _extract_text(props.get("Next Steps")),
+        "positive_signals": _extract_text(props.get("Positive Signals")),
+        "disqualifiers": _extract_text(props.get("Disqualifiers")),
+        "qualified_date": _extract_text(props.get("Qualified Date")),
+    }
+
+
 def _row_from_page(page: dict) -> dict:
     props = page.get("properties") or {}
     return {
@@ -525,6 +558,80 @@ class NotionSync:
         body = {"page_size": min(limit, 100), "sorts": [{"property": "ICP Normalised", "direction": "descending"}]}
         data = self._query(body)
         return [_row_from_page(p) for p in (data.get("results") or [])]
+
+    def get_page(self, page_id: str) -> dict:
+        """Fetch a single page and return a normalized, edit-friendly dict.
+        Distinct from list_pipeline rows: includes all editable fields."""
+        page = self._request("GET", f"/pages/{page_id}")
+        return _page_to_detail(page)
+
+    def update_page(self, page_id: str, edits: dict) -> dict:
+        """PATCH editable fields on a tracker page.
+
+        `edits` is a flat dict matching the keys returned by get_page (company,
+        url, status, sales_stage, vertical, opportunity_type, owner,
+        stack_confidence, revenue, employees, tech_stack, region, deal_size,
+        complexity, fit_summary, next_steps, positive_signals, disqualifiers).
+        Unknown keys are ignored. Empty strings clear the property.
+        """
+        props: dict[str, Any] = {}
+        # Title
+        if "company" in edits:
+            props["Company"] = {"title": _title(edits["company"])}
+        # URL
+        if "url" in edits:
+            props["URL"] = {"url": (edits["url"] or None)}
+        # Selects — None or empty string means leave alone; explicit "" means clear
+        for key, prop_name, mapping in (
+            ("status", "Status", {"qualify_in": "Qualified", "borderline": "Researching",
+                                  "qualify_out": "Disqualified",
+                                  # Accept raw select names too
+                                  "Qualified": "Qualified", "Researching": "Researching",
+                                  "Disqualified": "Disqualified", "New": "New",
+                                  "On Hold": "On Hold"}),
+            ("sales_stage", "Sales Stage", None),
+            ("vertical", "Vertical", None),
+            ("opportunity_type", "Opportunity Type",
+                {"retention": "Retention", "retention_light": "Retention Light",
+                 "migration": "Migration", "augmentation": "Augmentation",
+                 "greenfield": "Greenfield", "unknown": "Unknown",
+                 "Retention": "Retention", "Retention Light": "Retention Light",
+                 "Migration": "Migration", "Augmentation": "Augmentation",
+                 "Greenfield": "Greenfield", "Unknown": "Unknown"}),
+            ("owner", "Owner", None),
+            ("stack_confidence", "Stack Confidence", _STACK_CONFIDENCE_MAP),
+        ):
+            if key not in edits:
+                continue
+            value = edits[key]
+            if value is None or value == "":
+                props[prop_name] = {"select": None}
+            else:
+                mapped = mapping.get(value, value) if mapping else value
+                props[prop_name] = {"select": {"name": mapped}}
+        # Rich text fields
+        for key, prop_name in (
+            ("revenue", "Revenue"),
+            ("employees", "Employees"),
+            ("tech_stack", "Tech Stack"),
+            ("region", "Region"),
+            ("deal_size", "Deal Size"),
+            ("complexity", "Complexity"),
+            ("fit_summary", "Fit Summary"),
+            ("next_steps", "Next Steps"),
+            ("positive_signals", "Positive Signals"),
+            ("disqualifiers", "Disqualifiers"),
+        ):
+            if key in edits:
+                props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}
+
+        if not props:
+            return {"updated": False, "reason": "no editable fields supplied"}
+
+        page = self._request("PATCH", f"/pages/{page_id}",
+                             json_body={"properties": props})
+        return {"updated": True, "page_id": page.get("id"), "url": page.get("url"),
+                "lead": _page_to_detail(page)}
 
 
 def sync_to_notion(payload: dict) -> dict:

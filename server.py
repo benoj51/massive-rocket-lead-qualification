@@ -221,6 +221,35 @@ def api_audit():
     return jsonify({"rows": rows, "count": len(rows), "summary": audit.summarise(rows)})
 
 
+@app.route("/api/lead/<page_id>", methods=["GET"])
+def api_lead_get(page_id: str):
+    """Fetch a single lead's full record for the edit drawer."""
+    try:
+        sync = NotionSync()
+        lead = sync.get_page(page_id)
+        return jsonify({"lead": lead})
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Lead fetch failed: %s", e)
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/lead/<page_id>", methods=["PATCH"])
+def api_lead_update(page_id: str):
+    """Update editable fields on a lead. Body keys match the get_page shape."""
+    body = request.get_json(silent=True) or {}
+    if not body:
+        return jsonify({"error": "no edits supplied"}), 400
+    try:
+        sync = NotionSync()
+        result = sync.update_page(page_id, body)
+        audit.log_event("lead_updated", actor=_actor(), page_id=page_id,
+                        fields=sorted([k for k in body.keys() if k != "id"]))
+        return jsonify(result)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Lead update failed: %s", e)
+        return jsonify({"error": str(e)}), 502
+
+
 @app.route("/api/pipeline/export.csv", methods=["GET"])
 def api_pipeline_csv():
     try:

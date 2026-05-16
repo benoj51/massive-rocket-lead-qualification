@@ -5,6 +5,40 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] — 2026-05-15
+
+Click any row in Pipeline → edit the lead in-platform. No more
+context-switching to Notion just to bump a status.
+
+### Added
+- **Lead Detail drawer** — sliding right-side panel triggered by
+  clicking any Pipeline row. Shows every editable field grouped into
+  Identity / Qualification / Discovered / Notes sections.
+- **`notion_sync.get_page(page_id)`** — fetches a single page and
+  flattens Notion's verbose shape into an edit-friendly dict.
+- **`notion_sync.update_page(page_id, edits)`** — PATCHes editable
+  fields. Accepts flat dict matching get_page's keys. Selects
+  (Status, Sales Stage, Vertical, Opportunity Type, Owner, Stack
+  Confidence) and rich-text fields all supported. Sending `""`
+  clears the property.
+- **`GET /api/lead/<page_id>`** — full record for the drawer.
+- **`PATCH /api/lead/<page_id>`** — apply edits. Only changed fields
+  are sent (UI diffs against original) so we don't clobber unrelated
+  properties.
+- Every update writes an audit event (`lead_updated`) with the list
+  of changed fields.
+- "Open in Notion ↗" link in the drawer header for the cases where
+  Notion's UI is needed (rich blocks, comments, etc.).
+
+### Changed
+- Pipeline rows are now click-to-open-drawer instead of click-to-open-Notion.
+  ICP Score remains read-only in the drawer (it's a computed output).
+
+### Tests
+- 136 total (+8). Covers Notion page flattening, property-shape
+  construction for updates, clearing selects/rich-text, no-op when
+  there are no edits, and the endpoint contract under no-Notion-key.
+
 ## [0.5.1] — 2026-05-15
 
 Full MEDDPICC (8 criteria), pasted-notes capture, and AI-driven
