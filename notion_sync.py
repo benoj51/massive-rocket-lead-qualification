@@ -364,18 +364,39 @@ class NotionSync:
         """Look up the parent DB id for our data source, cache on self."""
         if self.database_id:
             return self.database_id
-        ds = self._request("GET", f"/data_sources/{self.data_source_id}")
-        parent = ds.get("parent") or {}
-        db_id = parent.get("database_id")
-        if not db_id:
-            raise NotionSyncError("Data source has no parent database_id; check the data source ID is correct.")
-        self.database_id = db_id
-        return db_id
+        try:
+            ds = self._request("GET", f"/data_sources/{self.data_source_id}")
+            parent = ds.get("parent") or {}
+            db_id = parent.get("database_id")
+            if db_id:
+                self.database_id = db_id
+                return db_id
+        except NotionSyncError:
+            pass
+        # The "data source ID" is actually a database ID — common when the
+        # user pulls it from the Notion URL. Treat it as such going forward.
+        self.database_id = self.data_source_id
+        self.data_source_id = ""
+        return self.database_id
 
     def _parent(self) -> dict:
         if self.data_source_id:
             return {"type": "data_source_id", "data_source_id": self.data_source_id}
         return {"database_id": self.database_id}
+
+    def _query(self, body: dict) -> dict:
+        """Query whichever endpoint we have. Falls back transparently if
+        NOTION_DATA_SOURCE_ID is actually a database_id (common mistake)."""
+        if self.data_source_id:
+            try:
+                return self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
+            except NotionSyncError as e:
+                if "404" not in str(e):
+                    raise
+                # ID isn't a data source. Try it as a database_id.
+                self.database_id = self.data_source_id
+                self.data_source_id = ""
+        return self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
 
     def _find_existing(self, company_name: str, company_url: str) -> dict | None:
         if not (company_name or company_url):
@@ -386,11 +407,7 @@ class NotionSync:
         if company_url:
             filters.append({"property": "URL", "url": {"equals": company_url}})
         body = {"filter": {"or": filters}, "page_size": 1} if len(filters) > 1 else {"filter": filters[0], "page_size": 1}
-
-        if self.data_source_id:
-            data = self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
-        else:
-            data = self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
+        data = self._query(body)
         results = data.get("results") or []
         return results[0] if results else None
 
@@ -435,10 +452,7 @@ class NotionSync:
     def list_pipeline(self, *, limit: int = 50) -> list[dict]:
         """Return pipeline rows for the UI's Pipeline view."""
         body = {"page_size": min(limit, 100), "sorts": [{"property": "ICP Normalised", "direction": "descending"}]}
-        if self.data_source_id:
-            data = self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
-        else:
-            data = self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
+        data = self._query(body)
         return [_row_from_page(p) for p in (data.get("results") or [])]
 
 
