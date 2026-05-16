@@ -474,6 +474,12 @@
         <button class="chip" data-filter="borderline" type="button">Borderline</button>
         <button class="chip" data-filter="qualify_out" type="button">Qualified Out</button>
         <button class="chip" data-filter="active" type="button">Active only</button>
+        <select id="pipe-filter-source" style="margin-left: 12px; padding: 5px 10px; font-size: 12px; min-width: 150px;">
+          <option value="">All sources</option>
+        </select>
+        <select id="pipe-filter-sourced-for" style="padding: 5px 10px; font-size: 12px; min-width: 170px;">
+          <option value="">Any sourced-for</option>
+        </select>
         <button class="btn ghost" id="btn-export-csv" type="button" style="margin-left:auto;">⇣ Export CSV</button>
         <button class="btn ghost" id="btn-refresh-pipeline" type="button">↻ Refresh</button>
       </div>
@@ -766,7 +772,7 @@
     currentResult: null,     // last qualify() payload
     overrides: {},           // user edits to discovered fields
     chart: null,
-    pipeline: { rows: [], filter: 'all', sort: { key: 'icp_normalised', dir: 'desc' } },
+    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', sort: { key: 'icp_normalised', dir: 'desc' } },
     authRequired: null,      // unknown until /api/health checked
     authToken: null,
   };
@@ -1234,6 +1240,7 @@
     try {
       const data = await jsonFetch('/api/pipeline?limit=100');
       state.pipeline.rows = data.rows || [];
+      populatePipelineFilterOptions();
       renderPipeline();
     } catch (e) {
       console.error(e);
@@ -1362,6 +1369,26 @@
     }
   }
 
+  function populatePipelineFilterOptions() {
+    // Build source + sourced-for option lists from the current pipeline rows
+    const sources = new Set();
+    const sourcedFor = new Set();
+    for (const r of state.pipeline.rows) {
+      if (r.opportunity_source) sources.add(r.opportunity_source);
+      for (const p of (r.sourced_for_partners || [])) sourcedFor.add(p);
+    }
+    const srcSel = $('#pipe-filter-source');
+    const currentSrc = srcSel.value;
+    srcSel.innerHTML = '<option value="">All sources</option>' +
+      Array.from(sources).sort().map(s => `<option value="${escapeAttr(s)}">${escapeHtml(s)}</option>`).join('');
+    srcSel.value = currentSrc;
+    const sfSel = $('#pipe-filter-sourced-for');
+    const currentSf = sfSel.value;
+    sfSel.innerHTML = '<option value="">Any sourced-for</option>' +
+      Array.from(sourcedFor).sort().map(s => `<option value="${escapeAttr(s)}">${escapeHtml(s)}</option>`).join('');
+    sfSel.value = currentSf;
+  }
+
   function renderPipeline() {
     const f = state.pipeline.filter;
     let rows = [...state.pipeline.rows];
@@ -1369,6 +1396,13 @@
     else if (f === 'qualify_in') rows = rows.filter(r => r.status === 'Qualified');
     else if (f === 'borderline') rows = rows.filter(r => r.status === 'Researching');
     else if (f === 'qualify_out') rows = rows.filter(r => r.status === 'Disqualified');
+    // Source / sourced-for filters
+    if (state.pipeline.sourceFilter) {
+      rows = rows.filter(r => r.opportunity_source === state.pipeline.sourceFilter);
+    }
+    if (state.pipeline.sourcedForFilter) {
+      rows = rows.filter(r => (r.sourced_for_partners || []).includes(state.pipeline.sourcedForFilter));
+    }
 
     const { key, dir } = state.pipeline.sort;
     rows.sort((a, b) => {
@@ -1921,6 +1955,14 @@
       if (e.key === 'Escape' && drawerState.id) closeLeadDrawer();
     });
     $('#btn-refresh-pipeline').addEventListener('click', refreshPipeline);
+    $('#pipe-filter-source').addEventListener('change', (e) => {
+      state.pipeline.sourceFilter = e.target.value;
+      renderPipeline();
+    });
+    $('#pipe-filter-sourced-for').addEventListener('change', (e) => {
+      state.pipeline.sourcedForFilter = e.target.value;
+      renderPipeline();
+    });
     $('#btn-export-csv').addEventListener('click', async () => {
       // Bearer auth requires a fetch + blob roundtrip rather than a plain <a download>.
       try {

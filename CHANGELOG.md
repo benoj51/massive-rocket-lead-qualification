@@ -5,6 +5,40 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] — 2026-05-15
+
+Partner sourcing made queryable: filter Pipeline by source / sourced-for,
+and aggregate the same dimensions in the Slack digest.
+
+### Added
+- **Pipeline filters: source + sourced-for.** Two dropdowns next to the
+  existing status chips:
+  - `All sources` — filters to leads with `opportunity_source` matching
+    the picked value (e.g. "show me all Braze-sourced leads").
+  - `Any sourced-for` — filters to leads where `sourced_for_partners`
+    includes the picked partner (e.g. "show me everything we're sourcing
+    for Snowflake").
+  - Option lists populate dynamically from the rows currently loaded —
+    only partners that actually appear show up.
+- **Slack digest: partner sourcing section.** When `pipeline_rows`
+  contains sourcing data, the digest renders:
+  - `Sourced to MR by partner` — count + company list per source
+  - `MR sourcing for partners` — count + company list per sourced-for
+  - Up to 8 partners per section, top-5 companies inline per partner,
+    sorted by count desc.
+  - Section is omitted entirely if no sourcing data is present.
+- `slack_digest.partner_sourcing_breakdown(rows)` — pure aggregation
+  helper, usable outside the digest (e.g. for a future report endpoint).
+
+### Changed
+- `notion_sync._row_from_page` now includes `opportunity_source` and
+  `sourced_for_partners` so Pipeline rows carry the data needed for
+  filtering and reporting.
+
+### Tests
+- 157 total (+9). Covers row enrichment, breakdown aggregation,
+  digest inclusion/omission logic.
+
 ## [0.5.3] — 2026-05-15
 
 Partner sourcing — track both directions of partner-led pipeline.

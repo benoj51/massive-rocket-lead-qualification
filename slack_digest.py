@@ -53,6 +53,54 @@ def _recent_qualifications(events: list[dict], n: int = 5) -> list[str]:
     return out
 
 
+def partner_sourcing_breakdown(rows: list[dict]) -> dict:
+    """Aggregate pipeline rows by opportunity_source and sourced_for_partners.
+    Returns counts + the company list per partner.
+    """
+    by_source: dict[str, list[str]] = {}
+    by_sourced_for: dict[str, list[str]] = {}
+    for r in rows or []:
+        src = (r.get("opportunity_source") or "").strip()
+        company = r.get("company") or "?"
+        if src:
+            by_source.setdefault(src, []).append(company)
+        for partner in (r.get("sourced_for_partners") or []):
+            if partner:
+                by_sourced_for.setdefault(partner, []).append(company)
+
+    def _sorted_counts(d: dict[str, list[str]]) -> list[tuple[str, int, list[str]]]:
+        return sorted(
+            ((k, len(v), v) for k, v in d.items()),
+            key=lambda x: -x[1],
+        )
+
+    return {
+        "by_source": _sorted_counts(by_source),
+        "by_sourced_for": _sorted_counts(by_sourced_for),
+        "leads_with_source": sum(1 for r in (rows or []) if (r.get("opportunity_source") or "").strip()),
+        "leads_with_sourced_for": sum(1 for r in (rows or []) if r.get("sourced_for_partners")),
+    }
+
+
+def _partner_sourcing_blocks(rows: list[dict]) -> list[dict]:
+    """Slack Block Kit blocks for the partner sourcing section. Empty if no data."""
+    breakdown = partner_sourcing_breakdown(rows)
+    if not breakdown["by_source"] and not breakdown["by_sourced_for"]:
+        return []
+    out: list[dict] = [{"type": "divider"}]
+    if breakdown["by_source"]:
+        lines = [f"• *{name}* — {count} lead{'s' if count != 1 else ''} ({', '.join(companies[:5])}{'…' if len(companies) > 5 else ''})"
+                 for name, count, companies in breakdown["by_source"][:8]]
+        out.append({"type": "section", "text": {"type": "mrkdwn",
+                    "text": "*Sourced to MR by partner*\n" + "\n".join(lines)}})
+    if breakdown["by_sourced_for"]:
+        lines = [f"• *{name}* — {count} lead{'s' if count != 1 else ''} ({', '.join(companies[:5])}{'…' if len(companies) > 5 else ''})"
+                 for name, count, companies in breakdown["by_sourced_for"][:8]]
+        out.append({"type": "section", "text": {"type": "mrkdwn",
+                    "text": "*MR sourcing for partners*\n" + "\n".join(lines)}})
+    return out
+
+
 def build_digest(*, pipeline_rows: list[dict], audit_events: list[dict],
                  title: str = "Lead Qualification — Weekly Digest") -> dict:
     """Build the Slack Block Kit payload. Pure function, no network."""
@@ -89,6 +137,9 @@ def build_digest(*, pipeline_rows: list[dict], audit_events: list[dict],
         blocks.append({"type": "divider"})
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
                        "text": "*Recent qualifications*\n" + "\n".join(recent)}})
+
+    # Partner sourcing — both directions if present
+    blocks.extend(_partner_sourcing_blocks(pipeline_rows))
 
     return {"blocks": blocks}
 

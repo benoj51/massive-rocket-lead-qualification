@@ -420,6 +420,8 @@ def _row_from_page(page: dict) -> dict:
         "opportunity_type": _extract_text(props.get("Opportunity Type")),
         "owner": _extract_text(props.get("Owner")),
         "next_steps": _extract_text(props.get("Next Steps")),
+        "opportunity_source": _extract_text(props.get("Partner Source")),
+        "sourced_for_partners": _extract_multi_select(props.get("Sourced For")),
         "last_edited": page.get("last_edited_time"),
     }
 
