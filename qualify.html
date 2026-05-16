@@ -250,6 +250,7 @@
   <nav>
     <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
+    <button id="nav-build" type="button">Project Build</button>
   </nav>
   <div class="health" id="health-bar"></div>
 </header>
@@ -306,7 +307,7 @@
       </div>
 
       <div class="card">
-        <h2>4 · MEDDICC</h2>
+        <h2>4 · MEDDPICC</h2>
         <div class="meddicc" id="meddicc"></div>
       </div>
 
@@ -404,6 +405,87 @@
         <div>No leads loaded yet.</div>
         <div class="muted" style="margin-top: 4px;">Click ↻ Refresh once Notion is configured.</div>
       </div>
+    </div>
+  </section>
+
+  <!-- PROJECT BUILD VIEW ====================================== -->
+  <section id="view-build" class="view">
+    <div class="card">
+      <h2>Project Build</h2>
+      <p class="muted" style="margin: 0 0 12px;">Capture project scope, generate a quote, route to delivery for validation.</p>
+
+      <div class="row row-3">
+        <div>
+          <label>Existing project</label>
+          <select id="pb-lead-select">
+            <option value="">— pick from list —</option>
+          </select>
+        </div>
+        <div>
+          <label>Or new lead — company name</label>
+          <input id="pb-new-name" type="text" placeholder="e.g. Deliveroo" />
+        </div>
+        <div>
+          <label>Lead ID (slug)</label>
+          <input id="pb-new-leadid" type="text" placeholder="deliveroo" />
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label>Project streams</label>
+        <div id="pb-streams" class="filters"></div>
+      </div>
+
+      <div class="btn-row" style="margin-top: 14px;">
+        <button id="pb-save" class="btn" type="button">Save scope</button>
+        <button id="pb-preview" class="btn ghost" type="button">Preview pricing</button>
+        <button id="pb-submit-val" class="btn ghost" type="button">Submit for delivery validation</button>
+        <span id="pb-status" class="muted"></span>
+      </div>
+    </div>
+
+    <div id="pb-panels"></div>
+
+    <div id="pb-pricing-card" class="card" style="display:none;">
+      <h2>Pricing preview</h2>
+      <div id="pb-pricing-summary" style="margin-bottom: 12px;"></div>
+      <div class="chart-wrap"><canvas id="pb-pricing-chart" height="180"></canvas></div>
+      <div id="pb-pricing-table" style="margin-top: 14px;"></div>
+    </div>
+
+    <div id="pb-validation-card" class="card" style="display:none;">
+      <h2>Delivery validation</h2>
+      <div id="pb-validation-banner" style="margin-bottom: 12px;"></div>
+      <div class="row row-2">
+        <div>
+          <label>Notes</label>
+          <textarea id="pb-val-notes" rows="3" placeholder="Why approve / what to fix"></textarea>
+        </div>
+        <div>
+          <label>Action</label>
+          <div class="btn-row">
+            <button id="pb-validate" class="btn" type="button">✓ Validate</button>
+            <button id="pb-reject" class="btn ghost" type="button">✗ Reject</button>
+            <button id="pb-reopen" class="btn ghost" type="button">↻ Reopen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Sales toolkit</h2>
+      <details style="margin-bottom: 8px;">
+        <summary style="cursor:pointer;color:var(--text-dim);">Discovery questions (Situation / Pain / Trap)</summary>
+        <div id="pb-discovery" style="margin-top: 10px;"></div>
+      </details>
+      <details style="margin-bottom: 8px;">
+        <summary style="cursor:pointer;color:var(--text-dim);">Anticipated objections</summary>
+        <div id="pb-objections" style="margin-top: 10px;"></div>
+      </details>
+      <details>
+        <summary style="cursor:pointer;color:var(--text-dim);">Reference points</summary>
+        <div id="pb-references" style="margin-top: 10px;"></div>
+      </details>
     </div>
   </section>
 
@@ -524,6 +606,7 @@
     $$('header.top nav button').forEach(b => b.classList.remove('active'));
     $(`#nav-${name}`).classList.add('active');
     if (name === 'pipeline') refreshPipeline();
+    if (name === 'build')    initProjectBuild();
   }
 
   // ---- Health -----------------------------------------------------------
@@ -852,12 +935,317 @@
   function prettyKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function escapeAttr(s) { return escapeHtml(s); }
+  function fmtUSD(n) { return '$' + Math.round(n).toLocaleString(); }
+
+  // ---- Project Build ---------------------------------------------------
+  const pbState = {
+    library: null,           // /api/scope/library response
+    projects: [],            // /api/scope/projects.projects
+    current: null,           // current ProjectScope dict
+    currentLeadId: null,
+    streamsSelected: new Set(),
+    pricingChart: null,
+  };
+
+  async function initProjectBuild() {
+    if (!pbState.library) {
+      try {
+        pbState.library = await jsonFetch('/api/scope/library');
+        renderStreamChips();
+        renderToolkit();
+      } catch (e) { toast(`Scope library failed: ${e.body?.error || e.message}`, 'error'); return; }
+    }
+    await refreshProjectList();
+  }
+
+  async function refreshProjectList() {
+    try {
+      const data = await jsonFetch('/api/scope/projects');
+      pbState.projects = data.projects || [];
+      const sel = $('#pb-lead-select');
+      const current = sel.value;
+      sel.innerHTML = '<option value="">— pick from list —</option>' +
+        pbState.projects.map(p => `<option value="${escapeAttr(p.lead_id)}">${escapeHtml(p.company_name || p.lead_id)} · ${escapeHtml(p.validation_status)} · ${p.stats?.qualified_pct || 0}% qualified</option>`).join('');
+      sel.value = current || '';
+    } catch (e) { console.warn('project list', e); }
+  }
+
+  function renderStreamChips() {
+    const types = pbState.library?.project_types || {};
+    const el = $('#pb-streams');
+    el.innerHTML = Object.entries(types).map(([key, info]) => `
+      <button type="button" class="chip" data-stream="${key}" title="${escapeAttr(info.description || '')}">
+        ${escapeHtml(info.label)}
+      </button>
+    `).join('');
+    el.querySelectorAll('[data-stream]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const k = btn.dataset.stream;
+        if (pbState.streamsSelected.has(k)) pbState.streamsSelected.delete(k);
+        else pbState.streamsSelected.add(k);
+        btn.classList.toggle('active', pbState.streamsSelected.has(k));
+        renderScopePanels();
+      });
+    });
+  }
+
+  function renderToolkit() {
+    const lib = pbState.library || {};
+    const disc = lib.discovery_questions || {};
+    $('#pb-discovery').innerHTML = Object.entries(disc).map(([cat, qs]) => `
+      <div style="margin-bottom: 10px;">
+        <strong>${escapeHtml(cat[0].toUpperCase() + cat.slice(1))}</strong>
+        <ul style="margin: 4px 0 0 18px;">${qs.map(q => `<li>${escapeHtml(q)}</li>`).join('')}</ul>
+      </div>
+    `).join('');
+    $('#pb-objections').innerHTML = (lib.objections || []).map(o => `
+      <div style="margin-bottom: 10px;">
+        <div style="color:var(--accent);font-weight:600;">${escapeHtml(o.objection)}</div>
+        <div class="muted">${escapeHtml(o.response)}</div>
+      </div>
+    `).join('');
+    $('#pb-references').innerHTML = `
+      <table class="stakeholders"><thead><tr><th>Industry</th><th>Customer</th><th>Proof point</th></tr></thead>
+      <tbody>${(lib.reference_points || []).map(r => `
+        <tr><td>${escapeHtml(r.industry)}</td><td>${escapeHtml(r.customer)}</td><td>${escapeHtml(r.proof_point)}</td></tr>
+      `).join('')}</tbody></table>`;
+  }
+
+  function renderScopePanels() {
+    const panels = $('#pb-panels');
+    if (pbState.streamsSelected.size === 0) { panels.innerHTML = ''; return; }
+    const lib = pbState.library?.criteria || {};
+    const current = pbState.current;
+    panels.innerHTML = Array.from(pbState.streamsSelected).map(streamKey => {
+      const info = pbState.library.project_types[streamKey] || { label: streamKey };
+      const criteria = lib[streamKey] || [];
+      const stream = current?.streams?.find(s => s.project_type === streamKey);
+      const answers = new Map((stream?.criteria || []).map(c => [c.key, c]));
+      return `
+        <div class="card">
+          <h2>${escapeHtml(info.label)} <small style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— ${escapeHtml(info.description || '')}</small></h2>
+          <div class="meddicc">
+            ${criteria.map(c => {
+              const a = answers.get(c.key) || { value: '', status: 'unqualified' };
+              return `
+                <div class="meddicc-row" data-stream="${streamKey}" data-key="${c.key}">
+                  <div class="key">${escapeHtml(c.label)}<small>${escapeHtml(c.hint || '')}</small></div>
+                  <input type="text" placeholder="—" value="${escapeAttr(a.value || '')}" data-scope-value />
+                  <div class="status-toggle">
+                    <button type="button" data-scope-status="unqualified">Unqualified</button>
+                    <button type="button" data-scope-status="qualifying">Qualifying</button>
+                    <button type="button" data-scope-status="qualified">Qualified</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+    // Hydrate toggles + binding
+    panels.querySelectorAll('.meddicc-row').forEach(row => {
+      const streamKey = row.dataset.stream;
+      const key = row.dataset.key;
+      const stream = pbState.current?.streams?.find(s => s.project_type === streamKey);
+      const a = stream?.criteria?.find(c => c.key === key);
+      const current = (a?.status) || 'unqualified';
+      row.querySelectorAll('[data-scope-status]').forEach(b => {
+        b.classList.toggle('on', b.dataset.scopeStatus === current);
+        b.classList.toggle(current, b.dataset.scopeStatus === current);
+      });
+    });
+  }
+
+  function collectCurrentScopeUpdates() {
+    const updates = [];
+    $$('#pb-panels .meddicc-row').forEach(row => {
+      const streamKey = row.dataset.stream;
+      const key = row.dataset.key;
+      const valueEl = row.querySelector('[data-scope-value]');
+      const onStatusBtn = row.querySelector('[data-scope-status].on');
+      updates.push({
+        project_type: streamKey,
+        key,
+        value: valueEl ? valueEl.value : '',
+        status: onStatusBtn ? onStatusBtn.dataset.scopeStatus : 'unqualified',
+      });
+    });
+    return updates;
+  }
+
+  function statusToggleBindings() {
+    $$('#pb-panels .meddicc-row').forEach(row => {
+      row.querySelectorAll('[data-scope-status]').forEach(b => {
+        b.addEventListener('click', () => {
+          row.querySelectorAll('[data-scope-status]').forEach(x => {
+            x.classList.remove('on', 'unqualified', 'qualifying', 'qualified');
+          });
+          b.classList.add('on', b.dataset.scopeStatus);
+        });
+      });
+    });
+  }
+
+  async function pbLoadProject(leadId) {
+    if (!leadId) {
+      pbState.current = null; pbState.currentLeadId = null;
+      pbState.streamsSelected.clear();
+      renderStreamChips(); renderScopePanels();
+      $('#pb-validation-card').style.display = 'none';
+      $('#pb-pricing-card').style.display = 'none';
+      return;
+    }
+    try {
+      const data = await jsonFetch(`/api/scope/${encodeURIComponent(leadId)}`);
+      pbState.current = data.project;
+      pbState.currentLeadId = leadId;
+      pbState.streamsSelected = new Set(data.project.streams.map(s => s.project_type));
+      $('#pb-new-name').value = data.project.company_name || '';
+      $('#pb-new-leadid').value = data.project.lead_id || leadId;
+      renderStreamChips();
+      // re-hydrate active chips
+      $$('#pb-streams [data-stream]').forEach(btn => {
+        btn.classList.toggle('active', pbState.streamsSelected.has(btn.dataset.stream));
+      });
+      renderScopePanels();
+      statusToggleBindings();
+      renderValidationBanner();
+    } catch (e) {
+      toast(`Load failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  function renderValidationBanner() {
+    const p = pbState.current;
+    const card = $('#pb-validation-card');
+    if (!p) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    const status = p.validation_status || 'draft';
+    const colorMap = { draft: 'borderline', pending_validation: 'borderline', validated: 'qualify_in', rejected: 'qualify_out' };
+    const banner = $('#pb-validation-banner');
+    banner.innerHTML = `
+      <span class="badge ${colorMap[status]}">${status.replace('_', ' ')}</span>
+      ${p.validated_by ? `<span class="muted" style="margin-left:10px;">by ${escapeHtml(p.validated_by)} at ${escapeHtml(p.validated_at || '')}</span>` : ''}
+      ${p.validation_notes ? `<div class="muted" style="margin-top:6px;">Notes: ${escapeHtml(p.validation_notes)}</div>` : ''}
+    `;
+    $('#pb-val-notes').value = p.validation_notes || '';
+  }
+
+  async function pbSave() {
+    const leadId = $('#pb-new-leadid').value.trim() || pbState.currentLeadId;
+    const companyName = $('#pb-new-name').value.trim() || pbState.current?.company_name || leadId;
+    if (!leadId) { toast('Lead ID required', 'error'); return; }
+    if (pbState.streamsSelected.size === 0) { toast('Select at least one project stream', 'error'); return; }
+    const body = {
+      company_name: companyName,
+      project_types: Array.from(pbState.streamsSelected),
+      criteria_updates: pbState.current ? collectCurrentScopeUpdates() : [],
+    };
+    try {
+      const data = await jsonFetch(`/api/scope/${encodeURIComponent(leadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      pbState.current = data.project;
+      pbState.currentLeadId = leadId;
+      renderScopePanels();
+      statusToggleBindings();
+      renderValidationBanner();
+      await refreshProjectList();
+      $('#pb-lead-select').value = leadId;
+      toast(`Saved · ${data.summary.stats.qualified_pct}% qualified · ${data.summary.confidence} confidence`, 'success');
+    } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function pbPreviewPricing() {
+    if (!pbState.currentLeadId) { toast('Save the scope first', 'error'); return; }
+    try {
+      const q = await jsonFetch('/api/pricing/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: pbState.currentLeadId, months: 12 }),
+      });
+      renderPricing(q);
+    } catch (e) { toast(`Pricing failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  function renderPricing(q) {
+    $('#pb-pricing-card').style.display = 'block';
+    const t = q.totals;
+    $('#pb-pricing-summary').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+        <div class="tile"><span class="lbl">Gross</span><span class="val">${fmtUSD(t.gross_usd)}</span></div>
+        <div class="tile"><span class="lbl">Discount</span><span class="val">−${fmtUSD(t.discount_usd)}</span></div>
+        <div class="tile"><span class="lbl">Net</span><span class="val">${fmtUSD(t.net_usd)}</span></div>
+        <div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · $${t.blended_rate_usd_per_hour}/h</span></div>
+      </div>`;
+
+    const ctx = $('#pb-pricing-chart').getContext('2d');
+    if (pbState.pricingChart) pbState.pricingChart.destroy();
+    pbState.pricingChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: q.monthly.map(m => `M${m.month}`),
+        datasets: [
+          { label: 'Net', data: q.monthly.map(m => m.net_usd), backgroundColor: '#ff4d2a', borderRadius: 4 },
+          { label: 'Discount', data: q.monthly.map(m => m.discount_usd), backgroundColor: 'rgba(255,255,255,.06)', borderRadius: 4 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { color: '#9898aa' } },
+          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#9898aa' } },
+        },
+        plugins: { legend: { labels: { color: '#e8e8f0' } } },
+      },
+    });
+
+    $('#pb-pricing-table').innerHTML = `
+      <table class="stakeholders">
+        <thead><tr><th>Role</th><th>U</th><th>E</th><th>A</th></tr></thead>
+        <tbody>${Object.entries(q.team).map(([role, byPhase]) => `
+          <tr><td>${escapeHtml(role)}</td>
+          <td>${byPhase.Understand?.toFixed(2) || '—'}</td>
+          <td>${byPhase.Execute?.toFixed(2) || '—'}</td>
+          <td>${byPhase.Accelerate?.toFixed(2) || '—'}</td></tr>
+        `).join('')}</tbody>
+      </table>
+      <div class="muted" style="margin-top:6px;font-size:11px;">FTE per phase. U = Understand · E = Execute · A = Accelerate.</div>
+    `;
+  }
+
+  async function pbTransition(action) {
+    if (!pbState.currentLeadId) { toast('Save the scope first', 'error'); return; }
+    const notes = $('#pb-val-notes').value.trim();
+    try {
+      const data = await jsonFetch(`/api/scope/${encodeURIComponent(pbState.currentLeadId)}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, notes }),
+      });
+      pbState.current = data.project;
+      renderValidationBanner();
+      await refreshProjectList();
+      toast(`${action.replace('_', ' ')} ✓`, 'success');
+    } catch (e) { toast(`Transition failed: ${e.body?.error || e.message}`, 'error'); }
+  }
 
   // ---- Wire ------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', async () => {
     await ensureAuth();
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
+    $('#nav-build').addEventListener('click', () => switchView('build'));
+    $('#pb-lead-select').addEventListener('change', (e) => pbLoadProject(e.target.value));
+    $('#pb-save').addEventListener('click', pbSave);
+    $('#pb-preview').addEventListener('click', pbPreviewPricing);
+    $('#pb-submit-val').addEventListener('click', () => pbTransition('pending_validation'));
+    $('#pb-validate').addEventListener('click', () => pbTransition('validated'));
+    $('#pb-reject').addEventListener('click', () => pbTransition('rejected'));
+    $('#pb-reopen').addEventListener('click', () => pbTransition('draft'));
     $('#btn-qualify').addEventListener('click', () => { state.overrides = {}; runQualify({}); });
     $('#btn-rescore').addEventListener('click', () => runQualify(state.overrides));
     $('#btn-clear').addEventListener('click', () => {

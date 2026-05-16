@@ -5,6 +5,79 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-15
+
+The Project Build stage. Adds scope intake, codified pricing calculator,
+and delivery-team validation between Qualify/Pipeline and the (future)
+SOW renderer. Live deploy on Railway; Apollo + Notion integrations
+confirmed working in production.
+
+### Added
+- **`pricing.py`** — full codified version of the Pricing Calculator. Single
+  blended USD/hour rate ($200) with per-role FTE varying by phase. Three
+  phases: Understand / Execute / Accelerate. Discount rules
+  (15% on first half, 0% second half) baked in but overridable.
+  Tests reproduce the reference deal's $1,191,360 gross / $1,112,016 net
+  exactly, $5,957 hours within 10 of CSV.
+- **`scope.py`** — scope intake model:
+  - 5 project types: CRM Strategy / CRM Build / CRM Execute / Data work /
+    Engineering
+  - Criteria library (campaigns, templates, channels, stakeholders, etc.)
+    with per-criterion role-driver tags so scope answers feed pricing
+  - 3-state qualification status per criterion: Unqualified → Qualifying →
+    Qualified
+  - Validation state machine: `draft → pending_validation → validated /
+    rejected`, with bounce-back to draft on rejection
+  - Discovery questions library (Situation / Pain / Trap)
+  - Anticipated objections library with prepared responses
+  - Reference points library (Yum, RBI, IHG, Just Eat, Monzo, GoPuff +
+    tech partners)
+- **`project_store.py`** — JSON-file-per-lead persistence at
+  `cache/projects/<lead_id>.json`. Stable lead IDs via filesystem slug.
+- **`/api/scope/library`** — read-only metadata bundle for the UI
+  (project types, criteria, discovery questions, objections, references,
+  team templates, role catalogue)
+- **`/api/scope/<lead_id>`** GET/POST/PUT — read or upsert a project scope
+- **`/api/scope/<lead_id>/transition`** POST — walk the validation state
+  machine. Delivery team uses this to validate/reject.
+- **`/api/scope/projects`** GET — list all projects + filter by pending
+  validation status
+- **`/api/pricing/preview`** POST — compute a quote from either a stored
+  lead's scope (with role multipliers from criteria) or raw inputs
+- **Project Build UI** — new tab in `qualify.html`. Multi-select project
+  streams, per-stream criteria panels (matching the existing MEDDPICC
+  visual language), pricing preview card with Chart.js monthly breakdown,
+  validation banner with Validate / Reject / Reopen actions, and a
+  collapsible "sales toolkit" surfacing discovery questions, objections,
+  and references.
+- Every scope save + transition writes an audit event.
+
+### Changed
+- **MEDDICC → MEDDPICC** labels in the UI heading and Notion page-body
+  section heading. Internal field names (`meddicc` payload key, Notion
+  property names) stay MEDDICC to avoid breaking the existing tracker.
+  This is option 2 — label-only rename, no new criteria. If you want the
+  full 8-criteria framework (adding Paper Process + Competition), that's
+  a follow-up that needs Notion schema additions.
+
+### Operational notes
+- Project files live in container-ephemeral storage (`cache/projects/`).
+  For durable retention across deploys, mount a Railway volume at
+  `cache/` (or set `PROJECT_STORE_DIR` to a mounted path).
+- Pricing calc is the *client-facing* rate book (single $200/h blended).
+  Internal margin accounting uses different per-role rates not captured
+  here — when finance shares them we add a margin view.
+- Delivery validation is gate-only — there's no Slack notification yet
+  when scope hits `pending_validation`. Delivery team checks the Pipeline
+  view filter "Active only" then filters by `validation_status` (TODO:
+  surface filter chip).
+
+### Test coverage
+- 80 tests total. New in v0.4: pricing math (14), scope model + state
+  machine + storage (15), scope endpoints (9).
+- Reference deal calibration: gross matches CSV exactly, net within 1%,
+  hours within 10.
+
 ## [0.3.0] — 2026-05-13
 
 The "ready for the team to actually use" release. Roadmap phases v0.3

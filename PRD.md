@@ -186,11 +186,33 @@ AI-assisted fit summaries via Anthropic, with heuristic fallback. See
   previews; `POST .../digest?send=1` posts to `SLACK_WEBHOOK_URL`. Schedule
   via Railway Cron or external scheduler.
 
+### v0.4 — shipped 2026-05-15 (Project Build + Pricing)
+- **Project Build** stage between Pipeline and (future) SOW.
+- 5 project types: CRM Strategy / CRM Build / CRM Execute / Data / Engineering.
+- Per-criterion 3-state qualification (Unqualified → Qualifying →
+  Qualified). Criteria are tagged with role drivers so scope answers
+  feed pricing.
+- **Pricing Calculator** codified in `pricing.py`. Reference deal reproduced
+  ($1.19M gross / $1.11M net). Single blended USD/hour rate, per-phase
+  team allocations, configurable discount.
+- **Delivery validation gate.** Scope flows `draft →
+  pending_validation → validated/rejected` before Pricing is sent.
+- MEDDICC label renamed to MEDDPICC throughout the UI (criteria
+  unchanged — full 8-criteria MEDDPICC pending Notion schema additions).
+
+### v0.5 — TBD (next up)
+- Draft SOW renderer pulling Apollo + scope + pricing into a single
+  reviewable document.
+- Slack notification when scope hits `pending_validation` so delivery
+  picks it up promptly.
+- Filter chips for `pending_validation` in the Pipeline view.
+
 ### v0.6 — TBD
 - Outreach-line drafter per stakeholder (Anthropic).
-- Move audit log off ephemeral disk to durable storage (Railway volume or
-  Postgres) once daily volume justifies the migration.
+- Move audit log + project store off ephemeral disk to durable storage
+  (Railway volume or Postgres) once daily volume justifies it.
 - Custom dashboard panels: stage-by-stage conversion, time-in-stage.
+- Full MEDDPICC (add Paper Process + Competition criteria + Notion schema).
 
 ## 11. Open questions
 

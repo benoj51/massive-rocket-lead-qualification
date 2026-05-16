@@ -35,7 +35,10 @@ import ai_summary
 import apollo
 import audit
 import hubspot_sync
+import pricing
+import project_store
 import qualify_service
+import scope as scope_module
 import slack_digest
 from notion_sync import NotionSync, NotionSyncError
 
@@ -251,6 +254,157 @@ def api_hubspot_sync():
         log.warning("HubSpot sync failure: %s", e)
         audit.log_event("hubspot_sync_failed", actor=_actor(), company=company_name, reason=str(e)[:200])
         return jsonify({"error": str(e)}), 502
+
+
+# ===========================================================================
+# v0.4: Project Build — scope intake + pricing + delivery validation
+# ===========================================================================
+
+@app.route("/api/scope/library", methods=["GET"])
+def api_scope_library():
+    """Read-only metadata for the UI."""
+    return jsonify({
+        "project_types": scope_module.project_types(),
+        "criteria": scope_module.criteria_library(),
+        "discovery_questions": scope_module.discovery_questions(),
+        "objections": scope_module.objection_library(),
+        "reference_points": scope_module.reference_points(),
+        "team_templates": pricing.list_team_templates(),
+        "role_catalogue": pricing.role_catalogue(),
+    })
+
+
+@app.route("/api/scope/projects", methods=["GET"])
+def api_scope_projects():
+    """List all in-flight projects (for the Project Build view)."""
+    only = request.args.get("pending_validation_only", "").lower() in ("1", "true", "yes")
+    summaries = project_store.list_pending_validation() if only else project_store.list_summaries()
+    return jsonify({"projects": summaries, "count": len(summaries)})
+
+
+@app.route("/api/scope/<lead_id>", methods=["GET"])
+def api_scope_get(lead_id: str):
+    project = project_store.load(lead_id)
+    if not project:
+        return jsonify({"error": "not_found", "lead_id": lead_id}), 404
+    return jsonify({
+        "project": scope_module.to_dict(project),
+        "summary": scope_module.project_summary(project),
+    })
+
+
+@app.route("/api/scope/<lead_id>", methods=["POST", "PUT"])
+def api_scope_upsert(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    company_name = (body.get("company_name") or "").strip()
+    project_types = body.get("project_types") or []
+    if not company_name:
+        return jsonify({"error": "company_name required"}), 400
+    if not project_types:
+        return jsonify({"error": "project_types required"}), 400
+
+    try:
+        existing = project_store.load(lead_id)
+        if existing is None:
+            project = scope_module.new_project(lead_id, company_name, project_types)
+        else:
+            # Preserve existing answers when project types stay the same; add
+            # empty criteria for newly-added streams.
+            project = existing
+            project.company_name = company_name
+            existing_types = {s.project_type for s in project.streams}
+            for pt in project_types:
+                if pt not in existing_types:
+                    library = scope_module.criteria_library().get(pt, [])
+                    project.streams.append(scope_module.ProjectStream(
+                        project_type=pt,
+                        criteria=[scope_module.CriterionAnswer(key=c["key"]) for c in library],
+                    ))
+            # Drop streams the AE deselected
+            project.streams = [s for s in project.streams if s.project_type in project_types]
+            project.touch()
+
+        # Apply criterion-level updates if provided.
+        for upd in body.get("criteria_updates") or []:
+            scope_module.update_criterion(
+                project,
+                project_type=upd["project_type"],
+                key=upd["key"],
+                value=upd.get("value"),
+                status=upd.get("status"),
+            )
+
+        project_store.save(project)
+        audit.log_event("scope_saved", actor=_actor(), lead_id=lead_id,
+                        company=company_name,
+                        validation_status=project.validation_status)
+        return jsonify({
+            "project": scope_module.to_dict(project),
+            "summary": scope_module.project_summary(project),
+        })
+    except scope_module.ScopeError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/scope/<lead_id>/transition", methods=["POST"])
+def api_scope_transition(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    action = (body.get("action") or "").strip()
+    notes = (body.get("notes") or "").strip()
+    project = project_store.load(lead_id)
+    if not project:
+        return jsonify({"error": "not_found", "lead_id": lead_id}), 404
+    try:
+        scope_module.transition(project, action, actor=_actor(), notes=notes)
+        project_store.save(project)
+        audit.log_event("scope_transition", actor=_actor(), lead_id=lead_id,
+                        action=action, notes=notes[:200])
+        return jsonify({
+            "project": scope_module.to_dict(project),
+            "summary": scope_module.project_summary(project),
+        })
+    except scope_module.ScopeError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/pricing/preview", methods=["POST"])
+def api_pricing_preview():
+    """Compute a quote. Either from a stored project or from raw inputs."""
+    body = request.get_json(silent=True) or {}
+    lead_id = (body.get("lead_id") or "").strip()
+    months = int(body.get("months") or 12)
+    discount_first_half = float(body.get("discount_first_half_pct", 0.15))
+    discount_second_half = float(body.get("discount_second_half_pct", 0.0))
+    role_overrides = body.get("role_overrides") or {}
+
+    if lead_id:
+        project = project_store.load(lead_id)
+        if not project:
+            return jsonify({"error": "lead not found", "lead_id": lead_id}), 404
+        project_types = [s.project_type for s in project.streams]
+        effort_multipliers = scope_module.role_drivers_for_project(project)
+    else:
+        project_types = body.get("project_types") or []
+        effort_multipliers = body.get("effort_multipliers") or {}
+
+    if not project_types:
+        return jsonify({"error": "project_types required (either via lead_id or in body)"}), 400
+
+    try:
+        quote = pricing.compute_quote(pricing.QuoteInputs(
+            project_types=project_types,
+            months=months,
+            discount_pct_first_half=discount_first_half,
+            discount_pct_second_half=discount_second_half,
+            role_overrides=role_overrides,
+            effort_multipliers=effort_multipliers,
+        ))
+        if lead_id:
+            audit.log_event("pricing_preview", actor=_actor(), lead_id=lead_id,
+                            net_usd=quote["totals"]["net_usd"])
+        return jsonify(quote)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/api/slack/digest", methods=["GET", "POST"])

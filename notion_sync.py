@@ -198,7 +198,7 @@ def _meddicc_blocks(payload: dict) -> list[dict]:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     blocks: list[dict] = [
         {"object": "block", "type": "heading_3",
-         "heading_3": {"rich_text": _rich_text(f"MEDDICC Notes — {stamp}")}},
+         "heading_3": {"rich_text": _rich_text(f"MEDDPICC Notes — {stamp}")}},
     ]
     for key, label in _MEDDICC_FIELDS:
         entry = meddicc.get(key) or {}
