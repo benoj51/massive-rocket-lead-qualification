@@ -751,6 +751,11 @@
     </div>
 
     <div class="group">
+      <h4>Project &amp; Pricing</h4>
+      <div id="ld-project-summary" class="muted" style="font-size:12px;">Loading…</div>
+    </div>
+
+    <div class="group">
       <h4>Contacts</h4>
       <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
       <details style="margin-top: 10px;">
@@ -1362,6 +1367,85 @@
     drawerState.id = null; drawerState.original = null; drawerState.current = null;
   }
 
+  async function loadLeadProject(leadId, companyName) {
+    if (!leadId) return;
+    const el = $('#ld-project-summary');
+    try {
+      const data = await jsonFetch(`/api/scope/${encodeURIComponent(leadId)}`);
+      const summary = data.summary || {};
+      const stats = summary.stats || {};
+      // Try to get a pricing preview for the current project state
+      let pricingNet = null;
+      try {
+        const q = await jsonFetch('/api/pricing/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_id: leadId, months: 12 }),
+        });
+        pricingNet = q?.totals?.net_usd;
+      } catch (_) { /* no streams yet → no quote */ }
+      const streams = (summary.streams || []).join(', ') || '(none yet)';
+      const valColor = { validated: 'qualify_in', pending_validation: 'borderline',
+                          rejected: 'qualify_out', draft: 'borderline' };
+      el.innerHTML = `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+            <span class="badge ${valColor[summary.validation_status] || 'borderline'}">${escapeHtml((summary.validation_status || 'draft').replace('_',' '))}</span>
+            <span class="muted" style="font-size:11px;">${stats.qualified_pct ?? 0}% qualified · ${escapeHtml(summary.confidence || 'low')} confidence</span>
+          </div>
+          <div style="font-size:12px;margin-bottom:6px;"><strong style="color:var(--text);">Streams:</strong> ${escapeHtml(streams)}</div>
+          ${pricingNet != null ? `<div style="font-size:12px;"><strong style="color:var(--text);">Forecast (net):</strong> ${fmtUSD(pricingNet)}</div>` : ''}
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn" type="button" data-open-pb="${escapeAttr(leadId)}" style="padding:5px 12px;font-size:11px;">Open Project Build →</button>
+          </div>
+        </div>
+      `;
+      el.querySelector('[data-open-pb]').addEventListener('click', () => openProjectBuildFor(leadId, companyName));
+    } catch (e) {
+      if (e.status === 404) {
+        // No project yet — show Create Project button
+        el.innerHTML = `
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center;">
+            <div class="muted" style="font-size:12px;margin-bottom:10px;">No project scope captured yet. Create one to start scoping the work + forecasting price.</div>
+            <button class="btn" type="button" id="ld-create-project" style="padding:6px 14px;font-size:12px;">✨ Create Project</button>
+          </div>
+        `;
+        $('#ld-create-project').addEventListener('click', () => createProjectFromLead(leadId, companyName));
+      } else {
+        el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+  }
+
+  async function createProjectFromLead(leadId, companyName) {
+    try {
+      await jsonFetch(`/api/scope/${encodeURIComponent(leadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: companyName || 'Unknown',
+          // Start with all five stream types unticked; AE picks them in Project Build
+          project_types: ['crm_build'],
+        }),
+      });
+      toast('Project draft created', 'success');
+      openProjectBuildFor(leadId, companyName);
+    } catch (e) { toast(`Create failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  function openProjectBuildFor(leadId, companyName) {
+    // Switch to the Project Build tab and load this lead
+    closeLeadDrawer();
+    switchView('build');
+    // initProjectBuild is async; wait for library before populating fields
+    setTimeout(async () => {
+      await initProjectBuild();
+      $('#pb-new-leadid').value = leadId;
+      $('#pb-new-name').value = companyName || '';
+      pbLoadProject(leadId);
+    }, 50);
+  }
+
   async function loadLeadContacts(leadId) {
     if (!leadId) return;
     const el = $('#ld-contacts-list');
@@ -1542,9 +1626,10 @@
         el.value = value;
       });
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
-      // Load contacts + calls in parallel (uses the page_id as lead_id slug)
+      // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);
       loadLeadCalls(pageId);
+      loadLeadProject(pageId, lead.company);
     } catch (e) {
       $('#ld-title').textContent = 'Failed to load';
       $('#ld-status').textContent = e.body?.error || e.message;
@@ -1707,6 +1792,31 @@
     currentLeadId: null,
     streamsSelected: new Set(),
     pricingChart: null,
+    roleOverrides: {},       // {role: {phase: fte}} — user FTE edits
+    pricingDebounce: null,
+    lastQuote: null,
+  };
+
+  const PHASE_HELP = {
+    Understand: 'Months 1–3. Discovery, data audit, lifecycle maturity baseline, programme design. Lighter team.',
+    Execute: 'Months 4–9. Campaign / template / pipeline build. Heaviest delivery team across CRM Architect + Developer + UX.',
+    Accelerate: 'Months 10–12. Optimisation, multi-channel scale-up, embedded ways-of-working with the client team.',
+  };
+
+  const ROLE_HELP = {
+    'Client Partner': 'Day-to-day client lead. Manages the relationship + commercials. Typically 0.20–0.25 FTE.',
+    'CRM Strategist': 'Lifecycle strategy, segmentation, journey design. 0.40–0.50 FTE depending on stream depth.',
+    'CRM Architect': 'Platform architecture + complex builds. Ramps Understand → Accelerate (0.50 → 1.00) on Build projects.',
+    'CRM Developer': 'Hands-on campaign + template development. Ramps in Execute. ~0.25 FTE on Build.',
+    'Architect': 'Cross-platform / data architecture for integrations. Steady ~0.20 FTE.',
+    'Program Manager': 'Runs the engagement — sprints, comms, dependencies. Scales with stream count.',
+    'UX/UI Designer': 'Email + push + landing page design. Ramps up as templates land in Execute and Accelerate.',
+    'Solution Architect': 'Senior cross-cutting architect, anchors data + CRM + engineering streams.',
+    'Data Architect': 'CDP, warehouse, identity model design. Ramps in Execute on Data projects.',
+    'Data Engineer': 'Pipelines, dbt, transformations. Heaviest in Execute.',
+    'Analytics Engineer': 'Metrics, dashboards, activation models. Steady across Execute + Accelerate.',
+    'Software Engineer': 'Custom integrations + APIs. Heavy in Execute.',
+    'Engineering Lead': 'Senior tech lead on engineering streams. ~0.50 FTE.',
   };
 
   async function initProjectBuild() {
@@ -1797,7 +1907,10 @@
               const a = answers.get(c.key) || { value: '', status: 'unqualified' };
               return `
                 <div class="meddicc-row" data-stream="${streamKey}" data-key="${c.key}" style="grid-template-columns: 200px 1fr 200px 60px;">
-                  <div class="key">${escapeHtml(c.label)}<small>${escapeHtml(c.hint || '')}</small></div>
+                  <div class="key">
+                    ${escapeHtml(c.label)}
+                    <small>${escapeHtml(c.hint || '')}${c.role_driver ? ` <span style="color:var(--accent);">· Impacts ${escapeHtml(c.role_driver)} effort</span>` : ''}</small>
+                  </div>
                   <input type="text" placeholder="—" value="${escapeAttr(a.value || '')}" data-scope-value />
                   <div class="status-toggle">
                     <button type="button" data-scope-status="unqualified">Unqualified</button>
@@ -1940,6 +2053,7 @@
   }
 
   async function pbLoadProject(leadId) {
+    pbState.roleOverrides = {};  // reset between projects
     if (!leadId) {
       pbState.current = null; pbState.currentLeadId = null;
       pbState.streamsSelected.clear();
@@ -2022,7 +2136,11 @@
       const q = await jsonFetch('/api/pricing/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: pbState.currentLeadId, months: 12 }),
+        body: JSON.stringify({
+          lead_id: pbState.currentLeadId,
+          months: 12,
+          role_overrides: pbState.roleOverrides,
+        }),
       });
       renderPricing(q);
     } catch (e) { toast(`Pricing failed: ${e.body?.error || e.message}`, 'error'); }
@@ -2060,18 +2178,110 @@
       },
     });
 
+    // Editable team table — each FTE cell is an input that re-quotes on change.
+    pbState.lastQuote = q;
+    const phaseCol = (phase, abbr) =>
+      `<th title="${escapeAttr(PHASE_HELP[phase] || '')}"><span style="border-bottom:1px dotted var(--text-muted);cursor:help;">${abbr}</span></th>`;
     $('#pb-pricing-table').innerHTML = `
       <table class="stakeholders">
-        <thead><tr><th>Role</th><th>U</th><th>E</th><th>A</th></tr></thead>
+        <thead><tr><th>Role</th>${phaseCol('Understand','Understand FTE')}${phaseCol('Execute','Execute FTE')}${phaseCol('Accelerate','Accelerate FTE')}</tr></thead>
         <tbody>${Object.entries(q.team).map(([role, byPhase]) => `
-          <tr><td>${escapeHtml(role)}</td>
-          <td>${byPhase.Understand?.toFixed(2) || '—'}</td>
-          <td>${byPhase.Execute?.toFixed(2) || '—'}</td>
-          <td>${byPhase.Accelerate?.toFixed(2) || '—'}</td></tr>
+          <tr title="${escapeAttr(ROLE_HELP[role] || '')}">
+            <td><span style="border-bottom:1px dotted var(--text-muted);cursor:help;">${escapeHtml(role)}</span></td>
+            <td><input type="number" min="0" step="0.05" value="${(byPhase.Understand ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Understand" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
+            <td><input type="number" min="0" step="0.05" value="${(byPhase.Execute ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Execute" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
+            <td><input type="number" min="0" step="0.05" value="${(byPhase.Accelerate ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Accelerate" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
+          </tr>
         `).join('')}</tbody>
       </table>
-      <div class="muted" style="margin-top:6px;font-size:11px;">FTE per phase. U = Understand · E = Execute · A = Accelerate.</div>
+      <div class="muted" style="margin-top:6px;font-size:11px;">
+        FTE per phase. Edit any cell to forecast — pricing recalculates as you type.
+        Hover any column or role for a quick explainer.
+        <a href="#" id="pb-pricing-help" style="color:var(--accent);margin-left:8px;">How is this calculated?</a>
+      </div>
     `;
+    // Wire change handlers
+    $$('#pb-pricing-table input[data-role]').forEach(input => {
+      input.addEventListener('input', () => onTeamFteChanged(input));
+    });
+    $('#pb-pricing-help').addEventListener('click', (e) => {
+      e.preventDefault();
+      showPricingExplainer();
+    });
+  }
+
+  function onTeamFteChanged(input) {
+    const role = input.dataset.role;
+    const phase = input.dataset.phase;
+    const value = parseFloat(input.value);
+    if (!pbState.roleOverrides[role]) pbState.roleOverrides[role] = {};
+    pbState.roleOverrides[role][phase] = Number.isFinite(value) ? value : 0;
+    // Debounce live recompute so each keystroke isn't a server hit.
+    clearTimeout(pbState.pricingDebounce);
+    pbState.pricingDebounce = setTimeout(() => liveRecomputePricing(), 350);
+  }
+
+  async function liveRecomputePricing() {
+    if (!pbState.currentLeadId) return;
+    try {
+      const q = await jsonFetch('/api/pricing/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lead_id: pbState.currentLeadId,
+          months: 12,
+          role_overrides: pbState.roleOverrides,
+        }),
+      });
+      // Update only the summary + chart (don't re-render inputs or we lose focus)
+      const t = q.totals;
+      $('#pb-pricing-summary').innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+          <div class="tile"><span class="lbl">Gross</span><span class="val">${fmtUSD(t.gross_usd)}</span></div>
+          <div class="tile"><span class="lbl">Discount</span><span class="val">−${fmtUSD(t.discount_usd)}</span></div>
+          <div class="tile"><span class="lbl">Net</span><span class="val">${fmtUSD(t.net_usd)}</span></div>
+          <div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · $${t.blended_rate_usd_per_hour}/h</span></div>
+        </div>`;
+      // Update chart
+      if (pbState.pricingChart) {
+        pbState.pricingChart.data.datasets[0].data = q.monthly.map(m => m.net_usd);
+        pbState.pricingChart.data.datasets[1].data = q.monthly.map(m => m.discount_usd);
+        pbState.pricingChart.update();
+      }
+      pbState.lastQuote = q;
+    } catch (e) {
+      toast(`Recompute failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  function showPricingExplainer() {
+    const t = pbState.lastQuote?.totals;
+    const blob = `
+      *How pricing works*
+
+      1. Each project type (CRM Build, Data Work, etc.) carries a baseline
+         team template — which roles are on the engagement at what FTE
+         across the Understand, Execute, and Accelerate phases.
+
+      2. The scope criteria you mark Qualifying/Qualified can nudge specific
+         roles up via effort multipliers. Example: a high HTML template
+         count pushes CRM Developer effort up.
+
+      3. Every role bills at the same blended client-facing rate of
+         $200/hour (MR's standard sticker). Internal margin uses different
+         per-role costs; that's a separate finance view.
+
+      4. Discount: 15% on the first half (Months 1–6), 0% on the second.
+         This is the default; tweak it in the Pricing endpoint body if
+         a specific deal needs different terms.
+
+      5. Total hours = sum(role_fte × phase_months × 160).
+         Total fee = total hours × $200.
+         Net = gross − discount.
+
+      ${t ? `\n      Current: ${Math.round(t.hours)}h, gross $${Math.round(t.gross_usd).toLocaleString()}, net $${Math.round(t.net_usd).toLocaleString()}.` : ''}
+    `;
+    alert(blob.replace(/^\s+/gm, '').trim());
   }
 
   // ---- SOW (Draft Statement of Work) -----------------------------------

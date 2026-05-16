@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-05-16
+
+Project Build is now reachable from inside the pipeline drawer, with
+live editable staffing and inline coaching on how the calculator works.
+
+### Added
+- **Project & Pricing section in the Lead Detail drawer.**
+  - If no project exists for the lead: "✨ Create Project" button →
+    creates a draft project (defaulting to a CRM Build stream), switches
+    to Project Build view, pre-fills the lead id + company name, and
+    loads the project for editing.
+  - If a project exists: shows validation badge, qualified-pct,
+    streams selected, and the latest forecast net total. "Open Project
+    Build →" button switches to the full view.
+- **Editable team FTE in the Pricing preview.** The previously-read-only
+  team × phase matrix now has a `<input type="number" step="0.05">`
+  for every cell. Changing any FTE triggers a debounced (350ms) live
+  recompute of the quote — gross / discount / net / hours all update,
+  plus the Chart.js monthly bars. Inputs keep focus across recomputes.
+- **Coaching tooltips.**
+  - Hover any phase header (Understand / Execute / Accelerate) for a
+    one-line explainer of what MR does in that phase + typical team
+    shape.
+  - Hover any role row for its responsibilities + typical FTE range.
+  - Each scope criterion in Project Build now surfaces its role driver
+    inline ("Impacts CRM Developer effort"), so the AE sees how their
+    Qualifying/Qualified answers translate to pricing.
+  - "How is this calculated?" link below the team table opens a 5-step
+    explainer of the pricing model: baseline team → criteria-driven
+    multipliers → blended rate → discount → totals.
+- `pbState.roleOverrides` accumulates per-cell edits across keystrokes
+  and rides with every pricing-preview call. Reset between projects so
+  edits don't bleed across leads.
+
+### Changed
+- `pbPreviewPricing()` now passes `pbState.roleOverrides` to
+  `/api/pricing/preview` (server already supported it).
+
+### Notes
+- No backend changes. Live recompute uses the existing
+  `/api/pricing/preview` endpoint with `role_overrides`.
+- The Project Build view still requires lead_id resolution to bridge
+  with the drawer (page_id as lead_id). The system is consistent
+  internally; the AE never sees the slug.
+
+### Tests
+- 175 total (unchanged). All UI/integration changes, no new
+  server-side behaviour to test.
+
 ## [0.6.0] — 2026-05-16
 
 The "pipeline progression" release. AEs can now keep a rolling log of
