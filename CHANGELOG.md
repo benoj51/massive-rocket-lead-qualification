@@ -5,6 +5,67 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-05-16
+
+The "pipeline progression" release. AEs can now keep a rolling log of
+calls and notes per lead (with AI extraction), maintain a persistent
+contacts list per company, mark a Key Contact, and stop seeing Notion
+plumbing in the UI.
+
+### Added
+- **Persistent contacts per lead** (`contacts_store.py`). Each lead gets
+  a `cache/contacts/<lead_id>.json` file with a list of contacts —
+  name, title, email, LinkedIn, phone, city, country, source
+  (apollo/manual), is_primary flag, and timestamp.
+- **Key Contact** flag — exactly one contact per lead can be primary
+  (auto-clears on others when set). Surfaced with a `KEY` chip in
+  the drawer.
+- **`+ Save` button on Qualify Lead stakeholders** — after the lead is
+  saved to the pipeline, the AE can persist Apollo-discovered
+  stakeholders one click at a time. Each saved contact is sourced
+  as "apollo" for audit.
+- **Manual contact entry** in the drawer — collapsible form for AEs
+  who want to capture names that didn't come from Apollo.
+- **Persistent calls + notes log** (`calls_store.py`). Each lead has a
+  `cache/calls/<lead_id>.json` storing timestamped entries with type
+  (call / note / email / transcript), title, content, and AI
+  extraction results.
+- **AI extraction baked into call save** — when ANTHROPIC_API_KEY is
+  set, every saved call runs through `ai_summary.extract_from_notes`
+  and the extracted MEDDPICC + project_scope ride with the record.
+  UI surfaces "AI ✦ N MEDDPICC + scope" on each entry.
+- **Calls & Notes section in the drawer** — paste form at the top,
+  history below (newest first), each entry with content preview, AI
+  badge, and delete button.
+- **`/api/contacts/<lead_id>` and `/api/calls/<lead_id>` endpoints** —
+  GET / POST / DELETE plus `POST /api/contacts/<lead_id>/<contact_id>/primary`
+  for the Key Contact toggle.
+- **Expanded Apollo search titles** — Apollo's `mixed_people/api_search`
+  now also includes CDTO, CCO, Chief Data Officer, VP/Director/Head of
+  Digital, Digital Marketing, Data, Data Engineering, Analytics, and
+  Customer Data leadership. Default search returns a richer cross-
+  section of the buyer mix MR actually sells into.
+
+### Changed
+- **"Push to Notion" renamed to "Save lead"** throughout the Qualify
+  view (header, button, success toast). Same goes for the failure
+  toast — generic "Save failed" instead of mentioning the data store.
+- **"Open in Notion ↗" link removed** from the drawer header.
+- The data store stays Notion, but the platform now reads as a
+  pipeline app — AEs don't need to know what's behind the scenes.
+
+### Operational notes
+- Both new stores live on the container's ephemeral filesystem.
+  Mount a Railway volume at `/app/cache` to keep contacts + calls
+  + audit log + project store + criteria store across deploys.
+- AI extraction is best-effort: if Anthropic is unconfigured or the
+  call fails, the call is still saved without the `extracted` block.
+
+### Tests
+- 175 total (+18). New: Apollo roles expansion, contacts CRUD +
+  bulk save + primary logic, calls CRUD + extraction aggregation,
+  both endpoint contracts.
+
 ## [0.5.4] — 2026-05-15
 
 Partner sourcing made queryable: filter Pipeline by source / sourced-for,

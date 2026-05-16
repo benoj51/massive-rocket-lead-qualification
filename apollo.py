@@ -232,13 +232,26 @@ def enrich_organization(domain_or_url: str, cfg: ApolloConfig | None = None) -> 
 
 
 # Default seniority filters Massive Rocket cares about for first-touch outreach.
+# Covers Marketing/CRM leadership, Digital, Data, and Analytics functions —
+# MR's typical buyer mix on QSR + retail + fintech engagements.
 DEFAULT_PEOPLE_TITLES = [
+    # Marketing + CRM leadership
     "VP Marketing", "VP CRM", "VP Customer", "VP Growth",
     "Director Marketing", "Director CRM", "Director Lifecycle",
     "Head of Marketing", "Head of CRM", "Head of Lifecycle", "Head of Growth",
     "Chief Marketing Officer", "CMO",
+    "Chief Customer Officer", "CCO",
+    # Digital leadership
     "Chief Digital Officer", "CDO",
-    "Chief Customer Officer",
+    "Chief Digital Transformation Officer", "CDTO",
+    "VP Digital", "Director Digital", "Head of Digital",
+    "Head of Digital Marketing", "Director Digital Marketing",
+    # Data leadership
+    "Chief Data Officer", "Chief Data and Analytics Officer",
+    "VP Data", "Director Data", "Head of Data",
+    "Head of Data Engineering", "Director Data Engineering",
+    "Head of Analytics", "VP Analytics", "Director Analytics",
+    "Head of Customer Data", "Director Customer Data",
 ]
 
 

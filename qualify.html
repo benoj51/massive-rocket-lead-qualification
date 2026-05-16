@@ -400,13 +400,13 @@
 
         <h3>Stakeholder Targets</h3>
         <table class="stakeholders" id="stakeholders-table">
-          <thead><tr><th>Name</th><th>Title</th><th>Priority</th><th>Why</th><th>LinkedIn</th></tr></thead>
+          <thead><tr><th>Name</th><th>Title</th><th>Priority</th><th>Why</th><th>LinkedIn</th><th>Save</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
 
       <div class="card">
-        <h2>8 · Push to Notion</h2>
+        <h2>8 · Save lead</h2>
         <div class="row row-2" style="margin-bottom: 12px;">
           <div>
             <label>Sales Stage</label>
@@ -454,9 +454,9 @@
             <div id="chk-sourced-for" class="filters" style="margin-top:0;"></div>
           </div>
         </div>
-        <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the Lead Qualification Tracker.</p>
+        <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the pipeline.</p>
         <div class="btn-row">
-          <button id="btn-notion" class="btn" type="button">Push to Notion</button>
+          <button id="btn-notion" class="btn" type="button">Save lead</button>
           <span id="notion-result" class="muted"></span>
         </div>
       </div>
@@ -608,7 +608,6 @@
       <div class="meta" id="ld-meta"></div>
     </div>
     <div class="btn-row">
-      <a id="ld-notion-link" class="btn ghost" target="_blank" rel="noopener" style="padding:6px 10px;font-size:11px;">Open in Notion ↗</a>
       <button id="ld-close" class="btn ghost" type="button" style="padding:6px 10px;font-size:11px;">✕ Close</button>
     </div>
   </header>
@@ -751,6 +750,51 @@
       <div class="field"><label>Disqualifiers</label><textarea rows="2" data-ld="disqualifiers"></textarea></div>
     </div>
 
+    <div class="group">
+      <h4>Contacts</h4>
+      <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
+      <details style="margin-top: 10px;">
+        <summary style="cursor:pointer;color:var(--accent);font-size:12px;">+ Add contact manually</summary>
+        <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-top:8px;">
+          <div class="row-2">
+            <div class="field"><label>Name</label><input type="text" id="ld-new-contact-name" placeholder="Jane Doe" /></div>
+            <div class="field"><label>Title</label><input type="text" id="ld-new-contact-title" placeholder="VP Marketing" /></div>
+          </div>
+          <div class="row-2">
+            <div class="field"><label>Email</label><input type="email" id="ld-new-contact-email" placeholder="jane@..." /></div>
+            <div class="field"><label>LinkedIn URL</label><input type="url" id="ld-new-contact-linkedin" placeholder="linkedin.com/in/..." /></div>
+          </div>
+          <div class="btn-row">
+            <button id="ld-add-contact" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">Add contact</button>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="group">
+      <h4>Calls &amp; Notes</h4>
+      <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-bottom:10px;">
+        <div class="row-2">
+          <div class="field">
+            <label>Type</label>
+            <select id="ld-new-call-type">
+              <option value="call">Call</option>
+              <option value="note">Note</option>
+              <option value="transcript">Transcript</option>
+              <option value="email">Email</option>
+            </select>
+          </div>
+          <div class="field"><label>Title (optional)</label><input type="text" id="ld-new-call-title" placeholder="e.g. Discovery #2" /></div>
+        </div>
+        <div class="field"><label>Content / paste transcript</label><textarea rows="5" id="ld-new-call-content" placeholder="Paste call notes, transcript snippets, or write a quick recap…" style="font-family:var(--mono);font-size:12px;"></textarea></div>
+        <div class="btn-row">
+          <button id="ld-add-call" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save call / note</button>
+          <span class="muted" id="ld-call-status" style="font-size:11px;"></span>
+        </div>
+      </div>
+      <div id="ld-calls-list" class="muted" style="font-size:12px;">Loading…</div>
+    </div>
+
   </div>
   <footer>
     <span id="ld-status" class="muted"></span>
@@ -775,6 +819,7 @@
     pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', sort: { key: 'icp_normalised', dir: 'desc' } },
     authRequired: null,      // unknown until /api/health checked
     authToken: null,
+    lastSavedPageId: null,   // set after Push to Notion succeeds
   };
 
   // Stable mapping of orchestrator `discovered` keys -> UI tile config.
@@ -905,6 +950,7 @@
 
   // ---- Qualify flow -----------------------------------------------------
   async function runQualify(forceOverrides = null) {
+    state.lastSavedPageId = null;  // reset between qualifications
     const name = $('#in-name').value.trim();
     const url = $('#in-url').value.trim();
     if (!name || !url) { toast('Please provide both name and URL.', 'error'); return; }
@@ -1192,19 +1238,56 @@
   function renderStakeholders(result) {
     const tbody = $('#stakeholders-table tbody');
     const rows = result.stakeholders || [];
+    const savedId = state.lastSavedPageId;
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="muted">No stakeholders returned by Apollo. Run a manual LinkedIn search.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="muted">No stakeholders returned by Apollo. Run a manual LinkedIn search.</td></tr>`;
       return;
     }
-    tbody.innerHTML = rows.map(s => `
-      <tr>
-        <td>${escapeHtml(s.name || '—')}</td>
-        <td>${escapeHtml(s.title || '—')}</td>
-        <td><span class="priority-${(s.priority||'').toLowerCase()}">${escapeHtml(s.priority || '—')}</span></td>
-        <td>${escapeHtml(s.why || '')}</td>
-        <td>${s.linkedin_url ? `<a href="${escapeAttr(s.linkedin_url)}" target="_blank" rel="noopener">view</a>` : '—'}</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = rows.map((s, i) => {
+      const saveBtn = savedId
+        ? `<button class="btn ghost" type="button" data-save-stakeholder="${i}" style="padding:3px 8px;font-size:10px;">+ Save</button>`
+        : `<button class="btn ghost" type="button" disabled style="padding:3px 8px;font-size:10px;" title="Save the lead first">+ Save</button>`;
+      return `
+        <tr>
+          <td>${escapeHtml(s.name || '—')}</td>
+          <td>${escapeHtml(s.title || '—')}</td>
+          <td><span class="priority-${(s.priority||'').toLowerCase()}">${escapeHtml(s.priority || '—')}</span></td>
+          <td>${escapeHtml(s.why || '')}</td>
+          <td>${s.linkedin_url ? `<a href="${escapeAttr(s.linkedin_url)}" target="_blank" rel="noopener">view</a>` : '—'}</td>
+          <td>${saveBtn}</td>
+        </tr>
+      `;
+    }).join('');
+    tbody.querySelectorAll('[data-save-stakeholder]').forEach(b => {
+      b.addEventListener('click', () => saveStakeholderToLead(parseInt(b.dataset.saveStakeholder, 10), b));
+    });
+  }
+
+  async function saveStakeholderToLead(idx, btn) {
+    const savedId = state.lastSavedPageId;
+    if (!savedId) { toast('Save the lead first', 'error'); return; }
+    const s = (state.currentResult?.stakeholders || [])[idx];
+    if (!s) return;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await jsonFetch(`/api/contacts/${encodeURIComponent(savedId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: s.apollo_id || undefined,
+          name: s.name, title: s.title,
+          linkedin_url: s.linkedin_url, email: s.email,
+          email_status: s.email_status,
+          city: s.city, country: s.country,
+          source: 'apollo',
+        }),
+      });
+      btn.textContent = '✓ Saved';
+      btn.classList.add('success');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '+ Save';
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   // ---- Notion push ------------------------------------------------------
@@ -1224,14 +1307,18 @@
         body: JSON.stringify(state.currentResult),
       });
       const verb = res.action === 'updated' ? 'Updated' : 'Created';
-      const link = res.url ? `<a href="${res.url}" target="_blank" rel="noopener">open in Notion ↗</a>` : '';
-      $('#notion-result').innerHTML = `${verb} · ${link}`;
+      $('#notion-result').textContent = `${verb} in pipeline`;
       btn.classList.add('success'); btn.innerHTML = `✓ ${verb}`;
-      toast(`${verb} in Notion. ${link}`, 'success');
-      setTimeout(() => { btn.classList.remove('success'); btn.innerHTML = 'Push to Notion'; }, 3000);
+      toast(`${verb} in pipeline.`, 'success');
+      // Remember the page_id so the Stakeholders "Save" buttons can target it.
+      if (res.page_id) {
+        state.lastSavedPageId = res.page_id;
+        if (state.currentResult) renderStakeholders(state.currentResult);
+      }
+      setTimeout(() => { btn.classList.remove('success'); btn.innerHTML = 'Save lead'; }, 3000);
     } catch (e) {
-      toast(`Notion push failed: ${e.body?.error || e.message}`, 'error');
-      btn.innerHTML = 'Push to Notion';
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+      btn.innerHTML = 'Save lead';
     } finally { btn.disabled = false; }
   }
 
@@ -1275,6 +1362,165 @@
     drawerState.id = null; drawerState.original = null; drawerState.current = null;
   }
 
+  async function loadLeadContacts(leadId) {
+    if (!leadId) return;
+    const el = $('#ld-contacts-list');
+    try {
+      const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`);
+      const contacts = data.contacts || [];
+      if (!contacts.length) {
+        el.innerHTML = '<div class="muted" style="font-size:12px;">No contacts saved yet. Save discovered stakeholders from Qualify Lead, or add manually below.</div>';
+        return;
+      }
+      el.innerHTML = contacts.map(c => `
+        <div style="background:var(--surface-2);border:1px solid ${c.is_primary ? 'var(--accent)' : 'var(--border)'};padding:8px 10px;border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;color:var(--text);font-weight:500;">
+              ${escapeHtml(c.name || '—')}
+              ${c.is_primary ? '<span style="background:var(--accent);color:#fff;font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:600;">KEY</span>' : ''}
+            </div>
+            <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
+            ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+          </div>
+          <div class="btn-row" style="flex-shrink:0;">
+            ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">★ Key</button>`}
+            <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+          </div>
+        </div>
+      `).join('');
+      el.querySelectorAll('[data-contact-primary]').forEach(b => {
+        b.addEventListener('click', () => setContactPrimary(leadId, b.dataset.contactPrimary));
+      });
+      el.querySelectorAll('[data-contact-del]').forEach(b => {
+        b.addEventListener('click', () => deleteContact(leadId, b.dataset.contactDel));
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed to load contacts: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  async function setContactPrimary(leadId, contactId) {
+    try {
+      await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contactId)}/primary`, { method: 'POST' });
+      await loadLeadContacts(leadId);
+      toast('Marked as key contact', 'success');
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function deleteContact(leadId, contactId) {
+    if (!window.confirm('Remove this contact?')) return;
+    try {
+      await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contactId)}`, { method: 'DELETE' });
+      await loadLeadContacts(leadId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function addContactManual(leadId) {
+    const name = $('#ld-new-contact-name').value.trim();
+    const email = $('#ld-new-contact-email').value.trim();
+    if (!name && !email) { toast('Name or email required', 'error'); return; }
+    const body = {
+      name,
+      title: $('#ld-new-contact-title').value.trim(),
+      email,
+      linkedin_url: $('#ld-new-contact-linkedin').value.trim(),
+      source: 'manual',
+    };
+    try {
+      await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      $('#ld-new-contact-name').value = '';
+      $('#ld-new-contact-title').value = '';
+      $('#ld-new-contact-email').value = '';
+      $('#ld-new-contact-linkedin').value = '';
+      await loadLeadContacts(leadId);
+      toast('Contact added', 'success');
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function loadLeadCalls(leadId) {
+    if (!leadId) return;
+    const el = $('#ld-calls-list');
+    try {
+      const data = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`);
+      const calls = data.calls || [];
+      if (!calls.length) {
+        el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes saved yet.</div>';
+        return;
+      }
+      el.innerHTML = calls.map(c => {
+        const when = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+        const meddpiccFills = c.extracted?.meddpicc ? Object.keys(c.extracted.meddpicc).length : 0;
+        const scopeFilled = !!c.extracted?.project_scope;
+        const aiTag = (meddpiccFills || scopeFilled) ? `<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">AI ✦ ${meddpiccFills} MEDDPICC${scopeFilled ? ' + scope' : ''}</span>` : '';
+        return `
+          <div style="background:var(--surface-2);border:1px solid var(--border);padding:10px;border-radius:8px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+              <div style="font-size:11px;color:var(--text-dim);">
+                <strong style="color:var(--text);text-transform:uppercase;letter-spacing:.05em;">${escapeHtml(c.type)}</strong>
+                ${c.title ? ' · ' + escapeHtml(c.title) : ''} · ${escapeHtml(when)}
+                ${aiTag}
+              </div>
+              <button class="btn ghost" type="button" data-call-del="${escapeAttr(c.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;max-height:120px;overflow:auto;">${escapeHtml(c.content)}</div>
+          </div>
+        `;
+      }).join('');
+      el.querySelectorAll('[data-call-del]').forEach(b => {
+        b.addEventListener('click', () => deleteCall(leadId, b.dataset.callDel));
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  async function addCall(leadId) {
+    const content = $('#ld-new-call-content').value.trim();
+    if (!content) { toast('Paste some content first', 'error'); return; }
+    const btn = $('#ld-add-call');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…';
+    $('#ld-call-status').textContent = '';
+    try {
+      const body = {
+        type: $('#ld-new-call-type').value,
+        title: $('#ld-new-call-title').value.trim(),
+        content,
+        company_name: drawerState.original?.company || '',
+      };
+      const data = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const extracted = data.call?.extracted;
+      const fills = extracted?.meddpicc ? Object.keys(extracted.meddpicc).length : 0;
+      const scope = !!extracted?.project_scope;
+      $('#ld-new-call-content').value = '';
+      $('#ld-new-call-title').value = '';
+      $('#ld-call-status').textContent = fills || scope
+        ? `Saved · AI extracted ${fills} MEDDPICC${scope ? ' + project scope' : ''}`
+        : 'Saved';
+      toast('Call saved', 'success');
+      await loadLeadCalls(leadId);
+    } catch (e) {
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false; btn.innerHTML = 'Save call / note';
+    }
+  }
+
+  async function deleteCall(leadId, callId) {
+    if (!window.confirm('Delete this call/note?')) return;
+    try {
+      await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}/${encodeURIComponent(callId)}`, { method: 'DELETE' });
+      await loadLeadCalls(leadId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
   async function loadLead(pageId) {
     try {
       const data = await jsonFetch(`/api/lead/${encodeURIComponent(pageId)}`);
@@ -1289,7 +1535,6 @@
       $('#ld-meta').textContent = lead.last_edited
         ? `Last edited ${new Date(lead.last_edited).toLocaleString()}`
         : '';
-      $('#ld-notion-link').href = lead.url || '#';
       // Populate all fields by their data-ld key
       $$('#lead-drawer [data-ld]').forEach(el => {
         const key = el.dataset.ld;
@@ -1297,6 +1542,9 @@
         el.value = value;
       });
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
+      // Load contacts + calls in parallel (uses the page_id as lead_id slug)
+      loadLeadContacts(pageId);
+      loadLeadCalls(pageId);
     } catch (e) {
       $('#ld-title').textContent = 'Failed to load';
       $('#ld-status').textContent = e.body?.error || e.message;
@@ -1951,6 +2199,12 @@
     $('#ld-cancel').addEventListener('click', closeLeadDrawer);
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
     $('#ld-save').addEventListener('click', saveLead);
+    $('#ld-add-contact').addEventListener('click', () => {
+      if (drawerState.id) addContactManual(drawerState.id);
+    });
+    $('#ld-add-call').addEventListener('click', () => {
+      if (drawerState.id) addCall(drawerState.id);
+    });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && drawerState.id) closeLeadDrawer();
     });

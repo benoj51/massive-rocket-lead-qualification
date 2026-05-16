@@ -34,6 +34,8 @@ except ImportError:
 import ai_summary
 import apollo
 import audit
+import calls_store
+import contacts_store
 import criteria_store
 import hubspot_sync
 import pricing
@@ -219,6 +221,107 @@ def api_audit():
     since = request.args.get("since")
     rows = audit.read_events(limit=limit, since=since)
     return jsonify({"rows": rows, "count": len(rows), "summary": audit.summarise(rows)})
+
+
+# --- Contacts per lead --------------------------------------------------
+
+@app.route("/api/contacts/<lead_id>", methods=["GET"])
+def api_contacts_list(lead_id: str):
+    return jsonify({
+        "contacts": contacts_store.list_contacts(lead_id),
+        "primary": contacts_store.primary_contact(lead_id),
+    })
+
+
+@app.route("/api/contacts/<lead_id>", methods=["POST"])
+def api_contacts_save(lead_id: str):
+    """Add or update one contact, or bulk save under {contacts: [...]} body."""
+    body = request.get_json(silent=True) or {}
+    if "contacts" in body and isinstance(body["contacts"], list):
+        saved = contacts_store.save_many(lead_id, body["contacts"])
+        audit.log_event("contacts_saved", actor=_actor(), lead_id=lead_id,
+                        count=len(saved))
+        return jsonify({"saved": saved,
+                        "contacts": contacts_store.list_contacts(lead_id)})
+    try:
+        saved_one = contacts_store.save_contact(lead_id, body)
+    except contacts_store.ContactsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("contact_saved", actor=_actor(), lead_id=lead_id,
+                    contact_id=saved_one["id"])
+    return jsonify({"contact": saved_one,
+                    "contacts": contacts_store.list_contacts(lead_id)})
+
+
+@app.route("/api/contacts/<lead_id>/<contact_id>", methods=["DELETE"])
+def api_contacts_delete(lead_id: str, contact_id: str):
+    ok = contacts_store.delete_contact(lead_id, contact_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("contact_deleted", actor=_actor(), lead_id=lead_id,
+                    contact_id=contact_id)
+    return jsonify({"deleted": True,
+                    "contacts": contacts_store.list_contacts(lead_id)})
+
+
+@app.route("/api/contacts/<lead_id>/<contact_id>/primary", methods=["POST"])
+def api_contacts_set_primary(lead_id: str, contact_id: str):
+    primary = contacts_store.set_primary(lead_id, contact_id)
+    if not primary:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("contact_set_primary", actor=_actor(), lead_id=lead_id,
+                    contact_id=contact_id)
+    return jsonify({"primary": primary,
+                    "contacts": contacts_store.list_contacts(lead_id)})
+
+
+# --- Calls / notes per lead ----------------------------------------------
+
+@app.route("/api/calls/<lead_id>", methods=["GET"])
+def api_calls_list(lead_id: str):
+    return jsonify({
+        "calls": calls_store.list_calls(lead_id),
+        "rolling": calls_store.aggregate_extractions(lead_id),
+    })
+
+
+@app.route("/api/calls/<lead_id>", methods=["POST"])
+def api_calls_add(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    content = (body.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    # Run AI extraction inline so the call record carries it from the start.
+    extracted = None
+    if ai_summary.is_configured():
+        try:
+            extracted = ai_summary.extract_from_notes(
+                content,
+                company_name=(body.get("company_name") or "").strip() or None,
+            )
+        except Exception as e:
+            log.warning("Call extraction failed: %s", e)
+            extracted = None
+    body["extracted"] = extracted
+    try:
+        record = calls_store.add_call(lead_id, body)
+    except calls_store.CallsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("call_added", actor=_actor(), lead_id=lead_id,
+                    call_id=record["id"], type=record["type"],
+                    extracted=bool(extracted))
+    return jsonify({"call": record,
+                    "rolling": calls_store.aggregate_extractions(lead_id)})
+
+
+@app.route("/api/calls/<lead_id>/<call_id>", methods=["DELETE"])
+def api_calls_delete(lead_id: str, call_id: str):
+    ok = calls_store.delete_call(lead_id, call_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("call_deleted", actor=_actor(), lead_id=lead_id,
+                    call_id=call_id)
+    return jsonify({"deleted": True})
 
 
 @app.route("/api/lead/<page_id>", methods=["GET"])
