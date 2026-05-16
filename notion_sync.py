@@ -361,9 +361,10 @@ class NotionSync:
 
     # ---- Public ----
     def resolve_database_id(self) -> str:
-        """Look up the parent DB id for our data source, cache on self."""
+        """Resolve the database_id from whatever the user gave us."""
         if self.database_id:
             return self.database_id
+        # data_source_id was set; try to look up its parent database
         try:
             ds = self._request("GET", f"/data_sources/{self.data_source_id}")
             parent = ds.get("parent") or {}
@@ -373,30 +374,55 @@ class NotionSync:
                 return db_id
         except NotionSyncError:
             pass
-        # The "data source ID" is actually a database ID — common when the
-        # user pulls it from the Notion URL. Treat it as such going forward.
+        # Value was actually a database ID (the part in Notion URLs).
         self.database_id = self.data_source_id
-        self.data_source_id = ""
         return self.database_id
 
-    def _parent(self) -> dict:
-        if self.data_source_id:
-            return {"type": "data_source_id", "data_source_id": self.data_source_id}
-        return {"database_id": self.database_id}
+    def _ensure_data_source_id(self) -> str:
+        """Guarantee self.data_source_id points at a real, queryable data
+        source. The user may have put a database_id in NOTION_DATA_SOURCE_ID;
+        in that case we discover the actual data source from the DB lookup
+        and cache it.
 
-    def _query(self, body: dict) -> dict:
-        """Query whichever endpoint we have. Falls back transparently if
-        NOTION_DATA_SOURCE_ID is actually a database_id (common mistake)."""
+        Notion-Version 2025-09+ no longer supports /databases/{id}/query —
+        everything has to flow through data sources.
+        """
         if self.data_source_id:
+            # Probe: is it actually a data source?
             try:
-                return self._request("POST", f"/data_sources/{self.data_source_id}/query", json_body=body)
+                self._request("GET", f"/data_sources/{self.data_source_id}")
+                return self.data_source_id
             except NotionSyncError as e:
                 if "404" not in str(e):
                     raise
-                # ID isn't a data source. Try it as a database_id.
-                self.database_id = self.data_source_id
+                # Fall through: treat as database_id
+                candidate_db = self.data_source_id
                 self.data_source_id = ""
-        return self._request("POST", f"/databases/{self.database_id}/query", json_body=body)
+                self.database_id = self.database_id or candidate_db
+
+        if not self.database_id:
+            raise NotionSyncError("No database_id or data_source_id resolves.")
+
+        db = self._request("GET", f"/databases/{self.database_id}")
+        sources = db.get("data_sources") or []
+        if not sources:
+            raise NotionSyncError(
+                f"Database {self.database_id} has no data sources. "
+                f"This is unusual — check the database hasn't been deleted."
+            )
+        self.data_source_id = sources[0]["id"]
+        return self.data_source_id
+
+    def _parent(self) -> dict:
+        # 2025-09 requires data_source_id parents for create. Make sure we have one.
+        ds_id = self._ensure_data_source_id()
+        return {"type": "data_source_id", "data_source_id": ds_id}
+
+    def _query(self, body: dict) -> dict:
+        """Query the data source. Self-heals if the user gave us a database_id
+        in the data_source_id env var (common when copying from Notion URLs)."""
+        ds_id = self._ensure_data_source_id()
+        return self._request("POST", f"/data_sources/{ds_id}/query", json_body=body)
 
     def _find_existing(self, company_name: str, company_url: str) -> dict | None:
         if not (company_name or company_url):
