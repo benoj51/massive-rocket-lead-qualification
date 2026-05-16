@@ -546,6 +546,38 @@
 
     <div id="pb-pricing-card" class="card" style="display:none;">
       <h2>Pricing preview</h2>
+      <div class="row row-3" style="margin-bottom: 12px;">
+        <div>
+          <label>Currency</label>
+          <select id="pb-currency">
+            <option value="USD">USD ($)</option>
+            <option value="GBP">GBP (£)</option>
+            <option value="EUR">EUR (€)</option>
+          </select>
+        </div>
+        <div>
+          <label>Rate card</label>
+          <select id="pb-rate-card"><option>MR Default</option></select>
+        </div>
+        <div>
+          <label>Package (optional starting point)</label>
+          <select id="pb-package"><option value="">— pick a package —</option></select>
+        </div>
+      </div>
+      <div class="row row-3" style="margin-bottom: 12px;">
+        <div>
+          <label>Project Ops % <small style="color:var(--text-muted);font-size:10px;">(uplift on gross)</small></label>
+          <input type="number" id="pb-ops-pct" min="0" max="100" step="1" value="0" />
+        </div>
+        <div>
+          <label>Contingency % <small style="color:var(--text-muted);font-size:10px;">(uplift on gross+ops)</small></label>
+          <input type="number" id="pb-contingency-pct" min="0" max="100" step="1" value="0" />
+        </div>
+        <div>
+          <label>Discount % (first half) <small style="color:var(--text-muted);font-size:10px;">(M1–M6)</small></label>
+          <input type="number" id="pb-discount-pct" min="0" max="100" step="1" value="15" />
+        </div>
+      </div>
       <div id="pb-pricing-summary" style="margin-bottom: 12px;"></div>
       <div class="chart-wrap"><canvas id="pb-pricing-chart" height="180"></canvas></div>
       <div id="pb-pricing-table" style="margin-top: 14px;"></div>
@@ -1782,7 +1814,12 @@
   function prettyKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function escapeAttr(s) { return escapeHtml(s); }
+  const CURRENCY_SYMBOL = { USD: '$', GBP: '£', EUR: '€' };
   function fmtUSD(n) { return '$' + Math.round(n).toLocaleString(); }
+  function fmtMoney(n, ccy) {
+    const sym = CURRENCY_SYMBOL[(ccy || 'USD').toUpperCase()] || '$';
+    return sym + Math.round(n).toLocaleString();
+  }
 
   // ---- Project Build ---------------------------------------------------
   const pbState = {
@@ -2130,32 +2167,80 @@
     } catch (e) { if (!silent) toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  function currentPricingInputs() {
+    return {
+      lead_id: pbState.currentLeadId,
+      months: 12,
+      role_overrides: pbState.roleOverrides,
+      currency: $('#pb-currency')?.value || 'USD',
+      rate_card: $('#pb-rate-card')?.value || 'MR Default',
+      project_ops_pct: (parseFloat($('#pb-ops-pct')?.value) || 0) / 100,
+      contingency_pct: (parseFloat($('#pb-contingency-pct')?.value) || 0) / 100,
+      discount_first_half_pct: (parseFloat($('#pb-discount-pct')?.value) || 0) / 100,
+    };
+  }
+
   async function pbPreviewPricing() {
     if (!pbState.currentLeadId) { toast('Save the scope first', 'error'); return; }
     try {
+      await pbLoadPricingLibrary();
       const q = await jsonFetch('/api/pricing/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lead_id: pbState.currentLeadId,
-          months: 12,
-          role_overrides: pbState.roleOverrides,
-        }),
+        body: JSON.stringify(currentPricingInputs()),
       });
       renderPricing(q);
     } catch (e) { toast(`Pricing failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  async function pbLoadPricingLibrary() {
+    // Fetch rate cards + packages lists once and cache.
+    if (pbState.pricingLibrary) return;
+    try {
+      const [rates, pkgs] = await Promise.all([
+        jsonFetch('/api/pricing/rate-cards'),
+        jsonFetch('/api/pricing/packages'),
+      ]);
+      pbState.pricingLibrary = { rates, packages: pkgs.packages };
+      // Populate the dropdowns
+      $('#pb-rate-card').innerHTML = rates.rate_cards.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+      $('#pb-package').innerHTML = '<option value="">— pick a package —</option>' +
+        pkgs.packages.map(p => `<option value="${escapeAttr(p.key)}">${escapeHtml(p.name)} (${p.total_hours}h / ${p.duration_months}mo)</option>`).join('');
+      // Wire change handlers — any pricing input change re-runs preview
+      ['pb-currency', 'pb-rate-card', 'pb-ops-pct', 'pb-contingency-pct', 'pb-discount-pct'].forEach(id => {
+        const el = $('#' + id);
+        if (el && !el.dataset.bound) {
+          el.addEventListener('change', () => liveRecomputePricing());
+          el.dataset.bound = '1';
+        }
+      });
+    } catch (e) { console.warn('pricing library load failed', e); }
+  }
+
   function renderPricing(q) {
     $('#pb-pricing-card').style.display = 'block';
     const t = q.totals;
+    const ccy = q.inputs?.currency || 'USD';
+    const opsLine = (t.ops_usd > 0 || t.contingency_usd > 0)
+      ? `<div class="tile"><span class="lbl">+ Ops / Contingency</span><span class="val">${fmtMoney(t.ops_usd + t.contingency_usd, ccy)}</span></div>`
+      : `<div class="tile"><span class="lbl">Discount</span><span class="val">−${fmtMoney(t.discount_usd, ccy)}</span></div>`;
+    const discountTile = (t.ops_usd > 0 || t.contingency_usd > 0)
+      ? `<div class="tile"><span class="lbl">− Discount</span><span class="val">${fmtMoney(t.discount_usd, ccy)}</span></div>`
+      : `<div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h</span></div>`;
+    const netTile = (t.ops_usd > 0 || t.contingency_usd > 0)
+      ? `<div class="tile"><span class="lbl">Net (${ccy})</span><span class="val">${fmtMoney(t.net_usd, ccy)}</span></div>`
+      : `<div class="tile"><span class="lbl">Net (${ccy})</span><span class="val">${fmtMoney(t.net_usd, ccy)}</span></div>`;
+    const lastTile = (t.ops_usd > 0 || t.contingency_usd > 0)
+      ? `<div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h</span></div>`
+      : `<div class="tile" style="display:none;"></div>`;
     $('#pb-pricing-summary').innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-        <div class="tile"><span class="lbl">Gross</span><span class="val">${fmtUSD(t.gross_usd)}</span></div>
-        <div class="tile"><span class="lbl">Discount</span><span class="val">−${fmtUSD(t.discount_usd)}</span></div>
-        <div class="tile"><span class="lbl">Net</span><span class="val">${fmtUSD(t.net_usd)}</span></div>
-        <div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · $${t.blended_rate_usd_per_hour}/h</span></div>
-      </div>`;
+        <div class="tile"><span class="lbl">Gross billable</span><span class="val">${fmtMoney(t.gross_usd, ccy)}</span></div>
+        ${opsLine}
+        ${discountTile}
+        ${netTile}
+      </div>
+      ${(t.ops_usd > 0 || t.contingency_usd > 0) ? `<div style="margin-top: 8px;" class="muted">Hours: ${Math.round(t.hours).toLocaleString()} · Blended ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h · Rate card: ${escapeHtml(q.inputs?.rate_card || 'MR Default')}</div>` : ''}`;
 
     const ctx = $('#pb-pricing-chart').getContext('2d');
     if (pbState.pricingChart) pbState.pricingChart.destroy();
@@ -2227,21 +2312,20 @@
       const q = await jsonFetch('/api/pricing/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lead_id: pbState.currentLeadId,
-          months: 12,
-          role_overrides: pbState.roleOverrides,
-        }),
+        body: JSON.stringify(currentPricingInputs()),
       });
       // Update only the summary + chart (don't re-render inputs or we lose focus)
       const t = q.totals;
+      const ccy = q.inputs?.currency || 'USD';
+      const hasUplift = (t.ops_usd > 0 || t.contingency_usd > 0);
       $('#pb-pricing-summary').innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-          <div class="tile"><span class="lbl">Gross</span><span class="val">${fmtUSD(t.gross_usd)}</span></div>
-          <div class="tile"><span class="lbl">Discount</span><span class="val">−${fmtUSD(t.discount_usd)}</span></div>
-          <div class="tile"><span class="lbl">Net</span><span class="val">${fmtUSD(t.net_usd)}</span></div>
-          <div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · $${t.blended_rate_usd_per_hour}/h</span></div>
-        </div>`;
+          <div class="tile"><span class="lbl">Gross billable</span><span class="val">${fmtMoney(t.gross_usd, ccy)}</span></div>
+          ${hasUplift ? `<div class="tile"><span class="lbl">+ Ops / Contingency</span><span class="val">${fmtMoney(t.ops_usd + t.contingency_usd, ccy)}</span></div>` : `<div class="tile"><span class="lbl">− Discount</span><span class="val">${fmtMoney(t.discount_usd, ccy)}</span></div>`}
+          ${hasUplift ? `<div class="tile"><span class="lbl">− Discount</span><span class="val">${fmtMoney(t.discount_usd, ccy)}</span></div>` : `<div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h</span></div>`}
+          <div class="tile"><span class="lbl">Net (${ccy})</span><span class="val">${fmtMoney(t.net_usd, ccy)}</span></div>
+        </div>
+        ${hasUplift ? `<div style="margin-top: 8px;" class="muted">Hours: ${Math.round(t.hours).toLocaleString()} · Blended ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h · Rate card: ${escapeHtml(q.inputs?.rate_card || 'MR Default')}</div>` : ''}`;
       // Update chart
       if (pbState.pricingChart) {
         pbState.pricingChart.data.datasets[0].data = q.monthly.map(m => m.net_usd);

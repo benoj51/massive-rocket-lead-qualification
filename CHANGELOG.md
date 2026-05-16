@@ -5,6 +5,88 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-05-16
+
+Pricing Calculator V2.0 — multi-currency, multi-rate-card, with
+Project Ops + Contingency uplifts. Data sourced directly from the
+live Google Sheet workbook
+(`1ghZrB-U7GoJ6IGR9K9yj3ptUbwM7IU4J_hRpFJ-00K4`), tabs
+`[Database] Rate Card - Sales` and `[Reference] Packages`.
+
+### Added
+- **`rate_cards.py`** — codified rate card data:
+  - **MR Default** (region-agnostic blended): £150/$200/€175 per hour
+  - **Staff Augmentation** — 47 entries across role × seniority × region
+    (UK, EU, LATAM, India). Includes Braze Technical Architect,
+    Business Analyst, CRM Consultant (incl. AI variant), CRM Developer
+    (Braze + SFMC), CRM Operations Manager, CRM Strategist, CRM Team
+    Lead, CRM Director, Data Analyst, Data Engineer (CDP/Kafka/
+    Snowflake), Manual QA Engineer, Platform Engineer, Project Manager,
+    Scrum Master, Software Engineer, Technical Architect, Technical
+    Product Owner.
+  - **Client-specific cards**: Yum! Small Markets (Onboarding
+    Consultant only) and Yum Thailand! (all roles, blended).
+  - `rate_lookup(card, role, currency, region, seniority)` — single
+    entry point. Falls back to MR Default if a role isn't on a custom
+    card.
+- **`packages.py`** — 35 pre-defined project packages from the
+  `[Reference] Packages` sheet:
+  Light Audit, Audit/Inception, Braze Onboarding & Training,
+  Braze Setup & Configuration, Braze Migration, [X-small|Small|Medium|
+  Large] Braze Operations, Customer 360, CDP Setup, CDP & Data
+  Operations, Salesforce Connector, Braze SDK Integration / Advisory,
+  CRM Development (+ game variants), Web/Mobile MVP, Support &
+  Maintenance, full PLO range (Lite/Growth/Bronze/Silver/Quick Start/
+  Ignite/Custom), Small Market variants, and add-on top-ups.
+- **`/api/pricing/rate-cards`** — returns currencies, rate card names,
+  regions, seniorities, full Staff Aug rate table, and the MR Default
+  blended rates per currency. Powers the new dropdowns.
+- **`/api/pricing/packages`** — returns all 35 package definitions.
+- **`/api/pricing/preview` accepts new fields**:
+  `currency`, `rate_card`, `project_ops_pct`, `contingency_pct`,
+  `role_staffing` (per-role region/seniority for Staff Aug). All
+  optional; defaults preserve v0.4 behaviour.
+- **Project Build pricing card extended**:
+  - Currency selector (USD / GBP / EUR)
+  - Rate card selector (MR Default / Staff Augmentation / Yum! Small
+    Markets / Yum Thailand!)
+  - Package selector (35 options as a starting point — visual only for
+    now; deeper seeding lands in P2)
+  - Project Operations % input
+  - Contingency % input
+  - Discount % input (was hidden, now editable per quote)
+  - Any change live-recomputes pricing
+- **Pricing summary now currency-aware** — tiles render the right
+  symbol (£/$/€). When Ops or Contingency is non-zero, the layout
+  expands to show Gross / + Ops & Contingency / − Discount / Net.
+
+### Changed
+- `pricing.py` rate lookup goes through `rate_cards.rate_lookup`
+  instead of a hardcoded $200 constant. `ROLE_RATES_USD_PER_HOUR`
+  retained for backward-compat but no longer the source of truth.
+- `compute_quote` output now includes `ops_usd`, `contingency_usd`,
+  `subtotal_usd` in both monthly and totals blocks.
+- The reference deal (12-month CRM Build, MR Default, USD, 15%
+  first-half discount, no Ops, no Contingency) **still produces
+  exactly $1,191,360 gross / $1,112,016 net / 5,957 hours** — tests
+  pin this so the existing calibration doesn't drift.
+
+### Still pending (v0.8 Phase 2)
+- **`[Database] Rate Card - Internal`** tab — needed for gross margin
+  calculation. The AE-visible quote works without it; the Ops-side
+  margin indicator does not.
+- Per-role region + seniority pickers in the team table (Staff Aug
+  becomes meaningful UI-side once the AE can pick per-role staffing).
+- Package "apply" — clicking a package today only shows its hours; in
+  P2, applying a package seeds the team allocation table from the
+  package's role × hours breakdown.
+
+### Tests
+- 193 total (+18). New: rate card lookups (UK/EU/LATAM/India + Yum
+  cards), Yum Thailand reduces price, 35 packages all have valid
+  components, currency switching produces proportional gross,
+  Project Ops + Contingency math, backward-compat reference deal.
+
 ## [0.7.0] — 2026-05-16
 
 Project Build is now reachable from inside the pipeline drawer, with

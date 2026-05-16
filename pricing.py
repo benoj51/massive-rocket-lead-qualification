@@ -135,17 +135,28 @@ TEAM_TEMPLATES: dict[str, TeamTemplate] = {
 
 @dataclass
 class QuoteInputs:
-    """What the AE picks to compute a quote."""
+    """What the AE picks to compute a quote.
+
+    v0.8 added rate-card aware lookups + Project Ops + Contingency uplifts.
+    Defaults preserve v0.4 behaviour: MR Default rate card, USD,
+    no uplifts, 15% first-half discount.
+    """
     project_types: list[str]   # ["crm_build", "data_work"] etc.
     months: int = 12           # total project length
     phase_months: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_PHASE_MONTHS))
-    discount_pct_first_half: float = 0.15  # 15% on first half (Understand + half Execute)
+    discount_pct_first_half: float = 0.15
     discount_pct_second_half: float = 0.0
     currency: str = "USD"
     role_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
-    # Optional: extra effort multipliers driven by Project Build's scope criteria.
-    # See scope.role_drivers_for_criteria.
     effort_multipliers: dict[str, float] = field(default_factory=dict)
+    # v0.8 additions
+    rate_card: str = "MR Default"
+    project_ops_pct: float = 0.0      # uplift on gross
+    contingency_pct: float = 0.0      # uplift on gross + ops
+    # Staff Augmentation needs region + seniority; if rate_card is "Staff
+    # Augmentation" these supply the defaults when role-specific overrides
+    # don't carry them. Keys are role names; values are {region, seniority}.
+    role_staffing: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +211,25 @@ def _apply_effort_multipliers(team: TeamTemplate, multipliers: dict[str, float])
     return merged
 
 
+def _resolve_rate(role: str, inputs: QuoteInputs) -> float:
+    """Look up the hourly rate for a role under the chosen rate card + currency.
+    Falls back to MR Default rate if the role isn't on the chosen card."""
+    import rate_cards
+    staffing = inputs.role_staffing.get(role, {}) if inputs.rate_card == "Staff Augmentation" else {}
+    rate = rate_cards.rate_lookup(
+        inputs.rate_card, role, inputs.currency,
+        region=staffing.get("region"), seniority=staffing.get("seniority"),
+    )
+    if rate is None:
+        # Fallback: MR Default in same currency.
+        rate = rate_cards.rate_lookup("MR Default", role, inputs.currency)
+    return float(rate["hourly"]) if rate else 0.0
+
+
 def _monthly_breakdown(team: TeamTemplate, inputs: QuoteInputs) -> list[dict[str, Any]]:
     months = inputs.months
     breakdown: list[dict[str, Any]] = []
+    role_rates = {role.strip(): _resolve_rate(role.strip(), inputs) for role in team.keys()}
     for m in range(1, months + 1):
         phase = _phase_for_month(m, inputs.phase_months)
         rows: list[dict[str, Any]] = []
@@ -214,27 +241,37 @@ def _monthly_breakdown(team: TeamTemplate, inputs: QuoteInputs) -> list[dict[str
             if fte <= 0:
                 continue
             hours = fte * HOURS_PER_FTE_MONTH
-            rate = ROLE_RATES_USD_PER_HOUR.get(role_name, 0)
+            rate = role_rates.get(role_name, 0)
             cost = hours * rate
             rows.append({
                 "role": role_name,
                 "fte": fte,
                 "hours": hours,
-                "rate_usd_per_hour": rate,
+                "rate_usd_per_hour": rate,  # name kept for backward compat; reflects selected currency
                 "cost_usd": round(cost, 2),
             })
             month_total_usd += cost
             month_hours += hours
 
+        # Project Ops uplift (proportional fee on top of gross)
+        ops_usd = month_total_usd * inputs.project_ops_pct
+        # Contingency uplift (on gross + ops, per the spec)
+        contingency_usd = (month_total_usd + ops_usd) * inputs.contingency_pct
+        # All-inclusive subtotal before discount
+        subtotal_usd = month_total_usd + ops_usd + contingency_usd
+
         discount_pct = inputs.discount_pct_first_half if m <= months // 2 else inputs.discount_pct_second_half
-        discount_usd = month_total_usd * discount_pct
-        net_usd = month_total_usd - discount_usd
+        discount_usd = subtotal_usd * discount_pct
+        net_usd = subtotal_usd - discount_usd
 
         breakdown.append({
             "month": m,
             "phase": phase,
             "rows": rows,
             "gross_usd": round(month_total_usd, 2),
+            "ops_usd": round(ops_usd, 2),
+            "contingency_usd": round(contingency_usd, 2),
+            "subtotal_usd": round(subtotal_usd, 2),
             "hours": round(month_hours, 1),
             "discount_pct": discount_pct,
             "discount_usd": round(discount_usd, 2),
@@ -254,6 +291,9 @@ def compute_quote(inputs: QuoteInputs) -> dict[str, Any]:
 
     months = _monthly_breakdown(team, inputs)
     gross_total = sum(m["gross_usd"] for m in months)
+    ops_total = sum(m["ops_usd"] for m in months)
+    contingency_total = sum(m["contingency_usd"] for m in months)
+    subtotal_total = sum(m["subtotal_usd"] for m in months)
     discount_total = sum(m["discount_usd"] for m in months)
     net_total = sum(m["net_usd"] for m in months)
     hours_total = sum(m["hours"] for m in months)
@@ -266,11 +306,17 @@ def compute_quote(inputs: QuoteInputs) -> dict[str, Any]:
             "phase_months": inputs.phase_months,
             "discount_first_half_pct": inputs.discount_pct_first_half,
             "currency": inputs.currency,
+            "rate_card": inputs.rate_card,
+            "project_ops_pct": inputs.project_ops_pct,
+            "contingency_pct": inputs.contingency_pct,
         },
         "team": {role.strip(): by_phase for role, by_phase in team.items()},
         "monthly": months,
         "totals": {
             "gross_usd": round(gross_total, 2),
+            "ops_usd": round(ops_total, 2),
+            "contingency_usd": round(contingency_total, 2),
+            "subtotal_usd": round(subtotal_total, 2),
             "discount_usd": round(discount_total, 2),
             "net_usd": round(net_total, 2),
             "hours": round(hours_total, 1),

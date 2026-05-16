@@ -38,9 +38,11 @@ import calls_store
 import contacts_store
 import criteria_store
 import hubspot_sync
+import packages
 import pricing
 import project_store
 import qualify_service
+import rate_cards
 import scope as scope_module
 import slack_digest
 import sow
@@ -590,6 +592,25 @@ def api_admin_criteria_reset_all():
     return jsonify({"library": criteria_store.load()})
 
 
+@app.route("/api/pricing/rate-cards", methods=["GET"])
+def api_pricing_rate_cards():
+    """Read-only metadata for the UI dropdowns."""
+    return jsonify({
+        "currencies": list(rate_cards.CURRENCIES),
+        "rate_cards": rate_cards.all_cards(),
+        "regions": rate_cards.list_regions(),
+        "seniorities": rate_cards.list_seniorities(),
+        "staff_aug_rates": rate_cards.STAFF_AUG_RATES,
+        "default_blended": {c: rate_cards.RATE_CARD_MR_DEFAULT["rates"][c]
+                            for c in rate_cards.CURRENCIES},
+    })
+
+
+@app.route("/api/pricing/packages", methods=["GET"])
+def api_pricing_packages():
+    return jsonify({"packages": packages.list_packages()})
+
+
 @app.route("/api/pricing/preview", methods=["POST"])
 def api_pricing_preview():
     """Compute a quote. Either from a stored project or from raw inputs."""
@@ -599,6 +620,12 @@ def api_pricing_preview():
     discount_first_half = float(body.get("discount_first_half_pct", 0.15))
     discount_second_half = float(body.get("discount_second_half_pct", 0.0))
     role_overrides = body.get("role_overrides") or {}
+    # v0.8 additions
+    currency = (body.get("currency") or "USD").upper()
+    rate_card = body.get("rate_card") or "MR Default"
+    project_ops_pct = float(body.get("project_ops_pct") or 0.0)
+    contingency_pct = float(body.get("contingency_pct") or 0.0)
+    role_staffing = body.get("role_staffing") or {}
 
     if lead_id:
         project = project_store.load(lead_id)
@@ -621,6 +648,11 @@ def api_pricing_preview():
             discount_pct_second_half=discount_second_half,
             role_overrides=role_overrides,
             effort_multipliers=effort_multipliers,
+            currency=currency,
+            rate_card=rate_card,
+            project_ops_pct=project_ops_pct,
+            contingency_pct=contingency_pct,
+            role_staffing=role_staffing,
         ))
         if lead_id:
             audit.log_event("pricing_preview", actor=_actor(), lead_id=lead_id,
