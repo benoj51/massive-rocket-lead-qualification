@@ -346,6 +346,11 @@ def qualify(
         },
         "notes": "",
         "project_scope": "",
+        # Partner sourcing — both directions.
+        # opportunity_source: who brought this lead TO us (single value).
+        # sourced_for_partners: which partners we're sourcing this account FOR (multi).
+        "opportunity_source": ov.partner_source or "",
+        "sourced_for_partners": [],
     }
 
 

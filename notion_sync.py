@@ -151,6 +151,19 @@ def _payload_to_properties(payload: dict) -> dict[str, Any]:
     if sales_stage:
         props["Sales Stage"] = {"select": {"name": sales_stage}}
 
+    # Source of opportunity — single select. Maps to existing Notion column.
+    opp_source = payload.get("opportunity_source")
+    if opp_source:
+        props["Partner Source"] = {"select": {"name": opp_source}}
+
+    # Sourced For — multi-select. New Notion column expected;
+    # add it manually if missing (Notion will 400 the whole push otherwise).
+    sourced_for = payload.get("sourced_for_partners")
+    if sourced_for:
+        valid = [p for p in sourced_for if p]
+        if valid:
+            props["Sourced For"] = {"multi_select": [{"name": p} for p in valid]}
+
     # MEDDICC — only set if the AE filled it in.
     meddicc_score = 0
     meddicc_score_map = {"not_started": 0, "in_progress": 1, "confirmed": 3}
@@ -329,6 +342,12 @@ def _chunk_text(text: str, size: int) -> list[str]:
 
 # --- Pipeline view helper --------------------------------------------------
 
+def _extract_multi_select(prop: dict | None) -> list[str]:
+    if not prop or prop.get("type") != "multi_select":
+        return []
+    return [item.get("name", "") for item in (prop.get("multi_select") or []) if item.get("name")]
+
+
 def _extract_text(prop: dict | None) -> str:
     if not prop:
         return ""
@@ -340,6 +359,8 @@ def _extract_text(prop: dict | None) -> str:
         return prop.get("url") or ""
     if prop.get("type") == "select":
         return (prop.get("select") or {}).get("name", "") or ""
+    if prop.get("type") == "multi_select":
+        return ", ".join(_extract_multi_select(prop))
     if prop.get("type") == "number":
         n = prop.get("number")
         return "" if n is None else str(n)
@@ -379,6 +400,8 @@ def _page_to_detail(page: dict) -> dict:
         "positive_signals": _extract_text(props.get("Positive Signals")),
         "disqualifiers": _extract_text(props.get("Disqualifiers")),
         "qualified_date": _extract_text(props.get("Qualified Date")),
+        "opportunity_source": _extract_text(props.get("Partner Source")),
+        "sourced_for_partners": _extract_multi_select(props.get("Sourced For")),
     }
 
 
@@ -624,6 +647,19 @@ class NotionSync:
         ):
             if key in edits:
                 props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}
+
+        # Source of opportunity — single select on Notion "Partner Source"
+        if "opportunity_source" in edits:
+            val = edits["opportunity_source"]
+            props["Partner Source"] = ({"select": None} if not val
+                                       else {"select": {"name": val}})
+
+        # Sourced For — multi-select. Send empty list to clear.
+        if "sourced_for_partners" in edits:
+            partners = edits["sourced_for_partners"] or []
+            if isinstance(partners, str):
+                partners = [p.strip() for p in partners.split(",") if p.strip()]
+            props["Sourced For"] = {"multi_select": [{"name": p} for p in partners if p]}
 
         if not props:
             return {"updated": False, "reason": "no editable fields supplied"}

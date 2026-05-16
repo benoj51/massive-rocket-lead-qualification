@@ -430,6 +430,30 @@
             </select>
           </div>
         </div>
+        <div class="row row-2" style="margin-bottom: 12px;">
+          <div>
+            <label>Source of opportunity</label>
+            <select id="sel-source">
+              <option value="">—</option>
+              <option>Braze</option>
+              <option>Hightouch</option>
+              <option>Snowflake</option>
+              <option>Talon.one</option>
+              <option>Voucherify</option>
+              <option>mParticle</option>
+              <option>Segment</option>
+              <option>Inbound</option>
+              <option>Outbound</option>
+              <option>Cold Outreach</option>
+              <option>Customer Referral</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label>Sourced for partners</label>
+            <div id="chk-sourced-for" class="filters" style="margin-top:0;"></div>
+          </div>
+        </div>
         <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the Lead Qualification Tracker.</p>
         <div class="btn-row">
           <button id="btn-notion" class="btn" type="button">Push to Notion</button>
@@ -673,6 +697,30 @@
         <label>ICP Score (read-only)</label>
         <div><span class="icp-pill" id="ld-icp">—</span></div>
       </div>
+      <div class="row-2">
+        <div class="field">
+          <label>Source of opportunity</label>
+          <select data-ld="opportunity_source">
+            <option value="">—</option>
+            <option>Braze</option>
+            <option>Hightouch</option>
+            <option>Snowflake</option>
+            <option>Talon.one</option>
+            <option>Voucherify</option>
+            <option>mParticle</option>
+            <option>Segment</option>
+            <option>Inbound</option>
+            <option>Outbound</option>
+            <option>Cold Outreach</option>
+            <option>Customer Referral</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Sourced for partners</label>
+          <div id="ld-sourced-for" class="filters" style="margin-top:0;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="group">
@@ -746,6 +794,7 @@
     { key: 'competition',       label: 'Competition',       hint: 'Who else they are evaluating.' },
   ];
   const MEDDPICC_KEYS = MEDDICC_ROWS.map(r => r.key);
+  const PARTNER_OPTIONS = ['Braze', 'Hightouch', 'Snowflake', 'Talon.one', 'Voucherify', 'mParticle', 'Segment'];
 
   // ---- Utilities --------------------------------------------------------
   const $ = (sel) => document.querySelector(sel);
@@ -890,6 +939,30 @@
     // Restore notes + project scope if persisted on the result
     $('#notes-text').value = result.notes || '';
     $('#project-scope-text').value = result.project_scope || '';
+    // Source + sourced-for chips
+    $('#sel-source').value = result.opportunity_source || '';
+    renderSourcedForChips(result.sourced_for_partners || []);
+  }
+
+  function renderSourcedForChips(selected) {
+    const set = new Set(selected || []);
+    const el = $('#chk-sourced-for');
+    el.innerHTML = PARTNER_OPTIONS.map(p => `
+      <button type="button" class="chip ${set.has(p) ? 'active' : ''}" data-partner="${escapeAttr(p)}">${escapeHtml(p)}</button>
+    `).join('');
+    el.querySelectorAll('[data-partner]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active');
+        if (state.currentResult) {
+          state.currentResult.sourced_for_partners = collectSourcedFor();
+        }
+      });
+    });
+  }
+
+  function collectSourcedFor() {
+    return Array.from(document.querySelectorAll('#chk-sourced-for [data-partner].active'))
+      .map(b => b.dataset.partner);
   }
 
   function bindNotesAndScopeSync() {
@@ -1133,9 +1206,11 @@
     if (!state.currentResult) return;
     const btn = $('#btn-notion');
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Pushing…';
-    // Capture the AE's stage + owner choices into the payload before push.
+    // Capture the AE's stage + owner + partner choices into the payload before push.
     state.currentResult.sales_stage = $('#sel-stage').value || null;
     state.currentResult.owner = $('#sel-owner').value || 'Ben Ojuolape';
+    state.currentResult.opportunity_source = $('#sel-source').value || '';
+    state.currentResult.sourced_for_partners = collectSourcedFor();
     try {
       const res = await jsonFetch('/api/notion/sync', {
         method: 'POST',
@@ -1214,11 +1289,29 @@
         const value = lead[key] != null ? String(lead[key]) : '';
         el.value = value;
       });
+      renderDrawerSourcedFor(lead.sourced_for_partners || []);
     } catch (e) {
       $('#ld-title').textContent = 'Failed to load';
       $('#ld-status').textContent = e.body?.error || e.message;
       toast(`Load failed: ${e.body?.error || e.message}`, 'error');
     }
+  }
+
+  function renderDrawerSourcedFor(selected) {
+    const set = new Set(selected || []);
+    const el = $('#ld-sourced-for');
+    if (!el) return;
+    el.innerHTML = PARTNER_OPTIONS.map(p => `
+      <button type="button" class="chip ${set.has(p) ? 'active' : ''}" data-ld-partner="${escapeAttr(p)}">${escapeHtml(p)}</button>
+    `).join('');
+    el.querySelectorAll('[data-ld-partner]').forEach(btn => {
+      btn.addEventListener('click', () => btn.classList.toggle('active'));
+    });
+  }
+
+  function collectDrawerSourcedFor() {
+    return Array.from(document.querySelectorAll('#ld-sourced-for [data-ld-partner].active'))
+      .map(b => b.dataset.ldPartner);
   }
 
   function collectLeadEdits() {
@@ -1231,6 +1324,12 @@
       const originalValue = original[key] != null ? String(original[key]) : '';
       if (value !== originalValue) edits[key] = value;
     });
+    // Sourced-for (multi-select) — diff against original list
+    const currentSourcedFor = collectDrawerSourcedFor().sort();
+    const originalSourcedFor = (original.sourced_for_partners || []).slice().sort();
+    if (currentSourcedFor.join('|') !== originalSourcedFor.join('|')) {
+      edits.sourced_for_partners = currentSourcedFor;
+    }
     return edits;
   }
 

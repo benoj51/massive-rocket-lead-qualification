@@ -5,6 +5,51 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] — 2026-05-15
+
+Partner sourcing — track both directions of partner-led pipeline.
+
+### Added
+- **Source of opportunity** (single-select) in Qualify Lead + Lead
+  Detail drawer. Captures who brought this lead *to* MR. Options:
+  Braze, Hightouch, Snowflake, Talon.one, Voucherify, mParticle,
+  Segment, Inbound, Outbound, Cold Outreach, Customer Referral, Other.
+  Writes to existing `Partner Source` select column.
+- **Sourced for partners** (multi-select chips) in Qualify Lead +
+  Lead Detail drawer. Captures which partners we're sourcing this
+  account *for*. Options: Braze, Hightouch, Snowflake, Talon.one,
+  Voucherify, mParticle, Segment. Writes to new `Sourced For`
+  multi_select column.
+- `notion_sync._extract_multi_select` helper to read multi_select
+  properties back from Notion.
+- Both fields surfaced in `_page_to_detail`, in `update_page` (with
+  clear-on-empty semantics), and in the `qualify()` payload defaults.
+  Existing `partner_source` override on QualificationOverrides now
+  flows through as the default `opportunity_source`.
+
+### Required Notion schema additions
+- **`Sourced For`** (multi_select) — needs to be added to the Lead
+  Qualification Tracker database before pushes will work. Steps:
+  1. Open the tracker DB in Notion → click the `+` to add a property
+  2. Name: **Sourced For** (exactly that)
+  3. Type: **Multi-select**
+  4. (Optional) Pre-create the options: Braze, Hightouch, Snowflake,
+     Talon.one, Voucherify, mParticle, Segment — or let Notion add
+     them as you push leads.
+- **`Partner Source`** already in the docs schema and used here, but
+  if it doesn't exist as a select column in your DB, add it the same
+  way with the option list above (plus Inbound/Outbound/Cold Outreach
+  /Customer Referral/Other).
+
+If those columns are missing, Notion 400s the push and the UI shows a
+red toast. Adding them fixes both Qualify Lead pushes and Lead Detail
+drawer saves immediately — no redeploy needed.
+
+### Tests
+- 148 total (+12). Covers payload defaults, Notion encode (select +
+  multi_select), Notion decode (with missing-column safety), update
+  flow including clearing values.
+
 ## [0.5.2] — 2026-05-15
 
 Click any row in Pipeline → edit the lead in-platform. No more
