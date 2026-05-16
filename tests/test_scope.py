@@ -44,11 +44,25 @@ class ScopeModelTests(unittest.TestCase):
             scope.update_criterion(p, "crm_build", "migrating_campaigns",
                                    status="invalid_status")
 
-    def test_update_unknown_criterion(self):
+    def test_update_unknown_criterion_appends(self):
+        """v0.4.1: criteria can be added to the library at runtime, so
+        update_criterion must append unknown keys (they were just added
+        between bootstrap and save)."""
+        import scope
+        p = scope.new_project("test_co", "Test Co", ["crm_build"])
+        scope.update_criterion(p, "crm_build", "newly_added_key",
+                               value="hello", status="qualifying")
+        stream = p.streams[0]
+        appended = next((c for c in stream.criteria if c.key == "newly_added_key"), None)
+        self.assertIsNotNone(appended)
+        self.assertEqual(appended.value, "hello")
+        self.assertEqual(appended.status, "qualifying")
+
+    def test_update_criterion_on_missing_stream_raises(self):
         import scope
         p = scope.new_project("test_co", "Test Co", ["crm_build"])
         with self.assertRaises(scope.ScopeError):
-            scope.update_criterion(p, "crm_build", "no_such_key", value="x")
+            scope.update_criterion(p, "data_work", "use_cases_count", value="3")
 
 
 class StateMachineTests(unittest.TestCase):

@@ -1022,19 +1022,29 @@
       const stream = current?.streams?.find(s => s.project_type === streamKey);
       const answers = new Map((stream?.criteria || []).map(c => [c.key, c]));
       return `
-        <div class="card">
-          <h2>${escapeHtml(info.label)} <small style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— ${escapeHtml(info.description || '')}</small></h2>
+        <div class="card" data-pbstream="${streamKey}">
+          <h2 style="display:flex;align-items:center;justify-content:space-between;">
+            <span>${escapeHtml(info.label)} <small style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— ${escapeHtml(info.description || '')}</small></span>
+            <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;">
+              <a href="#" data-pb-add="${streamKey}" style="color:var(--accent);margin-right:12px;">+ Add criterion</a>
+              <a href="#" data-pb-reset="${streamKey}" style="color:var(--text-muted);">↺ Reset</a>
+            </span>
+          </h2>
           <div class="meddicc">
             ${criteria.map(c => {
               const a = answers.get(c.key) || { value: '', status: 'unqualified' };
               return `
-                <div class="meddicc-row" data-stream="${streamKey}" data-key="${c.key}">
+                <div class="meddicc-row" data-stream="${streamKey}" data-key="${c.key}" style="grid-template-columns: 200px 1fr 200px 60px;">
                   <div class="key">${escapeHtml(c.label)}<small>${escapeHtml(c.hint || '')}</small></div>
                   <input type="text" placeholder="—" value="${escapeAttr(a.value || '')}" data-scope-value />
                   <div class="status-toggle">
                     <button type="button" data-scope-status="unqualified">Unqualified</button>
                     <button type="button" data-scope-status="qualifying">Qualifying</button>
                     <button type="button" data-scope-status="qualified">Qualified</button>
+                  </div>
+                  <div style="text-align:right;">
+                    <button class="btn ghost" type="button" style="padding:4px 8px;font-size:11px;" data-pb-edit-crit data-stream="${streamKey}" data-key="${c.key}" title="Edit criterion">✎</button>
+                    <button class="btn ghost" type="button" style="padding:4px 8px;font-size:11px;color:var(--red);border-color:rgba(239,68,68,.3);" data-pb-del-crit data-stream="${streamKey}" data-key="${c.key}" title="Delete criterion">×</button>
                   </div>
                 </div>
               `;
@@ -1055,6 +1065,86 @@
         b.classList.toggle(current, b.dataset.scopeStatus === current);
       });
     });
+    bindCriterionAdminButtons();
+  }
+
+  function bindCriterionAdminButtons() {
+    $$('#pb-panels [data-pb-add]').forEach(el => {
+      el.addEventListener('click', (e) => { e.preventDefault(); openCriterionEditor(el.dataset.pbAdd, null); });
+    });
+    $$('#pb-panels [data-pb-reset]').forEach(el => {
+      el.addEventListener('click', (e) => { e.preventDefault(); resetStreamCriteria(el.dataset.pbReset); });
+    });
+    $$('#pb-panels [data-pb-edit-crit]').forEach(el => {
+      el.addEventListener('click', () => {
+        const stream = el.dataset.stream, key = el.dataset.key;
+        const existing = (pbState.library.criteria[stream] || []).find(c => c.key === key);
+        openCriterionEditor(stream, existing);
+      });
+    });
+    $$('#pb-panels [data-pb-del-crit]').forEach(el => {
+      el.addEventListener('click', () => deleteCriterion(el.dataset.stream, el.dataset.key));
+    });
+  }
+
+  function openCriterionEditor(streamKey, existing) {
+    // Reuse a simple prompt-based editor. Keeps things minimal; no modal CSS.
+    const isEdit = !!existing;
+    const c = existing || { key: '', label: '', hint: '', role_driver: '', scale_factor: 0 };
+    const key = isEdit ? c.key : (window.prompt('Criterion key (stable id, snake_case)', c.key) || '').trim();
+    if (!key) return;
+    const label = (window.prompt('Label (prompt the AE sees)', c.label) || '').trim();
+    if (!label) return;
+    const hint = window.prompt('Hint (optional clarifier)', c.hint || '') || '';
+    const roles = Object.keys(pbState.library.role_catalogue || {}).sort();
+    const roleHint = `Role driver — blank for none. Options: ${roles.join(', ')}`;
+    const roleDriver = (window.prompt(roleHint, c.role_driver || '') || '').trim();
+    const scaleStr = window.prompt('Scale factor (0 = no driver, 1.0 = strong)', String(c.scale_factor || 0));
+    const scaleFactor = parseFloat(scaleStr || '0') || 0;
+    saveCriterion(streamKey, { key, label, hint, role_driver: roleDriver || null, scale_factor: scaleFactor });
+  }
+
+  async function saveCriterion(streamKey, criterion) {
+    // Persist current row values first so the user doesn't lose in-flight edits.
+    if (pbState.current) await pbSave({ silent: true });
+    try {
+      const data = await jsonFetch(`/api/admin/criteria/${encodeURIComponent(streamKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(criterion),
+      });
+      pbState.library.criteria = data.library;
+      // Refresh project state so newly added criteria get blank answers attached.
+      if (pbState.currentLeadId) await pbLoadProject(pbState.currentLeadId);
+      else { renderScopePanels(); statusToggleBindings(); }
+      toast(`Criterion ${criterion.key} saved`, 'success');
+    } catch (e) { toast(`Save criterion failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function deleteCriterion(streamKey, key) {
+    if (!window.confirm(`Remove criterion "${key}" from ${streamKey}? Existing project answers for this key will be preserved in storage but no longer shown.`)) return;
+    try {
+      const data = await jsonFetch(`/api/admin/criteria/${encodeURIComponent(streamKey)}/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      });
+      pbState.library.criteria = data.library;
+      if (pbState.currentLeadId) await pbLoadProject(pbState.currentLeadId);
+      else { renderScopePanels(); statusToggleBindings(); }
+      toast(`Removed ${key}`, 'success');
+    } catch (e) { toast(`Delete failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function resetStreamCriteria(streamKey) {
+    if (!window.confirm(`Reset ${streamKey} criteria to factory defaults? Custom criteria will be removed.`)) return;
+    try {
+      const data = await jsonFetch(`/api/admin/criteria/${encodeURIComponent(streamKey)}/reset`, {
+        method: 'POST',
+      });
+      pbState.library.criteria = data.library;
+      if (pbState.currentLeadId) await pbLoadProject(pbState.currentLeadId);
+      else { renderScopePanels(); statusToggleBindings(); }
+      toast(`${streamKey} reset to defaults`, 'success');
+    } catch (e) { toast(`Reset failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
   function collectCurrentScopeUpdates() {
@@ -1132,11 +1222,12 @@
     $('#pb-val-notes').value = p.validation_notes || '';
   }
 
-  async function pbSave() {
+  async function pbSave(opts = {}) {
+    const silent = opts.silent === true;
     const leadId = $('#pb-new-leadid').value.trim() || pbState.currentLeadId;
     const companyName = $('#pb-new-name').value.trim() || pbState.current?.company_name || leadId;
-    if (!leadId) { toast('Lead ID required', 'error'); return; }
-    if (pbState.streamsSelected.size === 0) { toast('Select at least one project stream', 'error'); return; }
+    if (!leadId) { if (!silent) toast('Lead ID required', 'error'); return; }
+    if (pbState.streamsSelected.size === 0) { if (!silent) toast('Select at least one project stream', 'error'); return; }
     const body = {
       company_name: companyName,
       project_types: Array.from(pbState.streamsSelected),
@@ -1155,8 +1246,8 @@
       renderValidationBanner();
       await refreshProjectList();
       $('#pb-lead-select').value = leadId;
-      toast(`Saved · ${data.summary.stats.qualified_pct}% qualified · ${data.summary.confidence} confidence`, 'success');
-    } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+      if (!silent) toast(`Saved · ${data.summary.stats.qualified_pct}% qualified · ${data.summary.confidence} confidence`, 'success');
+    } catch (e) { if (!silent) toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
   async function pbPreviewPricing() {

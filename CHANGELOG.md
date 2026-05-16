@@ -5,6 +5,52 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-05-15
+
+Editable scope criteria. The qualification framework is no longer a deploy
+to change — Ben (or anyone with platform access) can add, edit, remove,
+and reorder criteria from the UI directly.
+
+### Added
+- **`criteria_store.py`** — JSON-backed criteria library at
+  `cache/scope_criteria.json`. Auto-seeds from
+  `scope.DEFAULT_CRITERIA_LIBRARY` on first read.
+- **Admin endpoints** for the criteria library:
+  - `GET    /api/admin/criteria` — full library
+  - `POST   /api/admin/criteria/<project_type>` — add or replace criterion
+  - `DELETE /api/admin/criteria/<project_type>/<key>` — remove
+  - `POST   /api/admin/criteria/<project_type>/reorder` — `{keys: [...]}`
+  - `POST   /api/admin/criteria/<project_type>/reset` — restore one stream
+  - `POST   /api/admin/criteria/reset_all` — restore every stream
+- **Inline UI** in Project Build:
+  - Per-criterion ✎ (edit) and × (delete) buttons in each row
+  - "+ Add criterion" link per stream
+  - "↺ Reset" link per stream
+- Every criteria mutation writes an audit event
+  (`criteria_upsert` / `criteria_delete` / `criteria_reorder` / `criteria_reset` /
+  `criteria_reset_all`).
+
+### Changed
+- `scope.criteria_library()` reads from the editable store with
+  `DEFAULT_CRITERIA_LIBRARY` as a fallback.
+- `scope.update_criterion()` is now create-or-update — appends an answer
+  for previously-unknown criteria keys, so library changes after a project
+  was bootstrapped don't break subsequent saves.
+- Hardcoded `CRITERIA_LIBRARY` in `scope.py` renamed to
+  `DEFAULT_CRITERIA_LIBRARY` and kept as the reset baseline.
+
+### Operational notes
+- Storage is on the container's ephemeral filesystem. For durable
+  retention, mount a Railway volume at `cache/` (same recommendation as
+  the audit log + project store).
+- The UI uses native browser prompts to capture criterion fields — it's
+  intentionally minimal. A proper modal can come later if friction shows
+  up in usage.
+
+### Tests
+- 102 total (up from 80). New: 11 store tests, 10 admin endpoint tests,
+  1 amended test for the new update_criterion semantics.
+
 ## [0.4.0] — 2026-05-15
 
 The Project Build stage. Adds scope intake, codified pricing calculator,

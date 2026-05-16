@@ -34,6 +34,7 @@ except ImportError:
 import ai_summary
 import apollo
 import audit
+import criteria_store
 import hubspot_sync
 import pricing
 import project_store
@@ -365,6 +366,72 @@ def api_scope_transition(lead_id: str):
         })
     except scope_module.ScopeError as e:
         return jsonify({"error": str(e)}), 400
+
+
+# --- Admin: editable criteria library --------------------------------------
+
+@app.route("/api/admin/criteria", methods=["GET"])
+def api_admin_criteria_list():
+    return jsonify({"library": criteria_store.load()})
+
+
+@app.route("/api/admin/criteria/<project_type>", methods=["POST"])
+def api_admin_criteria_upsert(project_type: str):
+    if project_type not in scope_module.PROJECT_TYPES:
+        return jsonify({"error": f"unknown project type {project_type}"}), 400
+    body = request.get_json(silent=True) or {}
+    try:
+        saved = criteria_store.upsert_criterion(project_type, body)
+        audit.log_event("criteria_upsert", actor=_actor(),
+                        project_type=project_type, key=saved["key"])
+        return jsonify({"criterion": saved, "library": criteria_store.load()})
+    except criteria_store.CriteriaStoreError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/admin/criteria/<project_type>/<key>", methods=["DELETE"])
+def api_admin_criteria_delete(project_type: str, key: str):
+    if project_type not in scope_module.PROJECT_TYPES:
+        return jsonify({"error": f"unknown project type {project_type}"}), 400
+    removed = criteria_store.delete_criterion(project_type, key)
+    if not removed:
+        return jsonify({"error": "not found"}), 404
+    audit.log_event("criteria_delete", actor=_actor(),
+                    project_type=project_type, key=key)
+    return jsonify({"deleted": True, "library": criteria_store.load()})
+
+
+@app.route("/api/admin/criteria/<project_type>/reorder", methods=["POST"])
+def api_admin_criteria_reorder(project_type: str):
+    if project_type not in scope_module.PROJECT_TYPES:
+        return jsonify({"error": f"unknown project type {project_type}"}), 400
+    body = request.get_json(silent=True) or {}
+    keys = body.get("keys") or []
+    try:
+        criteria_store.reorder(project_type, keys)
+        audit.log_event("criteria_reorder", actor=_actor(), project_type=project_type)
+        return jsonify({"library": criteria_store.load()})
+    except criteria_store.CriteriaStoreError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/admin/criteria/<project_type>/reset", methods=["POST"])
+def api_admin_criteria_reset(project_type: str):
+    if project_type not in scope_module.PROJECT_TYPES:
+        return jsonify({"error": f"unknown project type {project_type}"}), 400
+    try:
+        criteria_store.reset_project_type(project_type)
+        audit.log_event("criteria_reset", actor=_actor(), project_type=project_type)
+        return jsonify({"library": criteria_store.load()})
+    except criteria_store.CriteriaStoreError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/admin/criteria/reset_all", methods=["POST"])
+def api_admin_criteria_reset_all():
+    criteria_store.reset_all()
+    audit.log_event("criteria_reset_all", actor=_actor())
+    return jsonify({"library": criteria_store.load()})
 
 
 @app.route("/api/pricing/preview", methods=["POST"])

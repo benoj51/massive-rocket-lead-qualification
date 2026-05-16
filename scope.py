@@ -74,7 +74,11 @@ PROJECT_TYPES = {
 #   - scale_factor: how much a "high" value bumps that role (relative)
 # ---------------------------------------------------------------------------
 
-CRITERIA_LIBRARY: dict[str, list[dict[str, Any]]] = {
+# DEFAULT_CRITERIA_LIBRARY is the immutable baseline. The live library lives
+# in criteria_store.py (JSON-backed, editable through the UI). This dict is
+# the source of truth for "reset to defaults" and the fallback if storage
+# can't be read.
+DEFAULT_CRITERIA_LIBRARY: dict[str, list[dict[str, Any]]] = {
     "crm_strategy": [
         {"key": "engagement_length", "label": "Engagement length (months)",
          "hint": "Ongoing advisory is usually 6-12 months.",
@@ -299,7 +303,13 @@ def project_types() -> dict[str, dict[str, Any]]:
 
 
 def criteria_library() -> dict[str, list[dict[str, Any]]]:
-    return {pt: list(criteria) for pt, criteria in CRITERIA_LIBRARY.items()}
+    """Live criteria library. Reads from the editable store; falls back to
+    DEFAULT_CRITERIA_LIBRARY if the store isn't available."""
+    try:
+        import criteria_store
+        return criteria_store.load()
+    except Exception:
+        return {pt: list(criteria) for pt, criteria in DEFAULT_CRITERIA_LIBRARY.items()}
 
 
 def discovery_questions() -> dict[str, list[str]]:
@@ -319,31 +329,46 @@ def reference_points(industry: str | None = None) -> list[dict[str, str]]:
 
 def new_project(lead_id: str, company_name: str, project_type_keys: Iterable[str]) -> ProjectScope:
     """Bootstrap a Project with empty criteria for every selected stream."""
+    library = criteria_library()
     streams: list[ProjectStream] = []
     for pt in project_type_keys:
         if pt not in PROJECT_TYPES:
             raise ScopeError(f"Unknown project type: {pt}")
-        criteria = [CriterionAnswer(key=c["key"]) for c in CRITERIA_LIBRARY.get(pt, [])]
+        criteria = [CriterionAnswer(key=c["key"]) for c in library.get(pt, [])]
         streams.append(ProjectStream(project_type=pt, criteria=criteria))
     return ProjectScope(lead_id=lead_id, company_name=company_name, streams=streams)
 
 
 def update_criterion(scope: ProjectScope, project_type: str, key: str, *, value: str | None = None, status: str | None = None) -> ProjectScope:
-    """Set value and/or status on a single criterion."""
+    """Set value and/or status on a single criterion. Creates the answer
+    record if the criterion was added to the library after the project was
+    bootstrapped — keeps editable criteria from breaking saves."""
     if status is not None and status not in ("unqualified", "qualifying", "qualified"):
         raise ScopeError(f"Bad status {status!r}")
+    target_stream: ProjectStream | None = None
     for stream in scope.streams:
-        if stream.project_type != project_type:
-            continue
-        for c in stream.criteria:
-            if c.key == key:
-                if value is not None:
-                    c.value = value
-                if status is not None:
-                    c.status = status
-                scope.touch()
-                return scope
-    raise ScopeError(f"Criterion {key} not found on stream {project_type}")
+        if stream.project_type == project_type:
+            target_stream = stream
+            break
+    if target_stream is None:
+        raise ScopeError(f"Stream {project_type!r} not on project")
+    for c in target_stream.criteria:
+        if c.key == key:
+            if value is not None:
+                c.value = value
+            if status is not None:
+                c.status = status
+            scope.touch()
+            return scope
+    # Criterion didn't exist on this project yet (added to library after
+    # bootstrap). Append it now.
+    target_stream.criteria.append(CriterionAnswer(
+        key=key,
+        value=value or "",
+        status=status or "unqualified",
+    ))
+    scope.touch()
+    return scope
 
 
 def transition(scope: ProjectScope, action: str, *, actor: str | None = None, notes: str = "") -> ProjectScope:
@@ -419,8 +444,9 @@ def role_drivers_for_project(scope: ProjectScope) -> dict[str, float]:
     move more than ±0.5 per criterion.
     """
     multipliers: dict[str, float] = {}
+    live_library = criteria_library()
     for stream in scope.streams:
-        library = {c["key"]: c for c in CRITERIA_LIBRARY.get(stream.project_type, [])}
+        library = {c["key"]: c for c in live_library.get(stream.project_type, [])}
         for answer in stream.criteria:
             spec = library.get(answer.key)
             if not spec or not spec.get("role_driver"):
