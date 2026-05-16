@@ -226,15 +226,28 @@ def _resolve_rate(role: str, inputs: QuoteInputs) -> float:
     return float(rate["hourly"]) if rate else 0.0
 
 
+def _resolve_internal_cost(role: str, inputs: QuoteInputs) -> float:
+    """Hourly internal cost for a role under the chosen staffing."""
+    import internal_costs
+    staffing = inputs.role_staffing.get(role, {})
+    cost = internal_costs.internal_cost_lookup(
+        role, inputs.currency,
+        region=staffing.get("region"), seniority=staffing.get("seniority"),
+    )
+    return float(cost["hourly"]) if cost else 0.0
+
+
 def _monthly_breakdown(team: TeamTemplate, inputs: QuoteInputs) -> list[dict[str, Any]]:
     months = inputs.months
     breakdown: list[dict[str, Any]] = []
     role_rates = {role.strip(): _resolve_rate(role.strip(), inputs) for role in team.keys()}
+    role_costs = {role.strip(): _resolve_internal_cost(role.strip(), inputs) for role in team.keys()}
     for m in range(1, months + 1):
         phase = _phase_for_month(m, inputs.phase_months)
         rows: list[dict[str, Any]] = []
         month_total_usd = 0.0
         month_hours = 0.0
+        month_internal_cost = 0.0
         for role, by_phase in team.items():
             role_name = role.strip()
             fte = by_phase.get(phase, 0.0)
@@ -242,16 +255,21 @@ def _monthly_breakdown(team: TeamTemplate, inputs: QuoteInputs) -> list[dict[str
                 continue
             hours = fte * HOURS_PER_FTE_MONTH
             rate = role_rates.get(role_name, 0)
+            internal_rate = role_costs.get(role_name, 0)
             cost = hours * rate
+            internal_cost = hours * internal_rate
             rows.append({
                 "role": role_name,
                 "fte": fte,
                 "hours": hours,
                 "rate_usd_per_hour": rate,  # name kept for backward compat; reflects selected currency
+                "internal_rate_per_hour": internal_rate,
                 "cost_usd": round(cost, 2),
+                "internal_cost_usd": round(internal_cost, 2),
             })
             month_total_usd += cost
             month_hours += hours
+            month_internal_cost += internal_cost
 
         # Project Ops uplift (proportional fee on top of gross)
         ops_usd = month_total_usd * inputs.project_ops_pct
@@ -273,6 +291,7 @@ def _monthly_breakdown(team: TeamTemplate, inputs: QuoteInputs) -> list[dict[str
             "contingency_usd": round(contingency_usd, 2),
             "subtotal_usd": round(subtotal_usd, 2),
             "hours": round(month_hours, 1),
+            "internal_cost_usd": round(month_internal_cost, 2),
             "discount_pct": discount_pct,
             "discount_usd": round(discount_usd, 2),
             "net_usd": round(net_usd, 2),
@@ -297,7 +316,19 @@ def compute_quote(inputs: QuoteInputs) -> dict[str, Any]:
     discount_total = sum(m["discount_usd"] for m in months)
     net_total = sum(m["net_usd"] for m in months)
     hours_total = sum(m["hours"] for m in months)
+    internal_cost_total = sum(m["internal_cost_usd"] for m in months)
     blended_rate = (net_total / hours_total) if hours_total else 0
+    margin_pct = ((net_total - internal_cost_total) / net_total) if net_total else 0
+
+    import internal_costs as _ic
+    margin_block = {
+        "gross_profit_usd": round(net_total - internal_cost_total, 2),
+        "internal_cost_usd": round(internal_cost_total, 2),
+        "margin_pct": round(margin_pct, 4),
+        "band": _ic.margin_band(margin_pct),
+        "thresholds": _ic.margin_thresholds(),
+        "is_placeholder": _ic.is_placeholder_data(),
+    }
 
     return {
         "inputs": {
@@ -322,6 +353,7 @@ def compute_quote(inputs: QuoteInputs) -> dict[str, Any]:
             "hours": round(hours_total, 1),
             "blended_rate_usd_per_hour": round(blended_rate, 2),
         },
+        "margin": margin_block,
     }
 
 

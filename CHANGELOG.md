@@ -5,6 +5,63 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-05-16
+
+Pricing Calculator V2.0 Phase 2. Adds gross margin analysis, Staff Aug
+region/seniority pickers, package "Apply" seeding, and inline per-role
+rates in the team table.
+
+### Added
+- **`internal_costs.py`** — placeholder internal-cost engine. Real
+  numbers will replace the 45% sales-rate ratio when Finance shares
+  the `[Database] Rate Card - Internal` tab. `is_placeholder_data()`
+  returns True until then so the UI can warn.
+- **Gross margin in every quote.** `compute_quote` returns a `margin`
+  block with internal cost, gross profit, margin %, and band
+  (green/yellow/red, defaulting to ≥40% / 30-40% / <30%). Each monthly
+  row carries internal cost + per-role internal rate; per-role rows
+  in the breakdown have `internal_cost_usd`.
+- **Pricing card UI: Margin row.** Four tiles below the headline:
+  Internal cost / Gross profit / Margin % (color-coded) / Status. The
+  Margin % tile shows the target threshold. Yellow placeholder banner
+  appears beneath the row while internal-costs are still stubbed.
+- **Staff Augmentation: per-role Region + Seniority pickers.** When
+  the AE picks the Staff Aug rate card, every team-row gets two
+  dropdowns alongside the FTE inputs. Changing either re-prices live.
+- **Effective hourly rate per role** in the team table — a small Rate
+  column shows what each role costs at the picked currency / rate
+  card / staffing.
+- **Apply Package button.** Picking a package + clicking Apply
+  computes hours-per-month per role, distributes evenly across the
+  3 phases as FTE, and overwrites `roleOverrides`. AE then tweaks per
+  phase. Confirmation prompt before overwriting.
+
+### Changed
+- `compute_quote` output gains `margin` (new top-level block) plus
+  `internal_cost_usd` and `internal_rate_per_hour` fields in monthly
+  rows.
+- `/api/pricing/preview` accepts `role_staffing: {role: {region,
+  seniority}}` and threads it into both rate AND internal-cost
+  lookups so Staff Aug margins reflect the right cost basis.
+
+### Notes
+- Reference deal still produces $1,191,360 gross / $1,112,016 net.
+  Margin under placeholder ratio is ~50% (the cost stub is uniform,
+  so this is structurally meaningful but not precise — needs the
+  real Internal Rate Card before relying on the number).
+- Region/Seniority pickers default to whatever the AE picked
+  previously for that role. No defaults are auto-applied — the AE
+  must explicitly choose. Until they do, rate falls back to MR
+  Default for that role.
+
+### Tests
+- 206 total (+13). New: internal cost = 45% of sales, margin band
+  thresholds, quote returns margin block, ops uplift increases
+  margin (revenue rises, cost unchanged), monthly rows carry
+  internal cost, Staff Aug staffing flows through to pricing,
+  fallback to MR Default when no staffing supplied, endpoint
+  accepts role_staffing.
+
 ## [0.8.0] — 2026-05-16
 
 Pricing Calculator V2.0 — multi-currency, multi-rate-card, with

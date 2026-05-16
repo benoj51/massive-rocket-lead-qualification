@@ -561,7 +561,10 @@
         </div>
         <div>
           <label>Package (optional starting point)</label>
-          <select id="pb-package"><option value="">— pick a package —</option></select>
+          <div style="display:flex;gap:4px;">
+            <select id="pb-package" style="flex:1;"><option value="">— pick a package —</option></select>
+            <button class="btn ghost" id="pb-apply-package" type="button" style="padding:6px 12px;font-size:11px;white-space:nowrap;">Apply</button>
+          </div>
         </div>
       </div>
       <div class="row row-3" style="margin-bottom: 12px;">
@@ -1830,8 +1833,10 @@
     streamsSelected: new Set(),
     pricingChart: null,
     roleOverrides: {},       // {role: {phase: fte}} — user FTE edits
+    roleStaffing: {},        // {role: {region, seniority}} — Staff Aug picks
     pricingDebounce: null,
     lastQuote: null,
+    pricingLibrary: null,
   };
 
   const PHASE_HELP = {
@@ -2172,6 +2177,7 @@
       lead_id: pbState.currentLeadId,
       months: 12,
       role_overrides: pbState.roleOverrides,
+      role_staffing: pbState.roleStaffing,
       currency: $('#pb-currency')?.value || 'USD',
       rate_card: $('#pb-rate-card')?.value || 'MR Default',
       project_ops_pct: (parseFloat($('#pb-ops-pct')?.value) || 0) / 100,
@@ -2191,6 +2197,34 @@
       });
       renderPricing(q);
     } catch (e) { toast(`Pricing failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  function applySelectedPackage() {
+    const key = $('#pb-package').value;
+    if (!key) { toast('Pick a package first', 'error'); return; }
+    const pkg = (pbState.pricingLibrary?.packages || []).find(p => p.key === key);
+    if (!pkg) { toast('Package not found', 'error'); return; }
+    if (!window.confirm(`Apply "${pkg.name}" template? This overwrites the current team allocation (${pkg.total_hours}h across ${pkg.duration_months || 1} month${pkg.duration_months === 1 ? '' : 's'}).`)) return;
+
+    // Sum hours per role across the package, then distribute as FTE per phase.
+    const roleHoursTotal = {};
+    for (const c of pkg.components || []) {
+      roleHoursTotal[c.role] = (roleHoursTotal[c.role] || 0) + (c.hours || 0);
+    }
+    const months = Math.max(1, pkg.duration_months || 1);
+    const overrides = {};
+    for (const [role, totalHours] of Object.entries(roleHoursTotal)) {
+      // FTE per month = hours_per_month / 160. Distribute evenly across phases.
+      const fte = (totalHours / months) / 160;
+      overrides[role] = {
+        Understand: Math.round(fte * 100) / 100,
+        Execute: Math.round(fte * 100) / 100,
+        Accelerate: Math.round(fte * 100) / 100,
+      };
+    }
+    pbState.roleOverrides = overrides;
+    toast(`Applied ${pkg.name} — ${Object.keys(overrides).length} role${Object.keys(overrides).length === 1 ? '' : 's'} seeded`, 'success');
+    liveRecomputePricing();
   }
 
   async function pbLoadPricingLibrary() {
@@ -2214,6 +2248,11 @@
           el.dataset.bound = '1';
         }
       });
+      const applyBtn = $('#pb-apply-package');
+      if (applyBtn && !applyBtn.dataset.bound) {
+        applyBtn.addEventListener('click', applySelectedPackage);
+        applyBtn.dataset.bound = '1';
+      }
     } catch (e) { console.warn('pricing library load failed', e); }
   }
 
@@ -2240,6 +2279,7 @@
         ${discountTile}
         ${netTile}
       </div>
+      ${renderMarginRow(q, ccy)}
       ${(t.ops_usd > 0 || t.contingency_usd > 0) ? `<div style="margin-top: 8px;" class="muted">Hours: ${Math.round(t.hours).toLocaleString()} · Blended ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h · Rate card: ${escapeHtml(q.inputs?.rate_card || 'MR Default')}</div>` : ''}`;
 
     const ctx = $('#pb-pricing-chart').getContext('2d');
@@ -2265,14 +2305,47 @@
 
     // Editable team table — each FTE cell is an input that re-quotes on change.
     pbState.lastQuote = q;
+    const ccy = q.inputs?.currency || 'USD';
+    const isStaffAug = q.inputs?.rate_card === 'Staff Augmentation';
+    const lib = pbState.pricingLibrary?.rates || {};
+    const regions = lib.regions || ['UK', 'EU', 'LATAM', 'India'];
+    const seniorities = lib.seniorities || ['Practitioner', 'Senior', 'Lead'];
     const phaseCol = (phase, abbr) =>
       `<th title="${escapeAttr(PHASE_HELP[phase] || '')}"><span style="border-bottom:1px dotted var(--text-muted);cursor:help;">${abbr}</span></th>`;
+    const staffAugCols = isStaffAug
+      ? '<th>Region</th><th>Seniority</th>'
+      : '';
+    // Rate per role: pull from the first monthly row that contains the role.
+    const ratePerRole = {};
+    for (const m of q.monthly || []) {
+      for (const row of (m.rows || [])) {
+        if (ratePerRole[row.role] == null && row.rate_usd_per_hour) {
+          ratePerRole[row.role] = row.rate_usd_per_hour;
+        }
+      }
+    }
+    const rateCol = (role) => {
+      const rate = ratePerRole[role];
+      return `<td class="muted" style="font-size:11px;font-family:var(--mono);">${rate ? fmtMoney(rate, ccy) + '/h' : '—'}</td>`;
+    };
+    const staffAugRowCols = (role) => {
+      if (!isStaffAug) return '';
+      const staffing = pbState.roleStaffing?.[role] || {};
+      const regionOptions = regions.map(r => `<option ${staffing.region === r ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('');
+      const seniorityOptions = seniorities.map(s => `<option ${staffing.seniority === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+      return `
+        <td><select data-role-staffing-region="${escapeAttr(role)}" style="font-size:11px;padding:3px 6px;">${regionOptions}</select></td>
+        <td><select data-role-staffing-seniority="${escapeAttr(role)}" style="font-size:11px;padding:3px 6px;">${seniorityOptions}</select></td>
+      `;
+    };
     $('#pb-pricing-table').innerHTML = `
       <table class="stakeholders">
-        <thead><tr><th>Role</th>${phaseCol('Understand','Understand FTE')}${phaseCol('Execute','Execute FTE')}${phaseCol('Accelerate','Accelerate FTE')}</tr></thead>
+        <thead><tr><th>Role</th>${staffAugCols}<th>Rate</th>${phaseCol('Understand','U FTE')}${phaseCol('Execute','E FTE')}${phaseCol('Accelerate','A FTE')}</tr></thead>
         <tbody>${Object.entries(q.team).map(([role, byPhase]) => `
           <tr title="${escapeAttr(ROLE_HELP[role] || '')}">
             <td><span style="border-bottom:1px dotted var(--text-muted);cursor:help;">${escapeHtml(role)}</span></td>
+            ${staffAugRowCols(role)}
+            ${rateCol(role)}
             <td><input type="number" min="0" step="0.05" value="${(byPhase.Understand ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Understand" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
             <td><input type="number" min="0" step="0.05" value="${(byPhase.Execute ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Execute" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
             <td><input type="number" min="0" step="0.05" value="${(byPhase.Accelerate ?? 0).toFixed(2)}" data-role="${escapeAttr(role)}" data-phase="Accelerate" style="width:70px;padding:4px 6px;font-size:12px;" /></td>
@@ -2282,6 +2355,7 @@
       <div class="muted" style="margin-top:6px;font-size:11px;">
         FTE per phase. Edit any cell to forecast — pricing recalculates as you type.
         Hover any column or role for a quick explainer.
+        ${isStaffAug ? '<br>Staff Aug card: pick Region + Seniority per role to get the right rate.' : ''}
         <a href="#" id="pb-pricing-help" style="color:var(--accent);margin-left:8px;">How is this calculated?</a>
       </div>
     `;
@@ -2289,10 +2363,24 @@
     $$('#pb-pricing-table input[data-role]').forEach(input => {
       input.addEventListener('input', () => onTeamFteChanged(input));
     });
+    $$('#pb-pricing-table [data-role-staffing-region]').forEach(sel => {
+      sel.addEventListener('change', () => onRoleStaffingChanged(sel.dataset.roleStaffingRegion, 'region', sel.value));
+    });
+    $$('#pb-pricing-table [data-role-staffing-seniority]').forEach(sel => {
+      sel.addEventListener('change', () => onRoleStaffingChanged(sel.dataset.roleStaffingSeniority, 'seniority', sel.value));
+    });
     $('#pb-pricing-help').addEventListener('click', (e) => {
       e.preventDefault();
       showPricingExplainer();
     });
+  }
+
+  function onRoleStaffingChanged(role, field, value) {
+    if (!pbState.roleStaffing) pbState.roleStaffing = {};
+    if (!pbState.roleStaffing[role]) pbState.roleStaffing[role] = {};
+    pbState.roleStaffing[role][field] = value;
+    clearTimeout(pbState.pricingDebounce);
+    pbState.pricingDebounce = setTimeout(() => liveRecomputePricing(), 200);
   }
 
   function onTeamFteChanged(input) {
@@ -2325,6 +2413,7 @@
           ${hasUplift ? `<div class="tile"><span class="lbl">− Discount</span><span class="val">${fmtMoney(t.discount_usd, ccy)}</span></div>` : `<div class="tile"><span class="lbl">Hours / Blended</span><span class="val">${Math.round(t.hours).toLocaleString()}h · ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h</span></div>`}
           <div class="tile"><span class="lbl">Net (${ccy})</span><span class="val">${fmtMoney(t.net_usd, ccy)}</span></div>
         </div>
+        ${renderMarginRow(q, ccy)}
         ${hasUplift ? `<div style="margin-top: 8px;" class="muted">Hours: ${Math.round(t.hours).toLocaleString()} · Blended ${fmtMoney(t.blended_rate_usd_per_hour, ccy)}/h · Rate card: ${escapeHtml(q.inputs?.rate_card || 'MR Default')}</div>` : ''}`;
       // Update chart
       if (pbState.pricingChart) {
@@ -2336,6 +2425,31 @@
     } catch (e) {
       toast(`Recompute failed: ${e.body?.error || e.message}`, 'error');
     }
+  }
+
+  function renderMarginRow(q, ccy) {
+    const m = q.margin;
+    if (!m) return '';
+    const pct = (m.margin_pct * 100).toFixed(1);
+    const bandColor = { green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)' }[m.band] || 'var(--text-muted)';
+    const placeholderBanner = m.is_placeholder
+      ? `<div style="margin-top: 10px; padding: 8px 12px; background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.3); border-radius: 6px; color: var(--yellow); font-size: 11px;">
+           ⚠ Internal costs are <strong>placeholder estimates</strong> (45% of sales rate). Margin shown is indicative only — replace with Finance's Internal Rate Card before relying on these numbers.
+         </div>`
+      : '';
+    return `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px;">
+        <div class="tile"><span class="lbl">Internal cost</span><span class="val">${fmtMoney(m.internal_cost_usd, ccy)}</span></div>
+        <div class="tile"><span class="lbl">Gross profit</span><span class="val">${fmtMoney(m.gross_profit_usd, ccy)}</span></div>
+        <div class="tile" style="border-color: ${bandColor};">
+          <span class="lbl">Gross margin</span>
+          <span class="val" style="color: ${bandColor};">${pct}%</span>
+          <span style="font-size:9px;color:var(--text-muted);display:block;">Target ≥${(m.thresholds.green*100).toFixed(0)}%</span>
+        </div>
+        <div class="tile"><span class="lbl">Status</span><span class="val" style="color: ${bandColor};">${m.band.toUpperCase()}</span></div>
+      </div>
+      ${placeholderBanner}
+    `;
   }
 
   function showPricingExplainer() {
