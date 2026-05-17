@@ -706,6 +706,7 @@
     <div>
       <div class="title" id="ld-title">Lead</div>
       <div class="meta" id="ld-meta"></div>
+      <div id="ld-group-chip" style="margin-top:6px;display:none;"></div>
     </div>
     <div class="btn-row">
       <button id="ld-close" class="btn ghost" type="button" style="padding:6px 10px;font-size:11px;">✕ Close</button>
@@ -715,6 +716,19 @@
 
     <div class="group">
       <h4>Identity</h4>
+      <div class="field">
+        <label>Parent group <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— is this brand part of a larger group? (e.g. KFC → Yum! Brands)</span></label>
+        <div id="ld-parent-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="ld-parent-search" placeholder="Search existing accounts, or type a new parent name…" style="flex:1;min-width:220px;" autocomplete="off" />
+          <button class="btn ghost" id="ld-parent-clear" type="button" style="padding:6px 10px;font-size:11px;display:none;">× Unlink</button>
+        </div>
+        <div id="ld-parent-suggestions" style="margin-top:4px;"></div>
+        <div id="ld-parent-error" class="muted" style="color:var(--red);font-size:11px;margin-top:4px;display:none;"></div>
+      </div>
+      <div id="ld-children-panel" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:8px;">Brands in this group <span id="ld-children-count" style="color:var(--accent);"></span></div>
+        <div id="ld-children-list"></div>
+      </div>
       <div class="field"><label>Company</label><input type="text" data-ld="company" /></div>
       <div class="field"><label>Website / URL</label><input type="url" data-ld="url" /></div>
     </div>
@@ -1455,6 +1469,8 @@
     try {
       const data = await jsonFetch('/api/pipeline?limit=100');
       state.pipeline.rows = data.rows || [];
+      // Reuse the larger fetch for the parent-picker; invalidate stale cache.
+      _pipelineForPicker = [];
       populatePipelineFilterOptions();
       renderPipeline();
     } catch (e) {
@@ -1990,6 +2006,7 @@
         el.value = value;
       });
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
+      renderDrawerGroup(pageId, data.group || { parent: null, children: [] });
       // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);
       loadLeadCalls(pageId);
@@ -2017,6 +2034,154 @@
     return Array.from(document.querySelectorAll('#ld-sourced-for [data-ld-partner].active'))
       .map(b => b.dataset.ldPartner);
   }
+
+  // ---------- Account groups (v0.10.0 Phase A) ----------
+
+  let _groupCache = { parent: null, children: [] };
+  let _pipelineForPicker = [];  // cached pipeline rows for parent search
+  let _pickerDebounce = null;
+
+  async function ensurePipelineForPicker() {
+    if (_pipelineForPicker.length) return _pipelineForPicker;
+    try {
+      const data = await jsonFetch('/api/pipeline?limit=500');
+      _pipelineForPicker = data.rows || [];
+    } catch (_) { _pipelineForPicker = []; }
+    return _pipelineForPicker;
+  }
+
+  function renderDrawerGroup(leadId, group) {
+    _groupCache = group;
+    const chip = $('#ld-group-chip');
+    const search = $('#ld-parent-search');
+    const clearBtn = $('#ld-parent-clear');
+    const childrenPanel = $('#ld-children-panel');
+    const childrenList = $('#ld-children-list');
+    const childrenCount = $('#ld-children-count');
+    $('#ld-parent-error').style.display = 'none';
+    $('#ld-parent-suggestions').innerHTML = '';
+
+    // Header chip: "Part of: <Parent>" — clickable to open parent
+    if (group.parent) {
+      const p = group.parent;
+      chip.style.display = 'inline-block';
+      chip.innerHTML = `<a href="#" id="ld-parent-link" class="chip" style="font-size:11px;background:rgba(255,77,42,.12);border:1px solid rgba(255,77,42,.35);color:var(--accent);text-decoration:none;padding:3px 10px;border-radius:12px;">Part of: ${escapeHtml(p.company || p.id)} →</a>`;
+      const link = document.getElementById('ld-parent-link');
+      if (link && p.id) {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          openLeadDrawer(p.id);
+        });
+      }
+      search.value = p.company || p.id;
+      search.disabled = true;
+      clearBtn.style.display = 'inline-flex';
+    } else {
+      chip.style.display = 'none';
+      chip.innerHTML = '';
+      search.value = '';
+      search.disabled = false;
+      clearBtn.style.display = 'none';
+    }
+
+    // Children panel: "Brands in this group" (visible when parent of others)
+    const kids = group.children || [];
+    if (kids.length) {
+      childrenPanel.style.display = 'block';
+      childrenCount.textContent = `(${kids.length})`;
+      childrenList.innerHTML = kids.map(k => {
+        const score = k.icp_normalised;
+        const scoreCls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+        const scoreTxt = score != null ? `${score}/10` : '—';
+        const status = k.status || '—';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+            <div style="min-width:0;flex:1;">
+              <a href="#" data-child-id="${escapeAttr(k.id)}" style="color:var(--text);font-weight:500;font-size:13px;text-decoration:none;">${escapeHtml(k.company || k.id)}</a>
+              <div class="muted" style="font-size:10px;">${escapeHtml(status)}${k.vertical ? ' · ' + escapeHtml(k.vertical) : ''}</div>
+            </div>
+            <span class="icp-pill ${scoreCls}" style="font-size:10px;padding:2px 8px;">${scoreTxt}</span>
+          </div>
+        `;
+      }).join('');
+      childrenList.querySelectorAll('[data-child-id]').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          openLeadDrawer(a.dataset.childId);
+        });
+      });
+    } else {
+      childrenPanel.style.display = 'none';
+      childrenList.innerHTML = '';
+    }
+  }
+
+  function renderParentSuggestions(q) {
+    const box = $('#ld-parent-suggestions');
+    const term = (q || '').trim().toLowerCase();
+    if (!term) { box.innerHTML = ''; return; }
+    const me = drawerState.id;
+    const matches = (_pipelineForPicker || [])
+      .filter(r => r.id !== me)
+      .filter(r => (r.company || '').toLowerCase().includes(term))
+      .slice(0, 6);
+    const exact = matches.find(m => (m.company || '').toLowerCase() === term);
+    const rows = matches.map(m => `
+      <a href="#" data-parent-pick="${escapeAttr(m.id)}" style="display:block;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);text-decoration:none;margin-bottom:4px;">
+        ${escapeHtml(m.company || m.id)}
+        <span class="muted" style="font-size:10px;">${m.status ? ' · ' + escapeHtml(m.status) : ''}</span>
+      </a>
+    `).join('');
+    const createRow = exact ? '' : `
+      <a href="#" data-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(255,77,42,.08);border:1px dashed rgba(255,77,42,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
+        + Use "${escapeHtml(q.trim())}" as parent group (will be created on first qualify)
+      </a>
+    `;
+    box.innerHTML = rows + createRow;
+    box.querySelectorAll('[data-parent-pick]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); setParent(a.dataset.parentPick); });
+    });
+    box.querySelectorAll('[data-parent-create]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); setParent(a.dataset.parentCreate); });
+    });
+  }
+
+  async function setParent(parentRef) {
+    if (!drawerState.id) return;
+    $('#ld-parent-error').style.display = 'none';
+    try {
+      await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/parent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_account_id: parentRef }),
+      });
+      toast('Linked to parent group', 'success');
+      // Reload the drawer to get the fresh group payload (with display name resolved)
+      await loadLead(drawerState.id);
+    } catch (e) {
+      const msg = e.body?.error || e.message;
+      const err = $('#ld-parent-error');
+      err.textContent = msg;
+      err.style.display = 'block';
+      toast(`Link failed: ${msg}`, 'error');
+    }
+  }
+
+  async function clearParent() {
+    if (!drawerState.id) return;
+    try {
+      await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/parent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_account_id: null }),
+      });
+      toast('Unlinked from parent group', 'success');
+      await loadLead(drawerState.id);
+    } catch (e) {
+      toast(`Unlink failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
 
   function collectLeadEdits() {
     const original = drawerState.original || {};
@@ -3313,6 +3478,19 @@
       if (drawerState.id) addCall(drawerState.id);
     });
     $('#ld-summary-refresh').addEventListener('click', refreshLeadSummary);
+    // Parent group picker (v0.10.0 Phase A)
+    $('#ld-parent-search').addEventListener('input', (e) => {
+      clearTimeout(_pickerDebounce);
+      const q = e.target.value;
+      _pickerDebounce = setTimeout(async () => {
+        await ensurePipelineForPicker();
+        renderParentSuggestions(q);
+      }, 200);
+    });
+    $('#ld-parent-search').addEventListener('focus', async () => {
+      await ensurePipelineForPicker();
+    });
+    $('#ld-parent-clear').addEventListener('click', clearParent);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && drawerState.id) closeLeadDrawer();
     });

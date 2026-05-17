@@ -5,6 +5,60 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0a] — 2026-05-17 — Account Groups (Phase A)
+
+Models the parent-brand relationship for B2B realities like Yum! Brands
+→ KFC, Pizza Hut, Taco Bell, Habit Burger. Phase A is manual linking
++ drawer UX; Phases B–D (Apollo auto-detect, grouped pipeline view,
+AI sibling context) land in 0.10.0b/c/d.
+
+### Added
+- **`accounts_graph.py`** — single-file JSON store at
+  `cache/accounts_graph.json` mapping `{child_slug: parent_slug}`.
+  One level deep on purpose; multi-level (Corp → Division → Brand) is
+  deferred. Includes cycle detection, self-ref block, one-level rule
+  (a parent with children cannot itself become a child).
+- **Server endpoints:**
+  - `GET /api/accounts/graph` — full map.
+  - `PUT /api/lead/<id>/parent` — set or clear parent (body
+    `{parent_account_id: "..."}` or `null`). Returns 400 on graph
+    violations.
+  - `GET /api/lead/<id>/children` — children enriched with pipeline
+    metadata (ICP score, status, vertical).
+- **`GET /api/lead/<id>` enriched** with a `group` block:
+  `{parent: {id, company, icp_normalised, status} | null,
+    children: [...]}`. Resolves slugs → display names from the
+  pipeline so the drawer renders names not slugs.
+- **`GET /api/pipeline` rows annotated** with `parent_account_id`
+  and `is_parent` flags so the UI can render grouped/flat views
+  without an extra round-trip (Phase C will use these).
+- **Drawer UX:**
+  - "Parent group" picker at the top of the Identity section
+    (typeahead over the pipeline + create-on-the-fly path).
+  - Header chip *"Part of: <Parent> →"* on child leads, clickable
+    to open the parent's drawer.
+  - "Brands in this group (N)" panel on parent leads, listing each
+    child with ICP score + status, clickable.
+  - "× Unlink" button when a parent is set.
+  - Inline error display for graph violations (self-ref / one-level).
+- Audit log captures `account_parent_set` / `account_parent_cleared`.
+
+### Out of scope for Phase A
+- Apollo auto-suggestion of parent (Phase B).
+- Grouped pipeline view + group filter chips (Phase C).
+- AI sibling context in lead summaries + portfolio summary (Phase D).
+- Notion column sync. The graph lives in `cache/` only for now —
+  durable until Railway redeploys without a volume mount. Mirror to
+  Notion is on the backlog.
+- Lead-account delete guard. There's no current "delete lead"
+  endpoint to guard; the locked-in policy is enforced once that
+  surface exists.
+
+### Tests
+- 257 total (+12). `test_accounts_graph.py` covers: empty graph,
+  set/read/unlink, children-of, slug normalisation, self-ref block,
+  one-level rule, persistence across process restart, can-delete guard.
+
 ## [0.9.4] — 2026-05-17
 
 Hotfix: `✨ Refresh` returned 500 if a saved call had `extracted=None`.

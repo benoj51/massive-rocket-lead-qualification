@@ -31,6 +31,7 @@ try:
 except ImportError:
     pass
 
+import accounts_graph
 import ai_summary
 import apollo
 import audit
@@ -344,14 +345,48 @@ def api_calls_delete(lead_id: str, call_id: str):
 
 @app.route("/api/lead/<page_id>", methods=["GET"])
 def api_lead_get(page_id: str):
-    """Fetch a single lead's full record for the edit drawer."""
+    """Fetch a single lead's full record for the edit drawer.
+
+    Returns the Notion lead plus a `group` block describing parent/child
+    relationships from accounts_graph. Child leads get `group.parent`
+    populated (slug + company name from the pipeline); parent leads get
+    `group.children` populated.
+    """
     try:
         sync = NotionSync()
         lead = sync.get_page(page_id)
-        return jsonify({"lead": lead})
     except (NotionSyncError, ValueError) as e:
         log.warning("Lead fetch failed: %s", e)
         return jsonify({"error": str(e)}), 502
+
+    group = {"parent": None, "children": []}
+    try:
+        parent_slug = accounts_graph.parent_of(page_id)
+        child_slugs = accounts_graph.children_of(page_id)
+        # Resolve slugs → display names via the pipeline (single round-trip).
+        all_slugs = set(filter(None, [parent_slug, *child_slugs]))
+        name_map: dict[str, dict] = {}
+        if all_slugs:
+            try:
+                rows = sync.list_pipeline(limit=500)
+                for r in rows:
+                    rid = project_store.slugify(r.get("id") or r.get("company") or "")
+                    if rid in all_slugs:
+                        name_map[rid] = {
+                            "id": r.get("id"),
+                            "company": r.get("company"),
+                            "icp_normalised": r.get("icp_normalised"),
+                            "status": r.get("status"),
+                        }
+            except Exception as e:
+                log.warning("Group name resolution failed: %s", e)
+        if parent_slug:
+            group["parent"] = name_map.get(parent_slug, {"id": parent_slug, "company": parent_slug})
+        group["children"] = [name_map.get(s, {"id": s, "company": s}) for s in child_slugs]
+    except Exception as e:
+        log.warning("accounts_graph lookup failed for %s: %s", page_id, e)
+
+    return jsonify({"lead": lead, "group": group})
 
 
 @app.route("/api/lead/<page_id>", methods=["PATCH"])
@@ -959,6 +994,14 @@ def api_pipeline():
     try:
         sync = NotionSync()
         rows = sync.list_pipeline(limit=limit)
+        # Annotate each row with group membership so the UI can render
+        # grouped/flat views without an extra round-trip.
+        graph = accounts_graph.full_graph()
+        parents_set = set(graph.values())
+        for r in rows:
+            rid = project_store.slugify(r.get("id") or r.get("company") or "")
+            r["parent_account_id"] = graph.get(rid)
+            r["is_parent"] = rid in parents_set
         return jsonify({"rows": rows, "count": len(rows)})
     except (NotionSyncError, ValueError) as e:
         log.warning("Pipeline list failure: %s", e)
@@ -966,6 +1009,68 @@ def api_pipeline():
     except Exception as e:
         log.exception("Pipeline list crash")
         return jsonify({"error": str(e), "rows": []}), 500
+
+
+# ---------- Account groups (v0.10.0 Phase A) ----------
+
+@app.route("/api/accounts/graph", methods=["GET"])
+def api_accounts_graph():
+    """Return the full {child_slug: parent_slug} map. Small, cacheable."""
+    return jsonify({"graph": accounts_graph.full_graph()})
+
+
+@app.route("/api/lead/<lead_id>/parent", methods=["PUT"])
+def api_lead_set_parent(lead_id: str):
+    """Set or clear the parent for this lead.
+
+    Body: {"parent_account_id": "<slug or display name>"} to link,
+          {"parent_account_id": null} or empty body to unlink.
+
+    Returns 400 on graph violations (self-ref, one-level-rule).
+    """
+    body = request.get_json(silent=True) or {}
+    parent = body.get("parent_account_id")
+    if parent is not None and not str(parent).strip():
+        parent = None
+    try:
+        result = accounts_graph.set_parent(lead_id, parent)
+    except accounts_graph.GraphError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event(
+        "account_parent_set" if parent else "account_parent_cleared",
+        actor=_actor(), lead_id=lead_id, parent=parent,
+    )
+    return jsonify(result)
+
+
+@app.route("/api/lead/<lead_id>/children", methods=["GET"])
+def api_lead_children(lead_id: str):
+    """List child accounts under this parent, enriched with pipeline metadata."""
+    child_slugs = accounts_graph.children_of(lead_id)
+    if not child_slugs:
+        return jsonify({"children": []})
+    try:
+        sync = NotionSync()
+        rows = sync.list_pipeline(limit=500)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Children pipeline lookup failed: %s", e)
+        return jsonify({"children": [{"id": s, "company": s} for s in child_slugs]})
+    by_slug = {project_store.slugify(r.get("id") or r.get("company") or ""): r for r in rows}
+    children = []
+    for s in child_slugs:
+        r = by_slug.get(s)
+        if r:
+            children.append({
+                "id": r.get("id"),
+                "company": r.get("company"),
+                "icp_normalised": r.get("icp_normalised"),
+                "status": r.get("status"),
+                "sales_stage": r.get("sales_stage"),
+                "vertical": r.get("vertical"),
+            })
+        else:
+            children.append({"id": s, "company": s, "_missing": True})
+    return jsonify({"children": children})
 
 
 if __name__ == "__main__":
