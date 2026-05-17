@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0b] — 2026-05-17 — Account Groups (Phase B): Apollo auto-detect
+
+When you qualify KFC, the platform now reads Apollo's enrichment and
+the company description, then surfaces a banner: *"Looks like this
+account is part of Yum! Brands."* The AE clicks Accept (one-click link
+to the parent, creating it if needed) or Override / Dismiss.
+
+### Added
+- **`parent_detector.py`** — combines two signals:
+  - Apollo's structured `parent_organization_*` / `parent_account_*`
+    fields (high confidence when present — rare in practice).
+  - Pattern matching on `short_description` for established M&A
+    phrasing: "subsidiary of X", "owned by X", "operating company of
+    X", "acquired by X" (medium confidence) and "part of the X
+    family", "brand of X", "division of X" (low confidence).
+  - Returns `{source, name, confidence, matched_phrase}` or `None`.
+- **`qualify_service.qualify()` now returns `suggested_parent`** in
+  the response payload (or `None` for standalone accounts).
+- **Suggestion banner in the qualify result** (between auto-discovery
+  header and tiles). Renders only when a candidate exists. Shows the
+  confidence pill, the source, and the matched phrase for trust.
+  Three actions:
+  - **Accept** — if the candidate is already in pipeline, one-click
+    link. Otherwise creates the parent on save and links.
+  - **Override** — dismisses the banner; AE uses the drawer picker.
+  - **Dismiss** — hides the banner for this session.
+- **Pending-link queue** — if the AE accepts a suggestion before the
+  lead is saved to Notion, the link auto-fires after the Notion save
+  completes.
+
+### Detector details (regex hygiene)
+- Name capture is case-sensitive (`[A-Z\d]`) on purpose — without it,
+  `re.IGNORECASE` would let the regex eat trailing lowercase words
+  like "since 2020" or "focused on cloud services".
+- Trailing legal-suffix stripping is narrow: only strips a `, Inc.`
+  / `, LLC` style suffix after a comma. "Yum! **Brands**", "Restaurant
+  **Brands** International", "Berkshire Hathaway **Holdings**" are
+  preserved because those tokens are part of the real name.
+- Generic-noun guard: rejects matches that start with "the", "a",
+  "global", "leading" etc. so "part of the global ecommerce industry"
+  doesn't false-positive.
+
+### Tests
+- 276 total (+19). `test_parent_detector.py` covers: subsidiary/owned-by/
+  operating-company-of/acquired-by (medium), part-of-family/brand-of/
+  division-of (low), Apollo flat + nested + domain-fallback fields,
+  empty inputs, generic-noun rejection, Apollo-beats-description
+  precedence.
+
 ## [0.10.0a] — 2026-05-17 — Account Groups (Phase A)
 
 Models the parent-brand relationship for B2B realities like Yum! Brands

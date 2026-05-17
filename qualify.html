@@ -354,6 +354,7 @@
       <div class="card">
         <h2>2 · Auto-Discovery</h2>
         <p class="muted" id="stub-banner" style="display:none;"></p>
+        <div id="parent-suggestion" style="display:none;"></div>
         <div class="tiles" id="tiles"></div>
         <div class="btn-row" style="margin-top: 14px;">
           <button id="btn-rescore" class="btn ghost" type="button">Re-score with overrides</button>
@@ -1130,6 +1131,7 @@
     renderFit(result);
     renderStakeholders(result);
     renderStubBanner(result);
+    renderParentSuggestion(result);
     // Restore notes + project scope if persisted on the result
     $('#notes-text').value = result.notes || '';
     $('#project-scope-text').value = result.project_scope || '';
@@ -1226,6 +1228,92 @@
       el.style.display = 'block';
       el.innerHTML = `<span class="stub-warning">Stubbed data — ${reason || 'no Apollo fixture, no API key'}</span>`;
     } else { el.style.display = 'none'; }
+  }
+
+  // v0.10.0 Phase B: parent-group suggestion banner.
+  // Shows "Apollo says X is part of Y — Link?" with Accept / Override / Dismiss
+  // when parent_detector found a candidate. Hidden for standalone accounts.
+  function renderParentSuggestion(result) {
+    const el = $('#parent-suggestion');
+    const sp = result?.suggested_parent;
+    if (!sp || !sp.name) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    // Check if the suggested parent already exists in our pipeline so we
+    // can offer one-click linking vs create-and-link.
+    const candidateLc = sp.name.toLowerCase();
+    const existing = (state.pipeline?.rows || []).find(r =>
+      (r.company || '').toLowerCase() === candidateLc
+    );
+    const confidenceColour = sp.confidence === 'high'
+      ? 'var(--green)' : (sp.confidence === 'medium' ? 'var(--accent)' : 'var(--yellow)');
+    const sourceLabel = sp.source === 'apollo'
+      ? 'Apollo data'
+      : `Detected from Apollo description${sp.matched_phrase ? ` ("${escapeHtml(sp.matched_phrase)}")` : ''}`;
+    const ctaLabel = existing
+      ? `Link to <strong>${escapeHtml(existing.company)}</strong> (already in pipeline)`
+      : `Create <strong>${escapeHtml(sp.name)}</strong> as parent + link`;
+
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div style="background:rgba(255,77,42,.08);border:1px solid rgba(255,77,42,.35);border-radius:8px;padding:12px;margin:12px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${confidenceColour};">
+            Possible parent group · ${escapeHtml(sp.confidence)} confidence
+          </div>
+          <button class="btn ghost" type="button" id="parent-suggestion-dismiss" style="padding:3px 8px;font-size:10px;">× Dismiss</button>
+        </div>
+        <div style="font-size:13px;color:var(--text);margin-bottom:6px;">
+          Looks like this account is part of <strong>${escapeHtml(sp.name)}</strong>.
+        </div>
+        <div class="muted" style="font-size:10px;margin-bottom:10px;">${sourceLabel}</div>
+        <div class="btn-row">
+          <button class="btn" type="button" id="parent-suggestion-accept" style="padding:5px 12px;font-size:11px;">
+            ${ctaLabel}
+          </button>
+          <button class="btn ghost" type="button" id="parent-suggestion-override" style="padding:5px 12px;font-size:11px;">
+            Override — pick different parent
+          </button>
+        </div>
+      </div>
+    `;
+    $('#parent-suggestion-dismiss').addEventListener('click', () => {
+      el.style.display = 'none';
+    });
+    $('#parent-suggestion-accept').addEventListener('click', () =>
+      acceptParentSuggestion(existing ? existing.id : sp.name)
+    );
+    $('#parent-suggestion-override').addEventListener('click', () => {
+      // Soft-dismiss the banner; the AE can use the drawer's parent picker
+      // after saving the lead.
+      el.style.display = 'none';
+      toast('Save the lead first, then use the parent picker in its drawer.', 'info');
+    });
+  }
+
+  async function acceptParentSuggestion(parentRef) {
+    // The current qualify result needs a saved lead before we can link a
+    // parent (the graph keys on lead_id). If the lead isn't saved yet,
+    // tell the AE to save first — keeps the flow honest.
+    const cur = state.currentResult;
+    const leadId = cur?.saved_id || cur?.notion_page_id;
+    if (!leadId) {
+      toast('Save the lead first, then the parent will be linked.', 'info');
+      // Stash for auto-link-after-save (best-effort).
+      state.pendingParentLink = parentRef;
+      return;
+    }
+    try {
+      await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/parent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_account_id: parentRef }),
+      });
+      toast('Parent group linked', 'success');
+      $('#parent-suggestion').style.display = 'none';
+      // If the pipeline view is open, refresh so the parent badge appears.
+      try { await refreshPipeline(); } catch (_) {}
+    } catch (e) {
+      toast(`Link failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   function renderTiles(result, pulse) {
@@ -1455,7 +1543,27 @@
       // Remember the page_id so the Stakeholders "Save" buttons can target it.
       if (res.page_id) {
         state.lastSavedPageId = res.page_id;
-        if (state.currentResult) renderStakeholders(state.currentResult);
+        if (state.currentResult) {
+          state.currentResult.saved_id = res.page_id;
+          renderStakeholders(state.currentResult);
+        }
+        // v0.10.0 Phase B: if the AE accepted a parent suggestion before
+        // the lead was saved, auto-link it now that the lead has an id.
+        if (state.pendingParentLink) {
+          const parentRef = state.pendingParentLink;
+          state.pendingParentLink = null;
+          try {
+            await jsonFetch(`/api/lead/${encodeURIComponent(res.page_id)}/parent`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parent_account_id: parentRef }),
+            });
+            toast('Parent group linked', 'success');
+            $('#parent-suggestion').style.display = 'none';
+          } catch (e) {
+            toast(`Parent link queued but failed: ${e.body?.error || e.message}`, 'error');
+          }
+        }
       }
       setTimeout(() => { btn.classList.remove('success'); btn.innerHTML = 'Save lead'; }, 3000);
     } catch (e) {

@@ -16,6 +16,7 @@ from typing import Any
 
 import apollo
 import ai_summary
+import parent_detector
 from scoring import (
     calculate_icp_score,
     check_hard_disqualifiers,
@@ -300,12 +301,18 @@ def qualify(
     fit_summary = ai_text or heuristic_summary
     summary_source = "ai" if ai_text else "heuristic"
 
+    # v0.10.0 Phase B: detect possible parent group from Apollo enrichment.
+    # Returns None for standalone accounts; the UI hides the suggestion banner
+    # in that case. The AE always confirms before any link is created.
+    suggested_parent = parent_detector.suggest_parent(org)
+
     return {
         "company": {
             "name": name,
             "url": url,
             "apollo": org,  # whole normalised payload incl. raw
         },
+        "suggested_parent": suggested_parent,
         "discovered": {
             "revenue": org.get("annual_revenue_printed") or company_data["revenue"],
             "revenue_numeric": org.get("annual_revenue"),
