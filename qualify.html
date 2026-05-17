@@ -2361,12 +2361,13 @@
     const btn = $('#ld-save');
     if (!btn) return;
     const { count, dirtySections } = countDirtyChanges();
+    const countEl = $('#ld-dirty-count');
     if (count > 0) {
       btn.classList.add('dirty');
-      $('#ld-dirty-count').textContent = String(count);
+      if (countEl) countEl.textContent = String(count);
     } else {
       btn.classList.remove('dirty');
-      $('#ld-dirty-count').textContent = '';
+      if (countEl) countEl.textContent = '';
     }
     // Highlight section summaries that have pending changes.
     $$('#lead-drawer details.group').forEach(d => {
@@ -4031,7 +4032,20 @@
     $('#ld-close').addEventListener('click', closeLeadDrawer);
     // (footer Cancel button removed in v0.10.0g — header X serves the same role.)
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
-    $('#ld-save').addEventListener('click', saveLead);
+    // v0.10.0i diagnostic + safety net: log click + wrap in try/catch so a
+    // silent throw can't strand the user with a non-responsive button.
+    $('#ld-save').addEventListener('click', async (e) => {
+      console.log('[drawer] Save clicked; drawerState.id =', drawerState?.id);
+      try {
+        await saveLead();
+      } catch (err) {
+        console.error('[drawer] saveLead threw:', err);
+        toast(`Save failed: ${err?.message || err}`, 'error');
+      }
+    });
+    // Global unhandled-error capture so we never lose silent rejections.
+    window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
+    window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
     $('#ld-add-contact').addEventListener('click', () => {
       if (drawerState.id) addContactManual(drawerState.id);
     });
