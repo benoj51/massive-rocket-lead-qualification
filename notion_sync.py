@@ -635,6 +635,9 @@ class NotionSync:
                 mapped = mapping.get(value, value) if mapping else value
                 props[prop_name] = {"select": {"name": mapped}}
         # Rich text fields
+        # NB: "Lead Summary" (v0.10.0f) requires the property to exist in
+        # the Notion DB. If it doesn't, Notion returns 400; callers should
+        # catch and skip rather than fail the upstream operation.
         for key, prop_name in (
             ("revenue", "Revenue"),
             ("employees", "Employees"),
@@ -646,6 +649,7 @@ class NotionSync:
             ("next_steps", "Next Steps"),
             ("positive_signals", "Positive Signals"),
             ("disqualifiers", "Disqualifiers"),
+            ("lead_summary", "Lead Summary"),
         ):
             if key in edits:
                 props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}

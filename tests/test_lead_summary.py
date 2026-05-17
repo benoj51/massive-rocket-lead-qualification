@@ -147,5 +147,45 @@ class GatherLeadContextNoneExtractedTests(unittest.TestCase):
         self.assertIsNone(ctx["calls"][0]["extracted_meddpicc"])
 
 
+class FormatSummaryForNotionTests(unittest.TestCase):
+    """v0.10.0f: structured summary → single rich-text block for Notion."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ["APOLLO_USE_FIXTURES"] = "1"
+        os.environ.pop("APP_AUTH_TOKEN", None)
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        for mod in ("server", "lead_summary_store", "ai_summary"):
+            sys.modules.pop(mod, None)
+        cls.server = importlib.import_module("server")
+
+    def test_full_summary_renders_all_sections(self):
+        out = self.server._format_summary_for_notion({
+            "state_of_play": "Mid-discovery on CDP build, fit is strong.",
+            "key_facts": ["Braze in stack", "Champion identified"],
+            "open_questions": ["Budget cycle?", "Decision criteria?"],
+            "next_action": "Book economic buyer call",
+            "risks": ["No procurement engagement"],
+            "generated_at": "2026-05-17T12:00:00Z",
+        })
+        self.assertIn("Mid-discovery on CDP build", out)
+        self.assertIn("KEY FACTS:", out)
+        self.assertIn("• Braze in stack", out)
+        self.assertIn("OPEN QUESTIONS:", out)
+        self.assertIn("NEXT ACTION: Book economic buyer call", out)
+        self.assertIn("RISKS:", out)
+        self.assertIn("• No procurement engagement", out)
+        self.assertIn("Generated 2026-05-17", out)
+
+    def test_minimal_summary_omits_empty_sections(self):
+        out = self.server._format_summary_for_notion({
+            "state_of_play": "Just one note in.",
+        })
+        self.assertIn("Just one note in.", out)
+        self.assertNotIn("KEY FACTS:", out)
+        self.assertNotIn("OPEN QUESTIONS:", out)
+        self.assertNotIn("RISKS:", out)
+
+
 if __name__ == "__main__":
     unittest.main()

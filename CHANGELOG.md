@@ -5,6 +5,49 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0f] — 2026-05-17 — Save changes commits pending notes + Lead Summary syncs to Notion
+
+Two issues raised after Phase E rollout:
+
+### Fixed: "Save changes" said "No changes to save" with a pending note
+When the AE typed in the Calls & Notes composer and clicked the
+drawer's footer "Save changes" instead of the inline "Save call /
+note", the bottom save diffed only `data-ld` fields and refused. The
+draft text was abandoned on close/refresh.
+
+`saveLead()` now also picks up `#ld-new-call-content` as part of the
+save flow:
+- If lead fields changed AND there's draft note text → save both
+  (lead PATCH first, then call POST).
+- If only the composer has text → just save the call.
+- If only lead fields changed → existing behaviour.
+- If nothing changed → "No changes to save" (unchanged).
+
+Status line summarises what was saved, e.g. *"Saved 2 fields + note"*.
+
+### Added: Lead Summary auto-syncs to Notion
+The cached AI summary lives in `cache/lead_summaries/` — ephemeral on
+Railway. After ✨ Refresh, the summary now also writes to a **"Lead
+Summary"** rich-text property on the Notion page (formatted block:
+state of play → key facts → open questions → next action → risks →
+generated timestamp).
+
+- New writable field `lead_summary` in `notion_sync.update_page`.
+- New helper `_format_summary_for_notion(summary)` renders the
+  structured dict into a single text block (~1900 chars cap).
+- Notion sync is best-effort: if the DB doesn't have a "Lead Summary"
+  property yet, Notion returns 400, we log a warning, and the local
+  cache still works.
+- Audit log captures `notion_synced: bool` so failures are visible.
+
+**Action for you:** add a **"Lead Summary"** column (type: Text) to
+the Notion DB. Once it exists, every ✨ Refresh updates it. Until
+then the local cache works the same as before.
+
+### Tests
+- 280 total (+2). New tests pin the format helper: full-summary
+  renders all sections; minimal-summary omits empty ones.
+
 ## [0.10.0e] — 2026-05-17 — Account Groups (Phase E): add opportunity under a group
 
 Two new entry points for adding a brand under a parent group, asked

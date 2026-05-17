@@ -859,7 +859,14 @@ def api_lead_summary_get(lead_id: str):
 
 @app.route("/api/lead/<lead_id>/summary", methods=["POST"])
 def api_lead_summary_refresh(lead_id: str):
-    """Run Claude over the lead's full context, cache + return the result."""
+    """Run Claude over the lead's full context, cache + return the result.
+
+    v0.10.0f also persists the formatted summary to Notion as a "Lead
+    Summary" rich-text property so it survives Railway redeploys and is
+    visible to anyone viewing the Notion page. Requires a "Lead Summary"
+    column in the Notion DB — if absent, Notion returns 400 and we log
+    a warning without failing the local save.
+    """
     if not ai_summary.is_configured():
         return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
     ctx = _gather_lead_context(lead_id)
@@ -867,9 +874,52 @@ def api_lead_summary_refresh(lead_id: str):
     if result is None:
         return jsonify({"error": "Synthesis failed"}), 502
     saved = lead_summary_store.save(lead_id, result)
+    notion_synced = False
+    try:
+        formatted = _format_summary_for_notion(saved)
+        sync = NotionSync()
+        sync.update_page(lead_id, {"lead_summary": formatted})
+        notion_synced = True
+    except Exception as e:
+        # Most common cause: the Notion DB doesn't have a "Lead Summary"
+        # property yet. We don't want to fail the user-visible operation —
+        # the cached copy is still valid; the AE just doesn't get the
+        # Notion mirror until the column is added.
+        log.warning("Notion summary sync skipped for %s: %s", lead_id, e)
     audit.log_event("lead_summary_refreshed", actor=_actor(), lead_id=lead_id,
-                    calls_used=len(ctx.get("calls") or []))
-    return jsonify({"summary": saved})
+                    calls_used=len(ctx.get("calls") or []),
+                    notion_synced=notion_synced)
+    return jsonify({"summary": saved, "notion_synced": notion_synced})
+
+
+def _format_summary_for_notion(summary: dict) -> str:
+    """Turn the structured summary into a single rich-text block.
+
+    Sections are separated by blank lines and prefixed with section
+    headers so the Notion text reads cleanly in the property view.
+    Truncated to ~1900 chars to fit Notion's per-rich-text-block limit
+    (the rich_text helper chunks further if needed).
+    """
+    parts: list[str] = []
+    state = (summary.get("state_of_play") or "").strip()
+    if state:
+        parts.append(state)
+    facts = [f.strip() for f in (summary.get("key_facts") or []) if f]
+    if facts:
+        parts.append("KEY FACTS:\n" + "\n".join(f"• {f}" for f in facts))
+    questions = [q.strip() for q in (summary.get("open_questions") or []) if q]
+    if questions:
+        parts.append("OPEN QUESTIONS:\n" + "\n".join(f"• {q}" for q in questions))
+    next_action = (summary.get("next_action") or "").strip()
+    if next_action:
+        parts.append(f"NEXT ACTION: {next_action}")
+    risks = [r.strip() for r in (summary.get("risks") or []) if r]
+    if risks:
+        parts.append("RISKS:\n" + "\n".join(f"• {r}" for r in risks))
+    generated = summary.get("generated_at")
+    if generated:
+        parts.append(f"(Generated {generated} by Claude)")
+    return "\n\n".join(parts)
 
 
 # --- Roadmap -------------------------------------------------------------

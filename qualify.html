@@ -2442,24 +2442,55 @@
   async function saveLead() {
     if (!drawerState.id) return;
     const edits = collectLeadEdits();
-    if (Object.keys(edits).length === 0) {
+    // v0.10.0f: also pick up a draft note in the call composer. If the AE
+    // typed there and hit "Save changes" instead of "Save call / note", we
+    // commit the note too so the text isn't lost.
+    const pendingNote = ($('#ld-new-call-content')?.value || '').trim();
+    if (Object.keys(edits).length === 0 && !pendingNote) {
       $('#ld-status').textContent = 'No changes to save';
       return;
     }
     const btn = $('#ld-save');
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…';
+    const summary = [];
     try {
-      const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(edits),
-      });
-      drawerState.original = data.lead;
-      drawerState.current = { ...data.lead };
-      $('#ld-status').textContent = `Saved ${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`;
-      toast(`Saved ${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`, 'success');
-      // Refresh the pipeline table behind the drawer so the row reflects new state
-      await refreshPipeline();
+      // 1) Lead PATCH (only if there are field edits)
+      if (Object.keys(edits).length) {
+        const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(edits),
+        });
+        drawerState.original = data.lead;
+        drawerState.current = { ...data.lead };
+        summary.push(`${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`);
+      }
+      // 2) Pending note → save as a call
+      if (pendingNote) {
+        const body = {
+          type: $('#ld-new-call-type')?.value || 'note',
+          title: $('#ld-new-call-title')?.value?.trim() || '',
+          content: pendingNote,
+          company_name: drawerState.original?.company || '',
+        };
+        await jsonFetch(`/api/calls/${encodeURIComponent(drawerState.id)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        $('#ld-new-call-content').value = '';
+        if ($('#ld-new-call-title')) $('#ld-new-call-title').value = '';
+        await loadLeadCalls(drawerState.id);
+        summary.push('note');
+      }
+      const msg = `Saved ${summary.join(' + ')}`;
+      $('#ld-status').textContent = msg;
+      toast(msg, 'success');
+      if (Object.keys(edits).length) {
+        // Refresh pipeline only if lead-level fields changed (call save
+        // doesn't affect the pipeline row).
+        await refreshPipeline();
+      }
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
       $('#ld-status').textContent = e.body?.error || e.message;
