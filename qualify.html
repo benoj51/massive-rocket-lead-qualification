@@ -356,6 +356,17 @@
         <p class="muted" id="stub-banner" style="display:none;"></p>
         <div id="parent-suggestion" style="display:none;"></div>
         <div class="tiles" id="tiles"></div>
+        <!-- Manual override row: pick a parent group BEFORE saving so this
+             new opportunity lands under the right group on first save. -->
+        <div class="field" style="margin-top:14px;">
+          <label>Parent group <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— optional. Link this new opportunity to a parent (e.g. KFC → Yum! Brands). Picks an existing parent or creates a new one on save.</span></label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="qf-parent-search" placeholder="Search existing accounts, or type a new parent name…" style="flex:1;min-width:240px;" autocomplete="off" />
+            <button class="btn ghost" id="qf-parent-clear" type="button" style="padding:6px 10px;font-size:11px;display:none;">× Clear</button>
+            <span id="qf-parent-status" class="muted" style="font-size:11px;"></span>
+          </div>
+          <div id="qf-parent-suggestions" style="margin-top:4px;"></div>
+        </div>
         <div class="btn-row" style="margin-top: 14px;">
           <button id="btn-rescore" class="btn ghost" type="button">Re-score with overrides</button>
         </div>
@@ -734,7 +745,10 @@
         <div id="ld-parent-error" class="muted" style="color:var(--red);font-size:11px;margin-top:4px;display:none;"></div>
       </div>
       <div id="ld-children-panel" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:8px;">Brands in this group <span id="ld-children-count" style="color:var(--accent);"></span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Brands in this group <span id="ld-children-count" style="color:var(--accent);"></span></div>
+          <button class="btn ghost" type="button" id="ld-add-brand" style="padding:4px 10px;font-size:11px;">+ Add brand under this group</button>
+        </div>
         <div id="ld-children-list"></div>
       </div>
       <div class="field"><label>Company</label><input type="text" data-ld="company" /></div>
@@ -1166,6 +1180,74 @@
   function collectSourcedFor() {
     return Array.from(document.querySelectorAll('#chk-sourced-for [data-partner].active'))
       .map(b => b.dataset.partner);
+  }
+
+  // ---------- Qualify-view parent group picker (v0.10.0e) ----------
+  // Mirrors the drawer's parent picker but operates BEFORE the lead is
+  // saved. On Notion save, state.pendingParentLink fires the link.
+  let _qfPickerDebounce = null;
+
+  function renderQfParentSuggestions(q) {
+    const box = $('#qf-parent-suggestions');
+    if (!box) return;
+    const term = (q || '').trim().toLowerCase();
+    if (!term) { box.innerHTML = ''; return; }
+    const matches = (_pipelineForPicker || [])
+      .filter(r => (r.company || '').toLowerCase().includes(term))
+      .slice(0, 6);
+    const exact = matches.find(m => (m.company || '').toLowerCase() === term);
+    const rows = matches.map(m => `
+      <a href="#" data-qf-parent-pick="${escapeAttr(m.id)}" data-qf-parent-name="${escapeAttr(m.company || m.id)}" style="display:block;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);text-decoration:none;margin-bottom:4px;">
+        ${escapeHtml(m.company || m.id)}
+        ${m.is_parent ? '<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;text-transform:uppercase;letter-spacing:.05em;">Group</span>' : ''}
+        <span class="muted" style="font-size:10px;">${m.status ? ' · ' + escapeHtml(m.status) : ''}</span>
+      </a>
+    `).join('');
+    const createRow = exact ? '' : `
+      <a href="#" data-qf-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(255,77,42,.08);border:1px dashed rgba(255,77,42,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
+        + Use "${escapeHtml(q.trim())}" as parent group (created on save)
+      </a>
+    `;
+    box.innerHTML = rows + createRow;
+    box.querySelectorAll('[data-qf-parent-pick]').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        setQfParent(a.dataset.qfParentPick, a.dataset.qfParentName);
+      });
+    });
+    box.querySelectorAll('[data-qf-parent-create]').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const name = a.dataset.qfParentCreate;
+        setQfParent(name, name);
+      });
+    });
+  }
+
+  function setQfParent(parentRef, displayName) {
+    state.pendingParentLink = parentRef;
+    $('#qf-parent-search').value = displayName || parentRef;
+    $('#qf-parent-search').disabled = true;
+    $('#qf-parent-clear').style.display = 'inline-flex';
+    $('#qf-parent-status').textContent = '→ will link on save';
+    $('#qf-parent-status').style.color = 'var(--green)';
+    $('#qf-parent-suggestions').innerHTML = '';
+  }
+
+  function clearQfParent() {
+    state.pendingParentLink = null;
+    $('#qf-parent-search').value = '';
+    $('#qf-parent-search').disabled = false;
+    $('#qf-parent-clear').style.display = 'none';
+    $('#qf-parent-status').textContent = '';
+    $('#qf-parent-suggestions').innerHTML = '';
+    $('#qf-parent-search').focus();
+  }
+
+  // Allow callers (parent drawer "+ Add brand") to prefill the picker by
+  // setting a sticky parent before the user even types a company name.
+  function prefillQfParent(parentSlug, displayName) {
+    setQfParent(parentSlug, displayName);
   }
 
   function bindNotesAndScopeSync() {
@@ -2217,6 +2299,29 @@
         heading.firstChild.textContent = 'Lead Summary ';
         subheading.textContent = '— AI synthesis across notes + qualification';
       }
+    }
+    // "+ Add brand" button — wires whenever the children panel is visible
+    // (a lead is a parent OR currently empty-parent waiting for its first brand).
+    // Closes the drawer, switches to Qualify view, and prefills the picker.
+    const addBrandBtn = $('#ld-add-brand');
+    if (addBrandBtn && !addBrandBtn._wired) {
+      addBrandBtn._wired = true;
+      addBrandBtn.addEventListener('click', () => {
+        const me = drawerState.original?.company || drawerState.id;
+        const meId = drawerState.id;
+        if (!meId) return;
+        closeLeadDrawer();
+        switchView('qualify');
+        // Focus the company-name field for immediate typing, then prefill
+        // the parent picker so the new brand auto-links on save.
+        setTimeout(() => {
+          $('#in-name').value = '';
+          $('#in-url').value = '';
+          $('#in-name').focus();
+          prefillQfParent(meId, me);
+          toast(`New opportunity will be linked under ${me}`, 'info');
+        }, 80);
+      });
     }
     if (kids.length) {
       childrenPanel.style.display = 'block';
@@ -3711,11 +3816,25 @@
     $('#btn-clear').addEventListener('click', () => {
       $('#in-name').value = ''; $('#in-url').value = '';
       state.currentResult = null; state.overrides = {};
+      clearQfParent();
       $('#results').style.display = 'none';
     });
     $('#btn-notion').addEventListener('click', pushToNotion);
     $('#btn-extract-notes').addEventListener('click', extractFromNotes);
     bindNotesAndScopeSync();
+    // Qualify-view parent group picker (v0.10.0e)
+    $('#qf-parent-search').addEventListener('input', (e) => {
+      clearTimeout(_qfPickerDebounce);
+      const q = e.target.value;
+      _qfPickerDebounce = setTimeout(async () => {
+        await ensurePipelineForPicker();
+        renderQfParentSuggestions(q);
+      }, 200);
+    });
+    $('#qf-parent-search').addEventListener('focus', async () => {
+      await ensurePipelineForPicker();
+    });
+    $('#qf-parent-clear').addEventListener('click', clearQfParent);
     // Lead detail drawer
     $('#ld-close').addEventListener('click', closeLeadDrawer);
     $('#ld-cancel').addEventListener('click', closeLeadDrawer);

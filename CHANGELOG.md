@@ -5,6 +5,38 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0e] — 2026-05-17 — Account Groups (Phase E): add opportunity under a group
+
+Two new entry points for adding a brand under a parent group, asked
+for after the initial A–D rollout:
+
+### Added
+- **Qualify view: "Parent group" picker** inside Auto-Discovery,
+  between the auto-detected tiles and the "Re-score with overrides"
+  button. Typeahead over existing pipeline accounts plus a
+  *"+ Use 'X' as parent group (created on save)"* fallback. Once
+  picked, the chosen parent is stashed in `state.pendingParentLink`
+  and the Notion save flow auto-links it as soon as the lead has an
+  id (reuses the Phase B pending-link queue).
+- **Parent drawer: "+ Add brand under this group" button** on the
+  "Brands in this group" panel. Closes the drawer, switches to the
+  Qualify view, prefills the parent picker, and focuses the company-
+  name field — one click and you're typing the new brand.
+- **Picker shows a `Group` chip** next to existing parents in the
+  suggestions list so it's obvious whether you're linking to a
+  standalone account or an already-established group.
+
+### Behaviour
+- Picker value is sticky until "× Clear" is clicked or the qualify
+  form is cleared.
+- The link only fires on save — Re-score doesn't create the link, so
+  the AE can change their mind freely.
+- Works for both Apollo-suggested and AE-picked parents — both paths
+  share `state.pendingParentLink` and converge in `pushToNotion`.
+
+### Tests
+- 278 total. UI-only change, no new Python tests. JS sanity check green.
+
 ## [0.10.0d] — 2026-05-17 — Account Groups (Phase D): AI sibling + portfolio context
 
 Final phase of the Account Groups feature. Claude now writes
