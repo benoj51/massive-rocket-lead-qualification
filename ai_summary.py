@@ -121,14 +121,51 @@ Schema:
     "champion":          {"value": "<name + title, or null>"},
     "competition":       {"value": "<vendors mentioned, or null>"}
   },
-  "project_scope": "<one short paragraph summarising what MR would deliver, or null>"
+  "project_scope": "<one short paragraph summarising what MR would deliver, or null>",
+  "synthesised_note": "<a structured call summary in the MR Call Note format — see below>"
 }
+
+The synthesised_note uses this exact markdown structure (omit any section
+where you have nothing real to say — never write 'TBD' or 'N/A'):
+
+## Headline
+<one sentence: what mattered most in this call>
+
+## Attendees
+- <name, title (company)> — one per line; MR side and prospect side mixed
+
+## What we heard
+- <2 to 4 bullets summarising the conversation in plain English>
+
+## Discovery
+- **Metrics:** <only if mentioned>
+- **Economic Buyer:** <only if identified>
+- **Decision Criteria:** <only if mentioned>
+- **Decision Process:** <only if discussed>
+- **Paper Process:** <only if discussed>
+- **Pain:** <only if surfaced>
+- **Champion:** <only if identified>
+- **Competition:** <only if mentioned>
+
+## Project shaping
+<1 to 2 sentences on what MR's engagement might look like — only if
+the call gave you enough to say something concrete>
+
+## Action items
+**MR:**
+- <action>
+**Prospect:**
+- <action>
+
+## Risks
+- <only if concrete risks were raised in the call>
 
 Rules:
 - Only fill values you can ground in the text. Use null for everything else.
 - Keep values brief — phrases, not paragraphs.
 - No marketing tone. No em-dashes. Plain English.
-- If the text doesn't mention something, return null. Don't guess.
+- If a section has nothing to say, omit the section entirely.
+- The synthesised_note IS the AE-facing artefact. Make it scannable.
 """
 
 
@@ -203,5 +240,14 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
         project_scope = str(project_scope).strip()
     else:
         project_scope = None
+    synthesised_note = data.get("synthesised_note")
+    if synthesised_note and str(synthesised_note).lower() != "null":
+        synthesised_note = str(synthesised_note).strip()
+    else:
+        synthesised_note = None
 
-    return {"meddpicc": meddpicc_out, "project_scope": project_scope}
+    return {
+        "meddpicc": meddpicc_out,
+        "project_scope": project_scope,
+        "synthesised_note": synthesised_note,
+    }

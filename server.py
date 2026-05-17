@@ -316,6 +316,19 @@ def api_calls_add(lead_id: str):
                     "rolling": calls_store.aggregate_extractions(lead_id)})
 
 
+@app.route("/api/calls/<lead_id>/<call_id>", methods=["PATCH"])
+def api_calls_update(lead_id: str, call_id: str):
+    body = request.get_json(silent=True) or {}
+    if not body:
+        return jsonify({"error": "no edits supplied"}), 400
+    updated = calls_store.update_call(lead_id, call_id, body)
+    if updated is None:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("call_updated", actor=_actor(), lead_id=lead_id, call_id=call_id,
+                    fields=sorted(body.keys()))
+    return jsonify({"call": updated})
+
+
 @app.route("/api/calls/<lead_id>/<call_id>", methods=["DELETE"])
 def api_calls_delete(lead_id: str, call_id: str):
     ok = calls_store.delete_call(lead_id, call_id)

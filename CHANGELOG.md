@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] — 2026-05-17
+
+Hotfix + editable AI-synthesised call notes.
+
+### Fixed
+- **HOTFIX: all buttons broken on the live platform.** The v0.8.1
+  `renderPricing` function declared `const ccy` twice in the same
+  scope (once for the summary tiles, once for the editable team
+  table). JS aborts on `SyntaxError: Identifier 'ccy' has already
+  been declared`, which kills every event listener on the page.
+  Removed the duplicate. Added `test_no_duplicate_const_ccy_in_renderpricing`
+  to lock against regression.
+
+### Added
+- **MR Call Note format** — Claude now returns a `synthesised_note`
+  alongside the MEDDPICC + project_scope extraction, structured as:
+  - `## Headline` — one sentence
+  - `## Attendees` — bullets, MR + prospect mixed
+  - `## What we heard` — 2-4 bullet summary
+  - `## Discovery` — MEDDPICC roll-up (only fields with content)
+  - `## Project shaping` — 1-2 sentences if grounded in the call
+  - `## Action items` — separated by **MR:** and **Prospect:**
+  - `## Risks` — only if concrete
+  - Sections omitted entirely when there's nothing real to say.
+- **Editable call notes.** Each call card now shows the synthesised
+  note (rendered from markdown to HTML inline) with an **✎ Edit**
+  button. Clicking Edit opens an inline textarea, AE refines, saves
+  → `PATCH /api/calls/<lead>/<call>`. The original AI draft is
+  preserved in `extracted.synthesised_note`; the AE's edits live in
+  the top-level `note` field. An "(edited)" badge appears in the
+  card header once the AE has diverged from the AI draft.
+- **Raw transcript collapsed by default.** The original raw paste is
+  still available behind a `<details>` toggle on each call card.
+- **`POST /api/calls/<lead>` seeds `note` from `extracted.synthesised_note`**
+  on first save. AE doesn't have to retype anything to start editing.
+- **`PATCH /api/calls/<lead>/<call_id>`** endpoint — `note`, `title`,
+  and `attendees` are editable; the raw content + AI extraction stay
+  immutable so the audit trail is intact.
+
+### Changed
+- `calls_store.add_call` accepts `note` directly and seeds it from
+  `extracted.synthesised_note` if not provided.
+- Each call record now carries `updated_at` separately from `created_at`.
+
+### Tests
+- 217 total (+11). New: JS syntax regression (the hotfix), call store
+  seeding from extracted note, update_call round-trip, endpoint
+  contract for PATCH, AI prompt schema documents the new format.
+
 ## [0.8.1] — 2026-05-16
 
 Pricing Calculator V2.0 Phase 2. Adds gross margin analysis, Staff Aug

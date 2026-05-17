@@ -96,20 +96,50 @@ def add_call(lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     call_type = (payload.get("type") or "note").strip().lower()
     if call_type not in VALID_TYPES:
         call_type = "note"
+    extracted = payload.get("extracted") or None
+    # If AI gave us a synthesised note, copy it into `note` as the AE-editable
+    # initial value. The AE can edit `note` later; `extracted.synthesised_note`
+    # is preserved as the original AI draft.
+    note = (payload.get("note") or "").strip()
+    if not note and isinstance(extracted, dict):
+        note = (extracted.get("synthesised_note") or "").strip()
     record: dict[str, Any] = {
         "id": str(payload.get("id") or "").strip() or uuid.uuid4().hex[:12],
         "lead_id": lead_id,
         "created_at": _now(),
+        "updated_at": _now(),
         "type": call_type,
         "title": (payload.get("title") or "").strip(),
         "attendees": [str(a).strip() for a in (payload.get("attendees") or []) if str(a).strip()],
         "content": content,
-        "extracted": payload.get("extracted") or None,
+        "note": note,
+        "extracted": extracted,
     }
     rows = _load_raw(lead_id)
     rows.append(record)
     _write_raw(lead_id, rows)
     return record
+
+
+def update_call(lead_id: str, call_id: str, edits: dict[str, Any]) -> dict[str, Any] | None:
+    """Apply edits to an existing call (note, title, attendees). The raw
+    content + AI-extracted block stay immutable — to change those, delete
+    and re-add."""
+    rows = _load_raw(lead_id)
+    for r in rows:
+        if r.get("id") != call_id:
+            continue
+        if "note" in edits:
+            r["note"] = (edits["note"] or "").strip()
+        if "title" in edits:
+            r["title"] = (edits["title"] or "").strip()
+        if "attendees" in edits:
+            r["attendees"] = [str(a).strip() for a in (edits["attendees"] or [])
+                              if str(a).strip()]
+        r["updated_at"] = _now()
+        _write_raw(lead_id, rows)
+        return r
+    return None
 
 
 def delete_call(lead_id: str, call_id: str) -> bool:

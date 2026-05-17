@@ -1566,6 +1566,7 @@
     try {
       const data = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`);
       const calls = data.calls || [];
+      _callsCache[leadId] = calls;
       if (!calls.length) {
         el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes saved yet.</div>';
         return;
@@ -1575,26 +1576,116 @@
         const meddpiccFills = c.extracted?.meddpicc ? Object.keys(c.extracted.meddpicc).length : 0;
         const scopeFilled = !!c.extracted?.project_scope;
         const aiTag = (meddpiccFills || scopeFilled) ? `<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">AI ✦ ${meddpiccFills} MEDDPICC${scopeFilled ? ' + scope' : ''}</span>` : '';
+        const note = c.note || c.extracted?.synthesised_note || '';
+        const noteRendered = renderCallNote(note);
+        const editedBadge = (c.note && c.extracted?.synthesised_note && c.note !== c.extracted.synthesised_note)
+          ? `<span style="font-size:9px;color:var(--text-muted);margin-left:4px;">(edited)</span>` : '';
         return `
-          <div style="background:var(--surface-2);border:1px solid var(--border);padding:10px;border-radius:8px;margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+          <div style="background:var(--surface-2);border:1px solid var(--border);padding:12px;border-radius:8px;margin-bottom:10px;" data-call-id="${escapeAttr(c.id)}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
               <div style="font-size:11px;color:var(--text-dim);">
                 <strong style="color:var(--text);text-transform:uppercase;letter-spacing:.05em;">${escapeHtml(c.type)}</strong>
                 ${c.title ? ' · ' + escapeHtml(c.title) : ''} · ${escapeHtml(when)}
-                ${aiTag}
+                ${aiTag}${editedBadge}
               </div>
-              <button class="btn ghost" type="button" data-call-del="${escapeAttr(c.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              <div class="btn-row" style="flex-shrink:0;">
+                <button class="btn ghost" type="button" data-call-edit="${escapeAttr(c.id)}" style="padding:2px 8px;font-size:10px;">✎ Edit</button>
+                <button class="btn ghost" type="button" data-call-del="${escapeAttr(c.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              </div>
             </div>
-            <div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;max-height:120px;overflow:auto;">${escapeHtml(c.content)}</div>
+            <div class="call-note-rendered" style="font-size:12px;color:var(--text);">${noteRendered}</div>
+            <details style="margin-top:8px;">
+              <summary class="muted" style="cursor:pointer;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Raw transcript / source</summary>
+              <div style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;max-height:160px;overflow:auto;margin-top:6px;font-family:var(--mono);background:var(--bg);padding:8px;border-radius:6px;">${escapeHtml(c.content)}</div>
+            </details>
           </div>
         `;
       }).join('');
       el.querySelectorAll('[data-call-del]').forEach(b => {
         b.addEventListener('click', () => deleteCall(leadId, b.dataset.callDel));
       });
+      el.querySelectorAll('[data-call-edit]').forEach(b => {
+        b.addEventListener('click', () => openCallEditor(leadId, b.dataset.callEdit));
+      });
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
+  }
+
+  function renderCallNote(md) {
+    // Lightweight markdown → HTML for the synthesised note format. Supports:
+    //   ## heading, **bold**, bullet lines (- or •), and paragraph breaks.
+    if (!md) return '<div class="muted">No synthesised note yet. Click ✎ Edit to add one.</div>';
+    const escaped = escapeHtml(md);
+    const lines = escaped.split('\n');
+    const out = [];
+    let inList = false;
+    const flushList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { flushList(); out.push(''); continue; }
+      const h2 = line.match(/^##\s+(.+)$/);
+      if (h2) {
+        flushList();
+        out.push(`<h5 style="margin:8px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);">${h2[1]}</h5>`);
+        continue;
+      }
+      const bullet = line.match(/^[-•]\s+(.+)$/);
+      if (bullet) {
+        if (!inList) { out.push('<ul style="margin:2px 0 6px 18px;padding:0;">'); inList = true; }
+        out.push(`<li style="margin:2px 0;">${bullet[1]}</li>`);
+        continue;
+      }
+      flushList();
+      out.push(`<p style="margin:4px 0;">${line}</p>`);
+    }
+    flushList();
+    let html = out.join('');
+    // Bold
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    return html;
+  }
+
+  function openCallEditor(leadId, callId) {
+    const card = document.querySelector(`[data-call-id="${CSS.escape(callId)}"]`);
+    if (!card) return;
+    const noteEl = card.querySelector('.call-note-rendered');
+    const current = noteEl?.dataset.rawNote;
+    // Stash original rendered HTML so Cancel restores it
+    const originalHtml = noteEl.innerHTML;
+    // Fetch the raw text source — we'll pull from cached calls list
+    const callRow = pbCachedCalls(leadId)?.find(c => c.id === callId);
+    const rawNote = current || callRow?.note || callRow?.extracted?.synthesised_note || '';
+    const editorHtml = `
+      <textarea data-call-editor="${escapeAttr(callId)}" rows="10" style="width:100%;font-family:var(--mono);font-size:12px;">${escapeHtml(rawNote)}</textarea>
+      <div class="muted" style="font-size:10px;margin-top:4px;">Markdown-ish: <code>## Heading</code>, <code>**bold**</code>, <code>- bullets</code>. Edit, then click Save.</div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn" type="button" data-call-save="${escapeAttr(callId)}" style="padding:5px 12px;font-size:11px;">Save edits</button>
+        <button class="btn ghost" type="button" data-call-cancel="${escapeAttr(callId)}" style="padding:5px 12px;font-size:11px;">Cancel</button>
+      </div>
+    `;
+    noteEl.innerHTML = editorHtml;
+    noteEl.querySelector(`[data-call-save]`).addEventListener('click', () =>
+      saveCallEdit(leadId, callId, noteEl.querySelector('textarea').value));
+    noteEl.querySelector(`[data-call-cancel]`).addEventListener('click', () => {
+      noteEl.innerHTML = originalHtml;
+    });
+  }
+
+  // Tiny cache of the last calls list per lead so the editor can read source text.
+  const _callsCache = {};
+  function pbCachedCalls(leadId) { return _callsCache[leadId]; }
+
+  async function saveCallEdit(leadId, callId, note) {
+    try {
+      await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}/${encodeURIComponent(callId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      });
+      toast('Call note saved', 'success');
+      await loadLeadCalls(leadId);
+    } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
   async function addCall(leadId) {
@@ -2305,7 +2396,7 @@
 
     // Editable team table — each FTE cell is an input that re-quotes on change.
     pbState.lastQuote = q;
-    const ccy = q.inputs?.currency || 'USD';
+    // ccy already declared above for the summary tiles
     const isStaffAug = q.inputs?.rate_card === 'Staff Augmentation';
     const lib = pbState.pricingLibrary?.rates || {};
     const regions = lib.regions || ['UK', 'EU', 'LATAM', 'India'];
