@@ -497,6 +497,13 @@
         <select id="pipe-filter-sourced-for" style="padding: 5px 10px; font-size: 12px; min-width: 170px;">
           <option value="">Any sourced-for</option>
         </select>
+        <select id="pipe-filter-group" style="padding: 5px 10px; font-size: 12px; min-width: 170px;">
+          <option value="">Any group</option>
+        </select>
+        <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:6px;">
+          <button class="chip" data-view-mode="flat" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Flat</button>
+          <button class="chip" data-view-mode="grouped" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Grouped</button>
+        </div>
         <button class="btn ghost" id="btn-export-csv" type="button" style="margin-left:auto;">⇣ Export CSV</button>
         <button class="btn ghost" id="btn-refresh-pipeline" type="button">↻ Refresh</button>
       </div>
@@ -944,7 +951,7 @@
     currentResult: null,     // last qualify() payload
     overrides: {},           // user edits to discovered fields
     chart: null,
-    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', sort: { key: 'icp_normalised', dir: 'desc' } },
+    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', groupFilter: '', viewMode: 'flat', expandedGroups: new Set(), sort: { key: 'icp_normalised', dir: 'desc' } },
     authRequired: null,      // unknown until /api/health checked
     authToken: null,
     lastSavedPageId: null,   // set after Push to Notion succeeds
@@ -1580,6 +1587,7 @@
       // Reuse the larger fetch for the parent-picker; invalidate stale cache.
       _pipelineForPicker = [];
       populatePipelineFilterOptions();
+      populateGroupFilterOptions();
       renderPipeline();
     } catch (e) {
       console.error(e);
@@ -2359,6 +2367,11 @@
     sfSel.value = currentSf;
   }
 
+  function _slug(s) {
+    return String(s || '').toLowerCase().replace(/https?:\/\//, '').replace(/www\./, '')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
+  }
+
   function renderPipeline() {
     const f = state.pipeline.filter;
     let rows = [...state.pipeline.rows];
@@ -2372,6 +2385,16 @@
     }
     if (state.pipeline.sourcedForFilter) {
       rows = rows.filter(r => (r.sourced_for_partners || []).includes(state.pipeline.sourcedForFilter));
+    }
+    // v0.10.0c: Group filter. Show only members of this group (the parent
+    // itself + all its children).
+    if (state.pipeline.groupFilter) {
+      const g = state.pipeline.groupFilter;
+      const gSlug = _slug(g);
+      rows = rows.filter(r => {
+        const rSlug = _slug(r.id || r.company);
+        return rSlug === gSlug || r.parent_account_id === gSlug;
+      });
     }
 
     const { key, dir } = state.pipeline.sort;
@@ -2391,12 +2414,19 @@
       return;
     }
     $('#pipeline-empty').style.display = 'none';
-    tbody.innerHTML = rows.map(r => {
+
+    const renderRow = (r, opts = {}) => {
       const score = r.icp_normalised;
       const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+      const indent = opts.child
+        ? '<span style="display:inline-block;width:18px;color:var(--text-muted);margin-right:6px;">↳</span>'
+        : '';
+      const parentBadge = (!opts.child && r.is_parent)
+        ? '<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;text-transform:uppercase;letter-spacing:.05em;">Group</span>'
+        : '';
       return `
-        <tr class="pipeline-row-clickable" data-page-id="${escapeAttr(r.id || '')}">
-          <td class="openlink">${escapeHtml(r.company || '—')}</td>
+        <tr class="pipeline-row-clickable${opts.child ? ' pipeline-row-child' : ''}" data-page-id="${escapeAttr(r.id || '')}">
+          <td class="openlink">${indent}${escapeHtml(r.company || '—')}${parentBadge}</td>
           <td><strong class="num ${cls}" style="font-size:14px;font-family:var(--mono);">${score ?? '—'}</strong></td>
           <td>${escapeHtml(r.status || '—')}</td>
           <td>${escapeHtml(r.sales_stage || '—')}</td>
@@ -2406,12 +2436,108 @@
           <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml((r.next_steps || '').split('\n')[0])}</td>
         </tr>
       `;
-    }).join('');
+    };
+
+    // ---------- Grouped mode ----------
+    if (state.pipeline.viewMode === 'grouped') {
+      // Bucket rows: parents at top, children grouped under them, then standalones.
+      const bySlug = new Map();
+      rows.forEach(r => bySlug.set(_slug(r.id || r.company), r));
+      const childrenBy = new Map();  // parent_slug -> [child_rows]
+      rows.forEach(r => {
+        if (r.parent_account_id) {
+          if (!childrenBy.has(r.parent_account_id)) childrenBy.set(r.parent_account_id, []);
+          childrenBy.get(r.parent_account_id).push(r);
+        }
+      });
+
+      const parents = rows.filter(r => r.is_parent);
+      const childSlugs = new Set();
+      childrenBy.forEach((kids) => kids.forEach(k => childSlugs.add(_slug(k.id || k.company))));
+      const standalones = rows.filter(r => !r.is_parent && !r.parent_account_id);
+      // Children whose parent isn't in the filtered set still need to render
+      // somewhere — treat them as orphan rows at the bottom.
+      const parentSlugsRendered = new Set(parents.map(p => _slug(p.id || p.company)));
+      const orphanChildren = rows.filter(r =>
+        r.parent_account_id && !parentSlugsRendered.has(r.parent_account_id) && !r.is_parent
+      );
+
+      const expanded = state.pipeline.expandedGroups;
+      const html = [];
+
+      parents.forEach(p => {
+        const pSlug = _slug(p.id || p.company);
+        const kids = childrenBy.get(pSlug) || [];
+        const isExpanded = expanded.has(pSlug);
+        const score = p.icp_normalised;
+        const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+        const caret = isExpanded ? '▾' : '▸';
+        html.push(`
+          <tr class="pipeline-row-clickable pipeline-row-group" data-page-id="${escapeAttr(p.id || '')}" data-group-slug="${escapeAttr(pSlug)}">
+            <td class="openlink">
+              <button class="pipeline-toggle" data-toggle-group="${escapeAttr(pSlug)}" type="button" style="background:none;border:0;color:var(--accent);cursor:pointer;padding:0 6px 0 0;font-size:11px;">${caret}</button>
+              <strong>${escapeHtml(p.company || '—')}</strong>
+              <span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;text-transform:uppercase;letter-spacing:.05em;">Group · ${kids.length}</span>
+            </td>
+            <td><strong class="num ${cls}" style="font-size:14px;font-family:var(--mono);">${score ?? '—'}</strong></td>
+            <td>${escapeHtml(p.status || '—')}</td>
+            <td>${escapeHtml(p.sales_stage || '—')}</td>
+            <td>${escapeHtml(p.vertical || '—')}</td>
+            <td>${escapeHtml(p.opportunity_type || '—')}</td>
+            <td>${escapeHtml(p.owner || '—')}</td>
+            <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml((p.next_steps || '').split('\n')[0])}</td>
+          </tr>
+        `);
+        if (isExpanded) {
+          kids.forEach(k => html.push(renderRow(k, { child: true })));
+        }
+      });
+
+      if (orphanChildren.length) {
+        orphanChildren.forEach(k => html.push(renderRow(k, { child: true })));
+      }
+      standalones.forEach(r => html.push(renderRow(r)));
+
+      tbody.innerHTML = html.join('');
+      // Group caret toggles
+      tbody.querySelectorAll('[data-toggle-group]').forEach(b => {
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const g = b.dataset.toggleGroup;
+          if (expanded.has(g)) expanded.delete(g); else expanded.add(g);
+          renderPipeline();
+        });
+      });
+    } else {
+      // ---------- Flat mode ----------
+      tbody.innerHTML = rows.map(r => renderRow(r)).join('');
+    }
+
     tbody.querySelectorAll('[data-page-id]').forEach(tr => {
       tr.addEventListener('click', () => {
         const id = tr.dataset.pageId;
         if (id) openLeadDrawer(id);
       });
+    });
+  }
+
+  // Populate the Group filter dropdown from the current pipeline's parents.
+  function populateGroupFilterOptions() {
+    const sel = $('#pipe-filter-group');
+    if (!sel) return;
+    const parents = (state.pipeline.rows || [])
+      .filter(r => r.is_parent)
+      .map(r => ({ slug: _slug(r.id || r.company), name: r.company || r.id }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const cur = state.pipeline.groupFilter || '';
+    sel.innerHTML = '<option value="">Any group</option>' +
+      parents.map(p => `<option value="${escapeAttr(p.slug)}"${p.slug === cur ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+  }
+
+  // Update the Flat/Grouped toggle visual state.
+  function updateViewModeChips() {
+    document.querySelectorAll('[data-view-mode]').forEach(b => {
+      b.classList.toggle('active', b.dataset.viewMode === state.pipeline.viewMode);
     });
   }
 
@@ -3611,6 +3737,19 @@
       state.pipeline.sourcedForFilter = e.target.value;
       renderPipeline();
     });
+    // v0.10.0c: Group filter + Flat/Grouped view-mode toggle.
+    $('#pipe-filter-group').addEventListener('change', (e) => {
+      state.pipeline.groupFilter = e.target.value;
+      renderPipeline();
+    });
+    document.querySelectorAll('[data-view-mode]').forEach(b => {
+      b.addEventListener('click', () => {
+        state.pipeline.viewMode = b.dataset.viewMode;
+        updateViewModeChips();
+        renderPipeline();
+      });
+    });
+    updateViewModeChips();
     $('#btn-export-csv').addEventListener('click', async () => {
       // Bearer auth requires a fetch + blob roundtrip rather than a plain <a download>.
       try {
@@ -3628,8 +3767,10 @@
       $('#in-name').value = b.dataset.name;
       $('#in-url').value = b.dataset.url;
     }));
-    $$('#pipeline-filters .chip').forEach(c => c.addEventListener('click', () => {
-      $$('#pipeline-filters .chip').forEach(x => x.classList.remove('active'));
+    // Status filter chips — only the ones with data-filter (status), not
+    // the view-mode toggle chips which share the .chip class.
+    $$('#pipeline-filters .chip[data-filter]').forEach(c => c.addEventListener('click', () => {
+      $$('#pipeline-filters .chip[data-filter]').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
       state.pipeline.filter = c.dataset.filter;
       renderPipeline();

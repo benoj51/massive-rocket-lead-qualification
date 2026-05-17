@@ -5,6 +5,45 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0c] — 2026-05-17 — Account Groups (Phase C): grouped pipeline view
+
+The Pipeline view now has a **Flat / Grouped** toggle and a **Group**
+filter dropdown. Grouped mode shows parents at the top with a "Group · N"
+badge; clicking the caret expands to reveal child brands indented under
+their parent. Filter by group to see "everything under Yum! Brands"
+including the parent itself.
+
+### Added
+- **Pipeline Group filter** (`#pipe-filter-group`) — populated from
+  the parents currently in pipeline. Selecting "Yum! Brands" filters
+  to the parent + every child brand under it.
+- **Flat / Grouped view-mode toggle.** Flat shows every account as a
+  row (original behaviour); Grouped buckets parents at the top with
+  children indented under them.
+- **Group badges in the table:**
+  - Parents show "Group · N" (N = number of brands) with a clickable
+    expand caret in grouped mode.
+  - In flat mode parents get a quieter "Group" tag next to the name.
+  - Children show a `↳` indent prefix in grouped mode.
+- **Per-group expand/collapse state** persisted in `state.pipeline
+  .expandedGroups` (a `Set`). Survives filter changes within a session.
+- **Constrained the status-chip handler** to chips that have a
+  `data-filter` attribute so the new view-mode chips don't trigger it
+  (would have set `state.pipeline.filter = undefined`).
+
+### Notes
+- Group-level TCV rollup (sum of project values across all brands in
+  the group) is on the backlog. The current parent row shows the
+  parent's own ICP/stage/owner — useful when the parent is a real
+  lead, less useful when it's purely a label.
+- Orphan children (whose parent isn't in the filtered view) fall
+  through to a flat row below the parents so they're never silently
+  hidden.
+
+### Tests
+- 276 total. No new Python tests — view-mode is UI-only. JS sanity
+  check (full inline parse) green.
+
 ## [0.10.0b] — 2026-05-17 — Account Groups (Phase B): Apollo auto-detect
 
 When you qualify KFC, the platform now reads Apollo's enrichment and
