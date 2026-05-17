@@ -728,7 +728,7 @@ def _gather_lead_context(lead_id: str) -> dict:
             "created_at": c.get("created_at"),
             "note": c.get("note") or "",
             "content_excerpt": (c.get("content") or "")[:1500],
-            "extracted_meddpicc": c.get("extracted", {}).get("meddpicc"),
+            "extracted_meddpicc": (c.get("extracted") or {}).get("meddpicc"),
         }
         for c in calls[:6]
     ]

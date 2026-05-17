@@ -86,5 +86,46 @@ class LeadSummaryEndpointsTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY", r.get_json()["error"])
 
 
+class GatherLeadContextNoneExtractedTests(unittest.TestCase):
+    """v0.9.4 regression: _gather_lead_context crashed with
+    AttributeError when a call had extracted=None (which happens when
+    Claude extraction fails mid-save and the call is stored with the
+    raw transcript only). Reproduces the trace from the 2026-05-17 prod
+    incident."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["CALLS_STORE_DIR"] = os.path.join(cls.tmp, "calls")
+        os.environ["LEAD_SUMMARY_STORE_DIR"] = os.path.join(cls.tmp, "summaries")
+        os.environ["APOLLO_USE_FIXTURES"] = "1"
+        os.environ.pop("APP_AUTH_TOKEN", None)
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        for mod in ("server", "calls_store", "lead_summary_store", "ai_summary"):
+            sys.modules.pop(mod, None)
+        cls.server = importlib.import_module("server")
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("CALLS_STORE_DIR", None)
+        os.environ.pop("LEAD_SUMMARY_STORE_DIR", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_gather_context_handles_none_extracted(self):
+        # Write a call with extracted=None directly (mirrors what
+        # calls_store.add does when payload.get("extracted") is falsy).
+        import calls_store
+        calls_store.add_call("lead-xyz", {
+            "type": "transcript",
+            "title": "Discovery #2",
+            "content": "long raw transcript " * 200,
+            "extracted": None,  # the bug-triggering shape
+        })
+        # _gather_lead_context should not raise.
+        ctx = self.server._gather_lead_context("lead-xyz")
+        self.assertEqual(len(ctx["calls"]), 1)
+        self.assertIsNone(ctx["calls"][0]["extracted_meddpicc"])
+
+
 if __name__ == "__main__":
     unittest.main()

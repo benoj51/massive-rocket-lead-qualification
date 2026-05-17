@@ -5,6 +5,36 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] — 2026-05-17
+
+Hotfix: `✨ Refresh` returned 500 if a saved call had `extracted=None`.
+Triggered in prod when a long transcript made Claude's JSON output
+truncate mid-string (`Unterminated string starting at: line 29
+column 23`); the call still saved with raw transcript only, but
+`extracted` was stored as `None` rather than `{}`. The next refresh
+crashed at `c.get("extracted", {}).get("meddpicc")` because
+`dict.get(key, default)` returns the stored `None`, not the default,
+when the key is present.
+
+### Fixed
+- **`_gather_lead_context` (server.py:731)** — `(c.get("extracted")
+  or {}).get(...)` now safely handles both missing and explicit-None.
+- **`suggest_roadmap` (ai_summary.py:190)** — same pattern.
+- **`suggest_extended_engagement` (ai_summary.py:327)** — same pattern.
+
+### Changed
+- **`extract_from_notes` `max_tokens` 900 → 1800.** The original cap
+  was tight enough that a longer transcript producing a full
+  synthesised note + 8 MEDDPICC fields + project scope would
+  truncate. Marginal token cost (~$0.005/call vs $0.003), much higher
+  success rate on real call transcripts.
+
+### Tests
+- 245 total (+1). New regression
+  `GatherLeadContextNoneExtractedTests.test_gather_context_handles_none_extracted`
+  writes a call with `extracted=None` directly through `calls_store`
+  and asserts `_gather_lead_context` no longer raises.
+
 ## [0.9.3] — 2026-05-17
 
 UX clarity for the AI-off state. Triggered by Ben reporting "only see

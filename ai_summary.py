@@ -187,7 +187,7 @@ def suggest_roadmap(*, total_months: int, current_milestones: list[dict],
             {
                 "type": c.get("type"),
                 "title": c.get("title") or "",
-                "note": (c.get("note") or c.get("extracted", {}).get("synthesised_note") or "")[:1200],
+                "note": (c.get("note") or (c.get("extracted") or {}).get("synthesised_note") or "")[:1200],
             }
             for c in (calls or [])[:5]
         ],
@@ -324,7 +324,7 @@ def suggest_extended_engagement(*, current_scope_streams: list[str],
             for p in (package_catalogue or [])
         ],
         "recent_call_notes": [
-            {"note": (c.get("note") or c.get("extracted", {}).get("synthesised_note") or "")[:1000]}
+            {"note": (c.get("note") or (c.get("extracted") or {}).get("synthesised_note") or "")[:1000]}
             for c in (calls or [])[:5]
         ],
     }
@@ -462,7 +462,10 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
         client = Anthropic(api_key=api_key)
         msg = client.messages.create(
             model=_DEFAULT_MODEL,
-            max_tokens=900,
+            # Bumped from 900 → 1800 in v0.9.4 after a long transcript truncated
+            # mid-JSON-string and the parser failed. Long synthesised notes +
+            # 8 MEDDPICC fields + project scope can easily exceed 900 tokens.
+            max_tokens=1800,
             system=_EXTRACT_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
         )
