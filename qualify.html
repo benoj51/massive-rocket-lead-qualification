@@ -4185,20 +4185,40 @@
     $('#ld-close').addEventListener('click', closeLeadDrawer);
     // (footer Cancel button removed in v0.10.0g — header X serves the same role.)
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
-    // v0.10.0i diagnostic + safety net: log click + wrap in try/catch so a
-    // silent throw can't strand the user with a non-responsive button.
-    $('#ld-save').addEventListener('click', async (e) => {
-      console.log('[drawer] Save clicked; drawerState.id =', drawerState?.id);
-      try {
-        await saveLead();
-      } catch (err) {
-        console.error('[drawer] saveLead threw:', err);
-        toast(`Save failed: ${err?.message || err}`, 'error');
-      }
-    });
+    // v0.10.0k VISIBLE diagnostic — toast on every step so we can see what
+    // fires without needing DevTools. Once we identify the bug we strip
+    // these out.
+    const _ldSaveBtn = $('#ld-save');
+    if (_ldSaveBtn) {
+      _ldSaveBtn.addEventListener('click', async (e) => {
+        // Flash the button briefly so we know the click registered visually.
+        _ldSaveBtn.style.outline = '3px solid #00ff00';
+        setTimeout(() => { _ldSaveBtn.style.outline = ''; }, 600);
+        toast(`SAVE CLICKED · drawerState.id=${drawerState?.id || 'NULL'}`, 'success');
+        console.log('[drawer] Save clicked; drawerState.id =', drawerState?.id);
+        try {
+          toast('Entering saveLead…', 'info');
+          await saveLead();
+          toast('saveLead returned without throwing', 'success');
+        } catch (err) {
+          console.error('[drawer] saveLead threw:', err);
+          toast(`saveLead threw: ${err?.message || err}`, 'error');
+        }
+      });
+    } else {
+      // Should never happen — but if it does, this toast fires at init time
+      // so we see that #ld-save was missing from the DOM when init ran.
+      toast('INIT: #ld-save not found in DOM at init time', 'error');
+    }
     // Global unhandled-error capture so we never lose silent rejections.
-    window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
-    window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
+    window.addEventListener('error', (e) => {
+      console.error('[window error]', e.error || e.message);
+      toast(`WINDOW ERROR: ${e.message || e.error}`, 'error');
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      console.error('[unhandled promise]', e.reason);
+      toast(`UNHANDLED REJECTION: ${e.reason?.message || e.reason}`, 'error');
+    });
     $('#ld-add-contact').addEventListener('click', () => {
       if (drawerState.id) addContactManual(drawerState.id);
     });
