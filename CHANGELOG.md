@@ -5,6 +5,47 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0n] — 2026-05-17 — Save · 1 stale badge fix (root cause found)
+
+The "Save button bug" was a stale badge, not a broken handler.
+
+### Root cause
+After clicking the inline "Save note now" button (`addCall`),
+`$('#ld-new-call-content').value = ''` clears the composer
+**programmatically**. Programmatic `.value` assignment does NOT
+fire `input` events, so `updateDirtyState()` never re-runs. The
+header **Save · 1** badge stays lit even though there's nothing
+left to save. Clicking it triggers `saveLead()`, which correctly
+sees empty edits + empty pendingNote and exits via the
+"No changes to save" branch silently.
+
+User sees Save · 1 → clicks → nothing visible → "broken Save button".
+
+### Fix
+- `addCall()` now calls `updateDirtyState()` immediately after
+  clearing the composer fields. Badge correctly returns to ghost
+  (no count) once the inline save completes.
+- Same fix applies anywhere we clear form state programmatically.
+
+### Diagnostics removed
+v0.10.0i through v0.10.0m added visible diagnostics (toasts,
+banners, native onclick alert, init try/catch with bright red
+banner) to chase this bug. With the cause known, those are stripped
+to keep the UI quiet. Kept the init try/catch as a safety net (it
+just logs to console + shows a single non-noisy banner if init
+genuinely fails).
+
+### What this changes for you
+- Save button now correctly reflects unsaved state at all times.
+- After clicking "Save note now" inline, the header Save returns to
+  its idle ghost state immediately, no leftover · 1.
+- The header Save still commits notes too (v0.10.0f behaviour
+  unchanged) — both paths are valid.
+
+### Tests
+- 302 total. UI fix only. No new tests — the bug was a one-line
+  miss easier caught by E2E than unit.
+
 ## [0.10.0j] — 2026-05-17 — RAG MEDDPICC + BANT-S Health rollup
 
 The hybrid framework from the design conversation. AE assigns RAG

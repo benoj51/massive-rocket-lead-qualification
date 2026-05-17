@@ -860,8 +860,7 @@
       </div>
     </div>
     <div class="btn-row" style="flex-shrink:0;">
-      <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;"
-              onclick="alert('NATIVE onclick fired — drawerState.id=' + (window.drawerState ? window.drawerState.id : 'undefined'));">
+      <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
       </button>
       <button id="ld-close" class="btn ghost" type="button" style="padding:7px 10px;font-size:11px;">✕</button>
@@ -1922,8 +1921,6 @@
 
   // ---- Lead Detail Drawer ---------------------------------------------
   const drawerState = { id: null, original: null, current: null };
-  // v0.10.0L diagnostic: expose to window so the native onclick on #ld-save can read it.
-  window.drawerState = drawerState;
 
   function openLeadDrawer(pageId) {
     if (!pageId) return;
@@ -2411,6 +2408,10 @@
       const scope = !!extracted?.project_scope;
       $('#ld-new-call-content').value = '';
       $('#ld-new-call-title').value = '';
+      // v0.10.0n: programmatic .value changes don't fire `input` events,
+      // so the dirty-state badge would stay stuck at "Save · 1" after the
+      // note saves. Manually refresh so the badge clears.
+      updateDirtyState();
       if (fills || scope) {
         $('#ld-call-status').textContent = `Saved · AI extracted ${fills} MEDDPICC${scope ? ' + project scope' : ''}`;
       } else if (!aiIsOn()) {
@@ -4131,30 +4132,22 @@
 
   // ---- Wire ------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', async () => {
-    // v0.10.0m: wrap init in try/catch so any throw surfaces as a toast
-    // AND a visible banner. Previous diagnostics couldn't reach us because
-    // they were inside the failing init. This catches BEFORE that.
+    // Safety net (kept from v0.10.0m): any init throw becomes a visible
+    // banner so we don't silently end up with a half-bound page.
     try {
-      window._initStep = 'ensureAuth';
       await _runInit();
-      // If we reach here, init completed.
-      window._initStep = 'COMPLETE';
     } catch (err) {
-      // Bright red banner that doesn't auto-disappear.
       const banner = document.createElement('div');
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 20px;z-index:9999;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre-wrap;';
-      banner.textContent = `INIT FAILED at step "${window._initStep}":\n${err?.message || err}\n\nStack: ${err?.stack || '(no stack)'}\n\nClick to dismiss.`;
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 20px;z-index:9999;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre-wrap;cursor:pointer;';
+      banner.textContent = `Init failed: ${err?.message || err}\nClick to dismiss.`;
       banner.addEventListener('click', () => banner.remove());
       document.body.appendChild(banner);
-      // Also alert so we definitely don't miss it.
-      setTimeout(() => alert(`INIT FAILED at "${window._initStep}":\n${err?.message || err}`), 100);
+      console.error('[init]', err);
     }
   });
 
   async function _runInit() {
-    window._initStep = 'ensureAuth';
     await ensureAuth();
-    window._initStep = 'nav-qualify';
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-build').addEventListener('click', () => switchView('build'));
@@ -4211,40 +4204,19 @@
     $('#ld-close').addEventListener('click', closeLeadDrawer);
     // (footer Cancel button removed in v0.10.0g — header X serves the same role.)
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
-    // v0.10.0k VISIBLE diagnostic — toast on every step so we can see what
-    // fires without needing DevTools. Once we identify the bug we strip
-    // these out.
-    const _ldSaveBtn = $('#ld-save');
-    if (_ldSaveBtn) {
-      _ldSaveBtn.addEventListener('click', async (e) => {
-        // Flash the button briefly so we know the click registered visually.
-        _ldSaveBtn.style.outline = '3px solid #00ff00';
-        setTimeout(() => { _ldSaveBtn.style.outline = ''; }, 600);
-        toast(`SAVE CLICKED · drawerState.id=${drawerState?.id || 'NULL'}`, 'success');
-        console.log('[drawer] Save clicked; drawerState.id =', drawerState?.id);
-        try {
-          toast('Entering saveLead…', 'info');
-          await saveLead();
-          toast('saveLead returned without throwing', 'success');
-        } catch (err) {
-          console.error('[drawer] saveLead threw:', err);
-          toast(`saveLead threw: ${err?.message || err}`, 'error');
-        }
-      });
-    } else {
-      // Should never happen — but if it does, this toast fires at init time
-      // so we see that #ld-save was missing from the DOM when init ran.
-      toast('INIT: #ld-save not found in DOM at init time', 'error');
-    }
-    // Global unhandled-error capture so we never lose silent rejections.
-    window.addEventListener('error', (e) => {
-      console.error('[window error]', e.error || e.message);
-      toast(`WINDOW ERROR: ${e.message || e.error}`, 'error');
+    // Save click handler — wrapped in try/catch so a silent throw can't
+    // strand the user with an unresponsive button.
+    $('#ld-save').addEventListener('click', async () => {
+      try {
+        await saveLead();
+      } catch (err) {
+        console.error('[drawer] saveLead threw:', err);
+        toast(`Save failed: ${err?.message || err}`, 'error');
+      }
     });
-    window.addEventListener('unhandledrejection', (e) => {
-      console.error('[unhandled promise]', e.reason);
-      toast(`UNHANDLED REJECTION: ${e.reason?.message || e.reason}`, 'error');
-    });
+    // Global error capture — log only, no UI noise.
+    window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
+    window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
     $('#ld-add-contact').addEventListener('click', () => {
       if (drawerState.id) addContactManual(drawerState.id);
     });
@@ -4343,7 +4315,6 @@
       renderPipeline();
     }));
     refreshHealth();
-    window._initStep = 'COMPLETE';
   }
 })();
 </script>
