@@ -1056,13 +1056,16 @@
   async function refreshHealth() {
     try {
       const h = await jsonFetch('/api/health');
+      state.healthCache = h;
       const apolloLive = h.apollo?.mode === 'live';
       const notionOk = h.notion?.configured && h.notion?.target_present;
+      const aiOk = !!h.ai?.configured;
       const authReq = !!(h.auth && h.auth.required);
       const signOut = authReq ? ` · <a href="#" id="link-signout" style="color:var(--text-muted);">sign out</a>` : '';
       $('#health-bar').innerHTML =
         `Apollo <span class="pill ${apolloLive ? 'ok' : 'warn'}">${h.apollo?.mode || '?'}</span>` +
         ` · Notion <span class="pill ${notionOk ? 'ok' : 'warn'}">${notionOk ? 'configured' : 'missing'}</span>` +
+        ` · AI <span class="pill ${aiOk ? 'ok' : 'warn'}">${aiOk ? 'on' : 'off'}</span>` +
         signOut;
       const so = document.getElementById('link-signout');
       if (so) so.addEventListener('click', (e) => { e.preventDefault(); window.signOutHandler(); });
@@ -1070,6 +1073,7 @@
       $('#health-bar').innerHTML = `<span class="pill warn">offline</span>`;
     }
   }
+  function aiIsOn() { return !!state.healthCache?.ai?.configured; }
   window.signOutHandler = signOut;
 
   // ---- Qualify flow -----------------------------------------------------
@@ -1667,17 +1671,36 @@
       _callsCache[leadId] = calls;
       renderLeadSummary(calls, data.rolling || {});
       if (!calls.length) {
-        el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes saved yet.</div>';
+        const emptyBanner = aiIsOn()
+          ? ''
+          : `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);color:var(--yellow);padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:11px;line-height:1.45;">
+               <strong>AI summarisation is off.</strong> Notes you save will be stored as-is. Set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> in Railway → Variables to enable Claude auto-summary + MEDDPICC extraction.
+             </div>`;
+        el.innerHTML = emptyBanner + '<div class="muted" style="font-size:12px;">No calls or notes saved yet.</div>';
         return;
       }
-      el.innerHTML = calls.map(c => {
+      const aiOff = !aiIsOn();
+      const aiOffBanner = aiOff
+        ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);color:var(--yellow);padding:8px 12px;border-radius:6px;margin-bottom:12px;font-size:11px;line-height:1.45;">
+             <strong>AI summarisation is off.</strong> Notes are saved as-is — no MEDDPICC extraction or synthesised summary.
+             Set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> in Railway → Variables to enable Claude.
+           </div>`
+        : '';
+      el.innerHTML = aiOffBanner + calls.map(c => {
         const when = c.created_at ? new Date(c.created_at).toLocaleString() : '';
         const meddpiccFills = c.extracted?.meddpicc ? Object.keys(c.extracted.meddpicc).length : 0;
         const scopeFilled = !!c.extracted?.project_scope;
         const aiTag = (meddpiccFills || scopeFilled) ? `<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">AI ✦ ${meddpiccFills} MEDDPICC${scopeFilled ? ' + scope' : ''}</span>` : '';
-        const note = c.note || c.extracted?.synthesised_note || '';
-        const noteRendered = renderCallNote(note);
-        const editedBadge = (c.note && c.extracted?.synthesised_note && c.note !== c.extracted.synthesised_note)
+        const synthesised = c.extracted?.synthesised_note || '';
+        const aeNote = (c.note && c.note !== synthesised) ? c.note : '';
+        const displayNote = aeNote || synthesised || '';
+        const hasDisplayNote = !!displayNote.trim();
+        const noteRendered = hasDisplayNote
+          ? renderCallNote(displayNote)
+          : (aiOff
+              ? `<span class="muted" style="font-style:italic;">No synthesised note — AI is off. Click <strong>✎ Edit note</strong> to write one manually, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> to enable auto-summarisation.</span>`
+              : `<span class="muted" style="font-style:italic;">No synthesised note yet. Click <strong>✎ Edit note</strong> to write one, or re-save the call to retry AI extraction.</span>`);
+        const editedBadge = (aeNote && synthesised)
           ? `<span style="font-size:9px;color:var(--text-muted);margin-left:4px;">(edited)</span>` : '';
         return `
           <div style="background:var(--surface-2);border:1px solid var(--border);padding:14px;border-radius:8px;margin-bottom:12px;" data-call-id="${escapeAttr(c.id)}">
@@ -1714,7 +1737,10 @@
     const el = $('#ld-notes-summary');
     if (!el || !drawerState.id) return;
     if (!calls.length) {
-      el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes yet — add one to start building a summary.</div>';
+      const hint = aiIsOn()
+        ? 'No calls or notes yet — add one to start building a summary.'
+        : 'No calls or notes yet. AI is off — set ANTHROPIC_API_KEY in Railway → Variables to enable Claude summaries.';
+      el.innerHTML = `<div class="muted" style="font-size:12px;">${hint}</div>`;
       return;
     }
     // Try the cached AI summary first
@@ -1740,9 +1766,15 @@
     ].filter(([k]) => meddpicc[k]?.value).map(([k, label]) => {
       return `<li style="margin:3px 0;"><strong style="color:var(--text);">${label}:</strong> ${escapeHtml(meddpicc[k].value)}</li>`;
     });
+    const aiOff = !aiIsOn();
+    const headerMsg = aiOff
+      ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);color:var(--yellow);font-size:11px;padding:8px 10px;border-radius:6px;margin-bottom:10px;line-height:1.45;">
+           <strong>AI is off.</strong> Lead summary needs Claude. Set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> in Railway → Variables, redeploy, then click <strong>✨ Refresh</strong>.
+         </div>`
+      : `<div class="muted" style="font-size:11px;margin-bottom:8px;">No AI summary yet. Click <strong>✨ Refresh</strong> to generate one from the call history + qualification.</div>`;
     el.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
-        <div class="muted" style="font-size:11px;margin-bottom:8px;">No AI summary yet. Click <strong>✨ Refresh</strong> to generate one from the call history + qualification.</div>
+        ${headerMsg}
         ${meddpiccBullets.length ? `
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">Discovery so far (raw)</div>
           <ul style="margin:0 0 8px 18px;padding:0;font-size:12px;color:var(--text-dim);">${meddpiccBullets.join('')}</ul>
@@ -1791,6 +1823,10 @@
 
   async function refreshLeadSummary() {
     if (!drawerState.id) return;
+    if (!aiIsOn()) {
+      toast('AI is off — set ANTHROPIC_API_KEY in Railway to enable summary generation.', 'error');
+      return;
+    }
     const btn = $('#ld-summary-refresh');
     const original = btn.innerHTML;
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Synthesising…';
@@ -1909,9 +1945,13 @@
       const scope = !!extracted?.project_scope;
       $('#ld-new-call-content').value = '';
       $('#ld-new-call-title').value = '';
-      $('#ld-call-status').textContent = fills || scope
-        ? `Saved · AI extracted ${fills} MEDDPICC${scope ? ' + project scope' : ''}`
-        : 'Saved';
+      if (fills || scope) {
+        $('#ld-call-status').textContent = `Saved · AI extracted ${fills} MEDDPICC${scope ? ' + project scope' : ''}`;
+      } else if (!aiIsOn()) {
+        $('#ld-call-status').textContent = 'Saved — note stored as-is (AI is off, set ANTHROPIC_API_KEY to auto-summarise).';
+      } else {
+        $('#ld-call-status').textContent = 'Saved — Claude returned nothing extractable from this content.';
+      }
       toast('Call saved', 'success');
       await loadLeadCalls(leadId);
     } catch (e) {

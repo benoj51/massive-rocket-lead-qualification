@@ -5,6 +5,56 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] — 2026-05-17
+
+UX clarity for the AI-off state. Triggered by Ben reporting "only see
+the raw transcript" after pasting a call note — the underlying cause
+was `ANTHROPIC_API_KEY` not being set in Railway, so Claude was silently
+skipped and the synthesised-note slot looked broken.
+
+### Added
+- **AI status pill in the header bar** (`AI on` / `AI off`) sourced
+  from `/api/health` and stashed in `state.healthCache`. New
+  `aiIsOn()` helper drives every downstream message.
+- **AI-off banner above the calls list** when `ANTHROPIC_API_KEY` is
+  missing — yellow box with explicit instruction to add the variable
+  in Railway → Variables.
+- **AI-off banner on the empty Calls section** (before the first call
+  is saved) so the AE sees the state before pasting anything.
+- **Inline empty-state in the "Synthesised note" slot** when the call
+  has no AE-edited note and no AI extraction:
+  - If AI is off: "No synthesised note — AI is off. Click ✎ Edit
+    note to write one manually, or set ANTHROPIC_API_KEY to enable
+    auto-summarisation."
+  - If AI is on but returned nothing: "No synthesised note yet. Click
+    ✎ Edit note to write one, or re-save the call to retry AI
+    extraction."
+
+### Changed
+- **`addCall()` status line** is now branch-aware:
+  - extracted MEDDPICC/scope → `Saved · AI extracted N MEDDPICC…`
+  - AI off → `Saved — note stored as-is (AI is off, set
+    ANTHROPIC_API_KEY to auto-summarise).`
+  - AI on but empty → `Saved — Claude returned nothing extractable
+    from this content.`
+- **`refreshLeadSummary()`** short-circuits with a clear toast when
+  AI is off rather than hitting the endpoint and surfacing a generic
+  503.
+- **Lead Summary fallback panel** now shows an AI-off explanation
+  (with the env var name) instead of a generic "click ✨ Refresh"
+  prompt when Claude isn't configured.
+- **Lead Summary empty-state** (no calls yet) explains AI is off so
+  the AE doesn't expect a magical summary after their first note.
+
+### Notes
+- This is a pure UX layer over v0.9.2 — server semantics unchanged.
+  The primary fix for the user remains: set `ANTHROPIC_API_KEY` in
+  Railway. This release makes the requirement obvious from inside the
+  app instead of a silent fallback to the raw transcript.
+
+### Tests
+- 244 total. No behaviour change in the Python layer.
+
 ## [0.9.2] — 2026-05-17
 
 Claude-driven aggregated lead summary at the top of the drawer.
