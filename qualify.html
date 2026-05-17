@@ -4131,7 +4131,30 @@
 
   // ---- Wire ------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', async () => {
+    // v0.10.0m: wrap init in try/catch so any throw surfaces as a toast
+    // AND a visible banner. Previous diagnostics couldn't reach us because
+    // they were inside the failing init. This catches BEFORE that.
+    try {
+      window._initStep = 'ensureAuth';
+      await _runInit();
+      // If we reach here, init completed.
+      window._initStep = 'COMPLETE';
+    } catch (err) {
+      // Bright red banner that doesn't auto-disappear.
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 20px;z-index:9999;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre-wrap;';
+      banner.textContent = `INIT FAILED at step "${window._initStep}":\n${err?.message || err}\n\nStack: ${err?.stack || '(no stack)'}\n\nClick to dismiss.`;
+      banner.addEventListener('click', () => banner.remove());
+      document.body.appendChild(banner);
+      // Also alert so we definitely don't miss it.
+      setTimeout(() => alert(`INIT FAILED at "${window._initStep}":\n${err?.message || err}`), 100);
+    }
+  });
+
+  async function _runInit() {
+    window._initStep = 'ensureAuth';
     await ensureAuth();
+    window._initStep = 'nav-qualify';
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-build').addEventListener('click', () => switchView('build'));
@@ -4320,7 +4343,8 @@
       renderPipeline();
     }));
     refreshHealth();
-  });
+    window._initStep = 'COMPLETE';
+  }
 })();
 </script>
 </body>
