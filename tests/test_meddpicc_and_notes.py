@@ -22,12 +22,30 @@ class QualifyPayloadShapeTests(unittest.TestCase):
         for mod in ("qualify_service", "apollo", "scope"):
             sys.modules.pop(mod, None)
 
-    def test_meddicc_has_eight_keys(self):
+    def test_meddicc_has_nine_keys(self):
+        # v0.10.0j: added budget_confirmed to feed the BANT-S Budget tile.
         from qualify_service import qualify
         r = qualify("Deliveroo", "deliveroo.co.uk")
         expected = {"metrics", "economic_buyer", "decision_criteria", "decision_process",
-                    "paper_process", "identify_pain", "champion", "competition"}
+                    "paper_process", "identify_pain", "champion", "competition",
+                    "budget_confirmed"}
         self.assertEqual(set(r["meddicc"].keys()), expected)
+
+    def test_meddicc_entries_carry_health_field(self):
+        from qualify_service import qualify
+        r = qualify("Deliveroo", "deliveroo.co.uk")
+        for k, entry in r["meddicc"].items():
+            self.assertIn("health", entry, f"{k} missing health field")
+            self.assertIsNone(entry["health"])  # null by default
+
+    def test_qualify_result_includes_bant_health(self):
+        from qualify_service import qualify
+        r = qualify("Deliveroo", "deliveroo.co.uk")
+        self.assertIn("bant_health", r)
+        for tile in ("budget", "authority", "need", "timeline", "scope"):
+            self.assertIn(tile, r["bant_health"])
+            self.assertIn("health", r["bant_health"][tile])
+            self.assertIn("caption", r["bant_health"][tile])
 
     def test_payload_includes_notes_and_scope(self):
         from qualify_service import qualify

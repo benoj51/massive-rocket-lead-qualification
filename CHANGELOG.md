@@ -5,6 +5,74 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0j] — 2026-05-17 — RAG MEDDPICC + BANT-S Health rollup
+
+The hybrid framework from the design conversation. AE assigns RAG
+(🔴 🟡 🟢) per MEDDPICC criterion; the system computes a 5-tile
+BANT-S Health strip (Budget / Authority / Need / Timeline / Scope)
+above the qualify result and in the drawer hero. No duplicate data
+entry — BANT renders from MEDDPICC + scope.
+
+### Added
+- **9th MEDDPICC criterion: Budget Confirmed.** Feeds the BANT-S
+  Budget tile. Same schema as the other 8 (value + status + health).
+- **`health` field** on every MEDDPICC entry: `"red" | "amber" |
+  "green" | None`. Separate from `status` (workflow state) so we can
+  render qualification confidence independently of "have we touched
+  this." Status auto-mirrors from RAG for back-compat
+  (red/amber → in_progress, green → confirmed, cleared → not_started).
+- **`bant_health.py`** module:
+  - `derive_bant_health(meddpicc, scope_state)` returns 5 tiles, each
+    with `{health, caption}`.
+  - `overall_score(bant)` returns counts + worst-of for future
+    pipeline filter chips ("show me leads where Budget is red").
+  - Mapping: Budget→budget_confirmed, Authority→economic_buyer,
+    Need→worst(identify_pain, metrics), Timeline→decision_process,
+    Scope→derived from streams + project_scope text.
+- **`bant_health`** appears on the `/api/qualify` response and on
+  `/api/calls/<lead_id>` GET (derived from rolling MEDDPICC +
+  project scope), so the drawer renders the strip without an extra
+  round-trip.
+- **AI extraction prompt** now teaches Claude to suggest `health`
+  per criterion with an explicit rubric (green = clearly satisfied,
+  amber = partial, red = actively concerning, null = no signal).
+  Bumped to be conservative — only set when notes really support it.
+
+### UI
+- **Qualify view: new "3 · BANT-S Health" card** between Auto-Discovery
+  and ICP Score. 5 horizontal tiles, each with:
+  - RAG-tinted border + faint background
+  - Section label (BUDGET / AUTHORITY / etc.)
+  - Caption: the captured MEDDPICC value, truncated to 2 lines, or a
+    default ("Strong" / "Needs work" / "Concern" / "Not assessed")
+  - RAG dot indicator top-right
+- **Drawer hero: same 5-tile strip** above the Lead Summary text.
+  Renders from `data.bant_health` returned by `/api/calls/<id>`.
+- **MEDDPICC rows: replaced the 3-button "Not started / In progress /
+  Confirmed" toggle** with a 4-button RAG toggle: 🔴 🟡 🟢 × (clear).
+  Click → updates `health` immediately, mirrors to `status` for
+  back-compat, re-renders the BANT strip live.
+- **Section renumbering** in the Qualify view: BANT-S Health is now
+  step 3; ICP Score → 4; Notes → 5; MEDDPICC → 6; Project Scope → 7;
+  Fit Analysis → 8; Save lead → 9.
+
+### Decisions made (for the record)
+- **No separate BANT input fields.** Authority duplicates Economic
+  Buyer; Need duplicates Pain+Metrics; Scope duplicates scope.py.
+  Hybrid model (RAG on MEDDPICC + computed BANT strip) avoids double
+  data entry while delivering the at-a-glance view Ben asked for.
+- **Health is a separate field, not a replacement for status.** Two
+  axes: status = workflow state, health = AE's qualification
+  confidence. UI shows only the RAG buttons for now; status is
+  auto-mirrored under the hood.
+
+### Tests
+- 302 total (+22). New `test_bant_health.py` covers: worst-of
+  comparator, scope health derivation (empty/free-text/drafted/
+  validated), per-tile derivation rules, default captions,
+  truncation, overall aggregate. Existing MEDDPICC tests updated
+  to 9 keys + assert `health` and `bant_health` shape.
+
 ## [0.10.0g] — 2026-05-17 — Drawer redesign
 
 Single biggest UX upgrade since v0.1. The lead drawer was 7+ stacked

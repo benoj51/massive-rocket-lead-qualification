@@ -194,6 +194,57 @@
   .status-toggle button.on.qualifying { background: rgba(251,191,36,.18); color: var(--yellow); }
   .status-toggle button.on.qualified { background: rgba(74,222,128,.18); color: var(--green); }
 
+  /* RAG (Red/Amber/Green) health toggle — v0.10.0j ------------ */
+  .rag-toggle {
+    display: inline-flex; gap: 4px; background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 3px;
+  }
+  .rag-toggle button {
+    width: 28px; height: 24px; padding: 0; border-radius: 5px; border: 0; cursor: pointer;
+    background: transparent; font-size: 14px; line-height: 1; transition: background .1s, transform .05s;
+    color: var(--text-muted);
+  }
+  .rag-toggle button:hover { background: var(--surface-2); }
+  .rag-toggle button.on.red    { background: rgba(239,68,68,.20);  color: var(--red); }
+  .rag-toggle button.on.amber  { background: rgba(251,191,36,.22); color: var(--yellow); }
+  .rag-toggle button.on.green  { background: rgba(74,222,128,.20); color: var(--green); }
+  .rag-toggle button.clear     { font-size: 10px; color: var(--text-muted); }
+
+  /* BANT-S Health strip — five tiles across the top ----------- */
+  .bant-strip {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0;
+  }
+  @media (max-width: 720px) {
+    .bant-strip { grid-template-columns: repeat(2, 1fr); }
+  }
+  .bant-tile {
+    position: relative;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; min-height: 64px;
+  }
+  .bant-tile.red    { border-color: rgba(239,68,68,.45);  background: rgba(239,68,68,.06); }
+  .bant-tile.amber  { border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.05); }
+  .bant-tile.green  { border-color: rgba(74,222,128,.45); background: rgba(74,222,128,.05); }
+  .bant-tile .bant-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); font-weight: 600;
+  }
+  .bant-tile.red    .bant-label { color: var(--red); }
+  .bant-tile.amber  .bant-label { color: var(--yellow); }
+  .bant-tile.green  .bant-label { color: var(--green); }
+  .bant-tile .bant-caption {
+    margin-top: 6px; font-size: 12px; color: var(--text); line-height: 1.35;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .bant-tile .bant-dot {
+    position: absolute; top: 10px; right: 12px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--text-muted);
+  }
+  .bant-tile.red    .bant-dot { background: var(--red); }
+  .bant-tile.amber  .bant-dot { background: var(--yellow); }
+  .bant-tile.green  .bant-dot { background: var(--green); }
+
   /* Tags ------------------------------------------------------- */
   .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .tag { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; }
@@ -440,8 +491,17 @@
         </div>
       </div>
 
+      <!-- v0.10.0j: BANT-S Health strip — derived from MEDDPICC + scope.
+           Renders 5 tiles (Budget / Authority / Need / Timeline / Scope)
+           with RAG colour computed from the AE's health flags. -->
       <div class="card">
-        <h2>3 · ICP Score</h2>
+        <h2>3 · BANT-S Health <span class="muted" style="font-weight:400;font-size:12px;text-transform:none;letter-spacing:0;">— at-a-glance rollup of MEDDPICC + scope</span></h2>
+        <div id="bant-strip" class="bant-strip"></div>
+        <div class="muted" style="font-size:11px;margin-top:4px;">Click RAG buttons in <strong>MEDDPICC</strong> below to update these tiles. Scope rolls up from the Project Scope text or, later, validated streams in Project Build.</div>
+      </div>
+
+      <div class="card">
+        <h2>4 · ICP Score</h2>
         <div class="score-grid">
           <div class="score-big">
             <div class="num" id="score-num">0<span class="out">/10</span></div>
@@ -455,7 +515,7 @@
       </div>
 
       <div class="card">
-        <h2>4 · Notes &amp; Transcripts</h2>
+        <h2>5 · Notes &amp; Transcripts</h2>
         <p class="muted" style="margin: 0 0 10px;">Paste call notes, Gong/Fathom transcripts, or any context. Click ✨ to extract MEDDPICC entries and a project scope summary from the text.</p>
         <textarea id="notes-text" rows="6" placeholder="Paste your raw notes here…" style="font-family: var(--mono); font-size: 12px;"></textarea>
         <div class="btn-row" style="margin-top: 10px;">
@@ -465,18 +525,18 @@
       </div>
 
       <div class="card">
-        <h2>5 · MEDDPICC</h2>
+        <h2>6 · MEDDPICC</h2>
         <div class="meddicc" id="meddicc"></div>
       </div>
 
       <div class="card">
-        <h2>6 · Project Scope</h2>
+        <h2>7 · Project Scope</h2>
         <p class="muted" style="margin: 0 0 10px;">One-paragraph summary of what the engagement is. Auto-fillable from notes above. The detailed scope intake lives in Project Build.</p>
         <textarea id="project-scope-text" rows="3" placeholder="e.g. CRM Build migration from SFMC to Braze + Hightouch CDP layer, ~25 campaigns, 4 markets."></textarea>
       </div>
 
       <div class="card">
-        <h2>7 · Fit Analysis</h2>
+        <h2>8 · Fit Analysis</h2>
         <h3>Summary <span id="fit-source" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:11px;"></span></h3>
         <p id="fit-summary" style="margin: 0 0 12px;"></p>
 
@@ -502,7 +562,7 @@
       </div>
 
       <div class="card">
-        <h2>8 · Save lead</h2>
+        <h2>9 · Save lead</h2>
         <div class="row row-2" style="margin-bottom: 12px;">
           <div>
             <label>Sales Stage</label>
@@ -808,7 +868,7 @@
   </header>
   <div class="body">
 
-    <!-- HERO: Lead Summary moved to the top — most important context. -->
+    <!-- HERO: Lead Summary + BANT-S Health strip — most important context. -->
     <div class="hero" id="ld-hero">
       <div class="hero-head">
         <span class="hero-title" id="ld-summary-heading">Lead Summary</span>
@@ -817,6 +877,7 @@
         </div>
       </div>
       <div class="muted" id="ld-summary-subheading" style="font-size:10px;margin-bottom:8px;">— AI synthesis across notes + qualification</div>
+      <div id="ld-bant-strip" class="bant-strip" style="margin-top:0;margin-bottom:12px;"></div>
       <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
     </div>
 
@@ -1082,6 +1143,8 @@
     { key: 'identify_pain',     label: 'Identify Pain',     hint: 'Core pain driving the initiative.' },
     { key: 'champion',          label: 'Champion',          hint: 'Internal advocate.' },
     { key: 'competition',       label: 'Competition',       hint: 'Who else they are evaluating.' },
+    // v0.10.0j: 9th criterion. Feeds the BANT-S Budget tile.
+    { key: 'budget_confirmed',  label: 'Budget Confirmed',  hint: 'Budget signal: amount, range, sign-off, fiscal window.' },
   ];
   const MEDDPICC_KEYS = MEDDICC_ROWS.map(r => r.key);
   const PARTNER_OPTIONS = ['Braze', 'Hightouch', 'Snowflake', 'Talon.one', 'Voucherify', 'mParticle', 'Segment'];
@@ -1238,6 +1301,9 @@
   function renderResult(result, pulse = true) {
     renderTiles(result, pulse);
     renderScore(result);
+    renderBantHealth(result);  // v0.10.0j: BANT-S strip — must come before
+                                // renderMeddicc so the tiles exist when
+                                // a RAG click triggers re-render.
     renderMeddicc(result);
     renderFit(result);
     renderStakeholders(result);
@@ -1601,38 +1667,122 @@
     const el = $('#meddicc');
     el.innerHTML = '';
     MEDDICC_ROWS.forEach(row => {
-      const entry = m[row.key] || { value: '', status: 'not_started' };
+      const entry = m[row.key] || { value: '', status: 'not_started', health: null };
       const div = document.createElement('div');
       div.className = 'meddicc-row';
+      // v0.10.0j: RAG toggle replaces the status toggle visually but we keep
+      // status as the underlying workflow field. The RAG buttons drive both
+      // `health` (the new field) AND `status` (so existing colour code in
+      // the rolling summary keeps working: red/amber→in_progress, green→confirmed).
       div.innerHTML = `
         <div class="key">${row.label}<small>${row.hint}</small></div>
         <input type="text" placeholder="Capture finding…" value="${escapeAttr(entry.value || '')}" data-meddicc-value="${row.key}" />
-        <div class="status-toggle">
-          <button type="button" data-meddicc-status="${row.key}" data-val="not_started">Not started</button>
-          <button type="button" data-meddicc-status="${row.key}" data-val="in_progress">In progress</button>
-          <button type="button" data-meddicc-status="${row.key}" data-val="confirmed">Confirmed</button>
+        <div class="rag-toggle" title="Qualification health — red / amber / green">
+          <button type="button" data-meddicc-rag="${row.key}" data-val="red"    title="Concern — actively blocking or missing">🔴</button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val="amber"  title="Partial — needs work">🟡</button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val="green"  title="Confirmed — strong">🟢</button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val=""       class="clear" title="Clear health">×</button>
         </div>
       `;
-      const toggle = (val) => {
-        div.querySelectorAll('[data-meddicc-status]').forEach(b => {
-          b.classList.toggle('on', b.dataset.val === val);
-          b.classList.toggle(val, b.dataset.val === val);
-          // remove other status classes
-          ['not_started','in_progress','confirmed'].forEach(c => { if (c !== val) b.classList.remove(c); });
+      const setRag = (val) => {
+        div.querySelectorAll('[data-meddicc-rag]').forEach(b => {
+          const isOn = (b.dataset.val === val) && val;
+          b.classList.toggle('on', !!isOn);
+          ['red','amber','green'].forEach(c => {
+            b.classList.toggle(c, isOn && c === val);
+          });
         });
         if (!state.currentResult.meddicc[row.key]) state.currentResult.meddicc[row.key] = {};
-        state.currentResult.meddicc[row.key].status = val;
+        state.currentResult.meddicc[row.key].health = val || null;
+        // Mirror to status so older code paths (Notion sync, AI summary
+        // prompt) still see meaningful workflow state.
+        const statusMap = { red: 'in_progress', amber: 'in_progress', green: 'confirmed', '': 'not_started' };
+        state.currentResult.meddicc[row.key].status = statusMap[val] || 'not_started';
+        // Recompute the BANT strip on every health change.
+        renderBantHealth(state.currentResult);
       };
-      toggle(entry.status || 'not_started');
+      setRag(entry.health || '');
       div.querySelector('input').addEventListener('input', (ev) => {
         if (!state.currentResult.meddicc[row.key]) state.currentResult.meddicc[row.key] = {};
         state.currentResult.meddicc[row.key].value = ev.target.value;
+        renderBantHealth(state.currentResult);
       });
-      div.querySelectorAll('[data-meddicc-status]').forEach(b => {
-        b.addEventListener('click', () => toggle(b.dataset.val));
+      div.querySelectorAll('[data-meddicc-rag]').forEach(b => {
+        b.addEventListener('click', () => setRag(b.dataset.val));
       });
       el.appendChild(div);
     });
+  }
+
+  // v0.10.0j: BANT-S Health strip. Computes client-side from current
+  // result.meddicc + result.project_scope mirrors the server's
+  // bant_health.derive_bant_health so the strip updates instantly as the
+  // AE clicks RAG buttons. Server still ships an initial value on qualify.
+  const BANT_TILES = [
+    { key: 'budget',    label: 'Budget',    pull: (m) => m.budget_confirmed },
+    { key: 'authority', label: 'Authority', pull: (m) => m.economic_buyer },
+    { key: 'need',      label: 'Need',      pull: (m) => _worstOf(m.identify_pain, m.metrics) },
+    { key: 'timeline',  label: 'Timeline',  pull: (m) => m.decision_process },
+    { key: 'scope',     label: 'Scope',     pull: null },  // computed differently
+  ];
+  const HEALTH_RANK = { red: 3, amber: 2, green: 1, '': 0, null: 0, undefined: 0 };
+  function _worstOf(a, b) {
+    const ah = a?.health || null, bh = b?.health || null;
+    if ((HEALTH_RANK[ah] || 0) >= (HEALTH_RANK[bh] || 0)) return { value: a?.value || b?.value || '', health: ah };
+    return { value: b?.value || a?.value || '', health: bh };
+  }
+  function _scopeHealthFromResult(result) {
+    const scopeText = (result?.project_scope || '').trim();
+    // No streams concept at qualify-time — the result is pre-Project Build.
+    // Use the freeform project_scope text as the only signal.
+    if (!scopeText) return { health: 'red', caption: 'Not defined' };
+    return { health: 'amber', caption: 'Scope drafted (free text)' };
+  }
+  function renderBantHealth(result) {
+    // Used by qualify view — derives from result.meddicc + result.project_scope.
+    const m = result?.meddicc || {};
+    const tiles = BANT_TILES.map(t => {
+      if (t.key === 'scope') {
+        const s = _scopeHealthFromResult(result);
+        return { key: 'scope', label: 'Scope', health: s.health, caption: s.caption };
+      }
+      const entry = t.pull(m) || {};
+      const captionRaw = (entry.value || '').trim();
+      const caption = captionRaw || (entry.health === 'green' ? 'Strong'
+                                   : entry.health === 'amber' ? 'Needs work'
+                                   : entry.health === 'red'   ? 'Concern'
+                                   : 'Not assessed');
+      return { key: t.key, label: t.label, health: entry.health || null, caption: caption.slice(0, 80) };
+    });
+    renderBantStrip('#bant-strip', tilesArrayToBantDict(tiles));
+  }
+
+  function tilesArrayToBantDict(tiles) {
+    const out = {};
+    tiles.forEach(t => { out[t.key] = { health: t.health, caption: t.caption }; });
+    return out;
+  }
+
+  // v0.10.0j: shared render. Takes a {budget, authority, need, timeline, scope}
+  // dict matching the server's bant_health.derive_bant_health output and
+  // paints 5 tiles into the given selector. Used by both qualify view and
+  // drawer hero.
+  function renderBantStrip(selector, bant) {
+    const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!el || !bant) return;
+    const labels = { budget: 'Budget', authority: 'Authority', need: 'Need',
+                     timeline: 'Timeline', scope: 'Scope' };
+    el.innerHTML = ['budget', 'authority', 'need', 'timeline', 'scope'].map(k => {
+      const t = bant[k] || {};
+      const cap = (t.caption || 'Not assessed').slice(0, 80);
+      return `
+        <div class="bant-tile ${t.health || ''}" data-bant="${k}">
+          <div class="bant-dot"></div>
+          <div class="bant-label">${labels[k]}</div>
+          <div class="bant-caption">${escapeHtml(cap)}</div>
+        </div>
+      `;
+    }).join('');
   }
 
   function renderFit(result) {
@@ -1979,6 +2129,9 @@
       // Section count badge
       const cnt = $('#ld-calls-count');
       if (cnt) cnt.textContent = calls.length ? `(${calls.length})` : '';
+      // v0.10.0j: BANT-S strip in the drawer hero. Server-side derives
+      // health from rolling MEDDPICC + project scope so we just render.
+      if (data.bant_health) renderBantStrip('#ld-bant-strip', data.bant_health);
       renderLeadSummary(calls, data.rolling || {});
       if (!calls.length) {
         const emptyBanner = aiIsOn()

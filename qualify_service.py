@@ -16,6 +16,7 @@ from typing import Any
 
 import apollo
 import ai_summary
+import bant_health
 import parent_detector
 from scoring import (
     calculate_icp_score,
@@ -340,17 +341,26 @@ def qualify(
         },
         "stakeholders": stakeholders,
         "meddicc": {
-            # MEDDPICC — 8 criteria. Empty by default; UI fills in.
+            # MEDDPICC — now 9 criteria (added budget_confirmed in v0.10.0j to
+            # support BANT-S Budget rollup). Empty by default; UI fills in.
             # Keyed as `meddicc` for backward payload-shape compatibility.
-            "metrics": {"value": "", "status": "not_started"},
-            "economic_buyer": {"value": "", "status": "not_started"},
-            "decision_criteria": {"value": "", "status": "not_started"},
-            "decision_process": {"value": "", "status": "not_started"},
-            "paper_process": {"value": "", "status": "not_started"},
-            "identify_pain": {"value": "", "status": "not_started"},
-            "champion": {"value": "", "status": "not_started"},
-            "competition": {"value": "", "status": "not_started"},
+            # `health`: AE's qualification-confidence RAG ("red"/"amber"/"green"/None).
+            # Separate from `status` (workflow state) so we can render
+            # qualification health independently of "have we touched this".
+            "metrics":           {"value": "", "status": "not_started", "health": None},
+            "economic_buyer":    {"value": "", "status": "not_started", "health": None},
+            "decision_criteria": {"value": "", "status": "not_started", "health": None},
+            "decision_process":  {"value": "", "status": "not_started", "health": None},
+            "paper_process":     {"value": "", "status": "not_started", "health": None},
+            "identify_pain":     {"value": "", "status": "not_started", "health": None},
+            "champion":          {"value": "", "status": "not_started", "health": None},
+            "competition":       {"value": "", "status": "not_started", "health": None},
+            "budget_confirmed":  {"value": "", "status": "not_started", "health": None},
         },
+        # v0.10.0j: BANT-S health strip derived from MEDDPICC + scope.
+        # All-null on first qualify (no health flags yet); rebuilt client-side
+        # as the AE fills RAGs.
+        "bant_health": bant_health.derive_bant_health({}, scope_state=None),
         "notes": "",
         "project_scope": "",
         # Partner sourcing — both directions.

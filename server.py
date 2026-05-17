@@ -35,6 +35,7 @@ import accounts_graph
 import ai_summary
 import apollo
 import audit
+import bant_health
 import calls_store
 import contacts_store
 import criteria_store
@@ -293,9 +294,32 @@ def api_contacts_set_primary(lead_id: str, contact_id: str):
 
 @app.route("/api/calls/<lead_id>", methods=["GET"])
 def api_calls_list(lead_id: str):
+    rolling = calls_store.aggregate_extractions(lead_id)
+    # v0.10.0j: derive BANT-S health from the rolling MEDDPICC + project scope.
+    # Cheap to compute, ships with every drawer load so the BANT strip renders
+    # without an extra round trip.
+    scope_state = None
+    try:
+        p = project_store.load(lead_id)
+        if p is not None:
+            scope_state = {
+                "streams": [
+                    {"project_type": s.project_type,
+                     "validation_status": getattr(s, "validation_status", "draft")}
+                    for s in p.streams
+                ],
+                "project_scope": (rolling or {}).get("project_scope") or "",
+            }
+    except Exception as e:
+        log.warning("scope_state lookup failed for %s: %s", lead_id, e)
+    bant = bant_health.derive_bant_health(
+        (rolling or {}).get("meddpicc") or {},
+        scope_state=scope_state,
+    )
     return jsonify({
         "calls": calls_store.list_calls(lead_id),
-        "rolling": calls_store.aggregate_extractions(lead_id),
+        "rolling": rolling,
+        "bant_health": bant,
     })
 
 

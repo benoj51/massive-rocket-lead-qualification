@@ -376,7 +376,10 @@ def suggest_extended_engagement(*, current_scope_streams: list[str],
 _MEDDPICC_KEYS = [
     "metrics", "economic_buyer", "decision_criteria", "decision_process",
     "paper_process", "identify_pain", "champion", "competition",
+    # v0.10.0j: 9th criterion. Budget Confirmed feeds the BANT-S Budget tile.
+    "budget_confirmed",
 ]
+_HEALTH_VALUES = {"red", "amber", "green"}
 
 _EXTRACT_SYSTEM_PROMPT = """You read raw sales call notes or transcripts and
 extract structured qualification data for an internal CRM agency (Massive
@@ -385,18 +388,29 @@ Rocket). You return ONE JSON object only, no preamble, no markdown fences.
 Schema:
 {
   "meddpicc": {
-    "metrics":           {"value": "<short phrase or null>"},
-    "economic_buyer":    {"value": "<name + title, or null>"},
-    "decision_criteria": {"value": "<comma-separated criteria, or null>"},
-    "decision_process":  {"value": "<short summary, or null>"},
-    "paper_process":     {"value": "<procurement/legal notes, or null>"},
-    "identify_pain":     {"value": "<core pain, or null>"},
-    "champion":          {"value": "<name + title, or null>"},
-    "competition":       {"value": "<vendors mentioned, or null>"}
+    "metrics":           {"value": "<short phrase or null>", "health": "<red|amber|green or null>"},
+    "economic_buyer":    {"value": "<name + title, or null>", "health": "<red|amber|green or null>"},
+    "decision_criteria": {"value": "<comma-separated criteria, or null>", "health": "<red|amber|green or null>"},
+    "decision_process":  {"value": "<short summary, or null>", "health": "<red|amber|green or null>"},
+    "paper_process":     {"value": "<procurement/legal notes, or null>", "health": "<red|amber|green or null>"},
+    "identify_pain":     {"value": "<core pain, or null>", "health": "<red|amber|green or null>"},
+    "champion":          {"value": "<name + title, or null>", "health": "<red|amber|green or null>"},
+    "competition":       {"value": "<vendors mentioned, or null>", "health": "<red|amber|green or null>"},
+    "budget_confirmed":  {"value": "<budget signal: amount, range, sign-off, or null>", "health": "<red|amber|green or null>"}
   },
   "project_scope": "<one short paragraph summarising what MR would deliver, or null>",
   "synthesised_note": "<a structured call summary in the MR Call Note format — see below>"
 }
+
+HEALTH rubric (use sparingly — only set when the notes give you a real signal):
+- green = the criterion is clearly satisfied (e.g. CFO confirmed as buyer + budget approved)
+- amber = the criterion is partially known but soft (e.g. VP champion identified but no exec
+  sponsor; pain mentioned but not quantified)
+- red = the criterion is actively concerning (e.g. no clear buyer despite 3 calls; competitor
+  already evaluated and ahead; no budget allocated this fiscal year)
+- null/omit = no signal in the notes — don't guess
+Do NOT set health on every field by default. Only set it when the prospect said something
+that genuinely supports the colour.
 
 The synthesised_note uses this exact markdown structure (omit any section
 where you have nothing real to say — never write 'TBD' or 'N/A'):
@@ -509,8 +523,15 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
     for k in _MEDDPICC_KEYS:
         entry = (data.get("meddpicc") or {}).get(k) or {}
         value = entry.get("value")
-        if value and value != "null":
-            meddpicc_out[k] = {"value": str(value).strip()}
+        health = entry.get("health")
+        # Only include a row when there's a usable signal — either value or health.
+        if (value and value != "null") or (health in _HEALTH_VALUES):
+            out: dict[str, Any] = {}
+            if value and value != "null":
+                out["value"] = str(value).strip()
+            if health in _HEALTH_VALUES:
+                out["health"] = health
+            meddpicc_out[k] = out
     project_scope = data.get("project_scope")
     if project_scope and str(project_scope).lower() != "null":
         project_scope = str(project_scope).strip()
