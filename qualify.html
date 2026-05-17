@@ -561,7 +561,10 @@
     <div id="pb-panels"></div>
 
     <div id="pb-pricing-card" class="card" style="display:none;">
-      <h2>Pricing preview</h2>
+      <h2 style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Pricing preview</span>
+        <span id="pb-pricing-saved" class="muted" style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;"></span>
+      </h2>
       <div class="row row-3" style="margin-bottom: 12px;">
         <div>
           <label>Currency</label>
@@ -2359,6 +2362,11 @@
       $('#pb-sow-card').style.display = 'block';
       await refreshSowVersions();
       await pbLoadRoadmap(leadId);
+      // Restore pricing config (currency, rate card, ops%, contingency%,
+      // discount%, role overrides + staffing). Library must be loaded
+      // first so dropdowns are populated.
+      await pbLoadPricingLibrary();
+      await loadPricingConfig(leadId);
     } catch (e) {
       toast(`Load failed: ${e.body?.error || e.message}`, 'error');
     }
@@ -2411,7 +2419,7 @@
   function currentPricingInputs() {
     return {
       lead_id: pbState.currentLeadId,
-      months: 12,
+      months: parseInt($('#pb-roadmap-months')?.value, 10) || 12,
       role_overrides: pbState.roleOverrides,
       role_staffing: pbState.roleStaffing,
       currency: $('#pb-currency')?.value || 'USD',
@@ -2420,6 +2428,68 @@
       contingency_pct: (parseFloat($('#pb-contingency-pct')?.value) || 0) / 100,
       discount_first_half_pct: (parseFloat($('#pb-discount-pct')?.value) || 0) / 100,
     };
+  }
+
+  // Persist pricing config + role overrides + staffing per lead. Debounced
+  // so a rapid sequence of edits writes once. Saved auto-restores on
+  // next project load.
+  async function persistPricingConfig() {
+    if (!pbState.currentLeadId) return;
+    const inputs = currentPricingInputs();
+    const config = {
+      currency: inputs.currency,
+      rate_card: inputs.rate_card,
+      months: inputs.months,
+      project_ops_pct: inputs.project_ops_pct,
+      contingency_pct: inputs.contingency_pct,
+      discount_first_half_pct: inputs.discount_first_half_pct,
+      role_overrides: pbState.roleOverrides || {},
+      role_staffing: pbState.roleStaffing || {},
+      selected_package: $('#pb-package')?.value || '',
+    };
+    try {
+      const data = await jsonFetch(`/api/pricing/config/${encodeURIComponent(pbState.currentLeadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      pbState.savedConfig = data.config;
+      const indicator = $('#pb-pricing-saved');
+      if (indicator) {
+        const ts = new Date(data.config.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        indicator.innerHTML = `<span style="color:var(--green);">✓</span> Saved ${ts}`;
+      }
+    } catch (e) {
+      const indicator = $('#pb-pricing-saved');
+      if (indicator) indicator.innerHTML = `<span style="color:var(--red);">⚠ Save failed</span>`;
+    }
+  }
+  function schedulePricingSave() {
+    clearTimeout(pbState.configSaveDebounce);
+    pbState.configSaveDebounce = setTimeout(persistPricingConfig, 600);
+  }
+
+  async function loadPricingConfig(leadId) {
+    if (!leadId) return;
+    try {
+      const data = await jsonFetch(`/api/pricing/config/${encodeURIComponent(leadId)}`);
+      const cfg = data.config;
+      if (!cfg) return;
+      pbState.savedConfig = cfg;
+      pbState.roleOverrides = cfg.role_overrides || {};
+      pbState.roleStaffing = cfg.role_staffing || {};
+      // Update UI controls
+      if ($('#pb-currency') && cfg.currency) $('#pb-currency').value = cfg.currency;
+      if ($('#pb-rate-card') && cfg.rate_card) $('#pb-rate-card').value = cfg.rate_card;
+      if ($('#pb-ops-pct') && cfg.project_ops_pct != null) $('#pb-ops-pct').value = Math.round((cfg.project_ops_pct || 0) * 100);
+      if ($('#pb-contingency-pct') && cfg.contingency_pct != null) $('#pb-contingency-pct').value = Math.round((cfg.contingency_pct || 0) * 100);
+      if ($('#pb-discount-pct') && cfg.discount_first_half_pct != null) $('#pb-discount-pct').value = Math.round((cfg.discount_first_half_pct || 0) * 100);
+      if ($('#pb-package') && cfg.selected_package) $('#pb-package').value = cfg.selected_package;
+      if ($('#pb-pricing-saved') && cfg.updated_at) {
+        const ts = new Date(cfg.updated_at).toLocaleString();
+        $('#pb-pricing-saved').innerHTML = `<span style="color:var(--text-muted);">Last saved ${ts}</span>`;
+      }
+    } catch (e) { console.warn('pricing config load failed', e); }
   }
 
   async function pbPreviewPricing() {
@@ -2751,10 +2821,15 @@
       ['pb-currency', 'pb-rate-card', 'pb-ops-pct', 'pb-contingency-pct', 'pb-discount-pct'].forEach(id => {
         const el = $('#' + id);
         if (el && !el.dataset.bound) {
-          el.addEventListener('change', () => liveRecomputePricing());
+          el.addEventListener('change', () => { liveRecomputePricing(); schedulePricingSave(); });
           el.dataset.bound = '1';
         }
       });
+      const pkgEl = $('#pb-package');
+      if (pkgEl && !pkgEl.dataset.boundSave) {
+        pkgEl.addEventListener('change', schedulePricingSave);
+        pkgEl.dataset.boundSave = '1';
+      }
       const applyBtn = $('#pb-apply-package');
       if (applyBtn && !applyBtn.dataset.bound) {
         applyBtn.addEventListener('click', applySelectedPackage);
@@ -2888,6 +2963,7 @@
     pbState.roleStaffing[role][field] = value;
     clearTimeout(pbState.pricingDebounce);
     pbState.pricingDebounce = setTimeout(() => liveRecomputePricing(), 200);
+    schedulePricingSave();
   }
 
   function onTeamFteChanged(input) {
@@ -2899,6 +2975,7 @@
     // Debounce live recompute so each keystroke isn't a server hit.
     clearTimeout(pbState.pricingDebounce);
     pbState.pricingDebounce = setTimeout(() => liveRecomputePricing(), 350);
+    schedulePricingSave();
   }
 
   async function liveRecomputePricing() {

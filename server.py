@@ -40,6 +40,7 @@ import criteria_store
 import hubspot_sync
 import packages
 import pricing
+import pricing_store
 import project_store
 import qualify_service
 import rate_cards
@@ -623,6 +624,20 @@ def api_pricing_rate_cards():
 @app.route("/api/pricing/packages", methods=["GET"])
 def api_pricing_packages():
     return jsonify({"packages": packages.list_packages()})
+
+
+@app.route("/api/pricing/config/<lead_id>", methods=["GET"])
+def api_pricing_config_get(lead_id: str):
+    return jsonify({"config": pricing_store.load(lead_id)})
+
+
+@app.route("/api/pricing/config/<lead_id>", methods=["POST", "PUT"])
+def api_pricing_config_save(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    saved = pricing_store.save(lead_id, body)
+    audit.log_event("pricing_config_saved", actor=_actor(), lead_id=lead_id,
+                    fields=sorted([k for k in saved.keys() if k != "updated_at"]))
+    return jsonify({"config": saved})
 
 
 @app.route("/api/pricing/preview", methods=["POST"])

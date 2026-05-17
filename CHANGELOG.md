@@ -5,6 +5,53 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-05-17
+
+Pricing progress is now saved. Close the tab, come back, everything's
+where you left it.
+
+### Added
+- **`pricing_store.py`** — JSON-per-lead store at
+  `cache/pricing_configs/<lead_id>.json` holding the pricing
+  configuration: currency, rate card, months, project_ops_pct,
+  contingency_pct, discount_first_half_pct, role_overrides,
+  role_staffing, selected_package.
+- **`GET /api/pricing/config/<lead_id>`** + **`POST` (upsert)** endpoints.
+- **Auto-save on every pricing input change.**
+  - Editing any of the three input rows (currency / rate card /
+    package / ops % / contingency % / discount %)
+  - Editing any team FTE cell
+  - Picking a role's Region or Seniority (Staff Aug)
+  → debounced 600ms, then a single POST persists everything.
+- **"Saved HH:MM" indicator** in the Pricing preview heading. Goes
+  green on every successful save; flips red if a save fails. Shows
+  the full "Last saved …" timestamp on first load.
+- **Auto-restore on project load.** When you open a lead's Project
+  Build, the saved pricing config rehydrates: currency / rate card
+  / Ops / Contingency / Discount fields all repopulate, role
+  overrides + Staff Aug staffing flow back into the team table.
+  The "Last saved …" timestamp confirms what state you're picking
+  up.
+- Audit log captures every `pricing_config_saved` event with the
+  field list.
+
+### Coverage
+After v0.9.1, **every authored surface in Project Build is now
+persistent**:
+- Scope criteria + statuses — saved via Save scope (existing)
+- MEDDPICC for the lead — saved via Save lead (existing)
+- Notes / calls — saved on add (existing, v0.6.0)
+- Contacts — saved on add (existing, v0.6.0)
+- Roadmap milestones + extended engagement — saved via Save
+  roadmap (v0.9.0)
+- **Pricing config + role overrides + staffing — auto-saved
+  (this release)**
+- SOW versions — written on every draft (existing, v0.5.0)
+
+### Tests
+- 238 total (+7). Covers store round-trip, unknown-key filtering,
+  updated_at stamping, endpoint contracts.
+
 ## [0.9.0] — 2026-05-17
 
 Project Roadmap + Extended Engagement. A roadmap lives between scope and
