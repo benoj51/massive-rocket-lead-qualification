@@ -107,7 +107,15 @@ def _require_auth():
 
 @app.route("/", methods=["GET"])
 def index():
-    return Response(_QUALIFY_HTML, mimetype="text/html; charset=utf-8")
+    # v0.10.0h: explicit no-cache + must-revalidate so browsers always
+    # pick up the latest JS/CSS after a Railway deploy. The HTML is one
+    # bundled file (~200KB) — re-fetching it on every load is cheap and
+    # avoids the "design hasn't changed" complaint after a deploy.
+    resp = Response(_QUALIFY_HTML, mimetype="text/html; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/api/health", methods=["GET"])
