@@ -275,18 +275,86 @@
     display: flex; flex-direction: column;
   }
   .drawer.open { transform: translateX(0); }
+  /* Drawer v0.10.0g — redesigned header with sticky save + accordion body. */
   .drawer header {
     padding: 14px 20px; border-bottom: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    background: var(--surface);
   }
-  .drawer header .title { font-size: 15px; font-weight: 600; }
-  .drawer header .meta { font-size: 11px; color: var(--text-muted); }
+  .drawer header .title { font-size: 17px; font-weight: 600; line-height: 1.2; }
+  .drawer header .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .drawer header .subtitle-row {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px;
+  }
+  .drawer header .subtitle-row .icp-pill {
+    font-size: 11px; padding: 2px 8px;
+  }
+  .drawer header .status-chip {
+    font-size: 10px; padding: 2px 8px; border-radius: 12px;
+    text-transform: uppercase; letter-spacing: .05em;
+    background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  /* Save button in header — primary action surface. */
+  .drawer header #ld-save {
+    position: relative;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .drawer header #ld-save.dirty {
+    background: var(--accent); border-color: var(--accent); color: white;
+  }
+  .drawer header #ld-save.dirty:hover { filter: brightness(1.1); }
+  .drawer header #ld-save .dirty-count {
+    display: none; margin-left: 6px; font-size: 10px;
+    background: rgba(255,255,255,.25); padding: 1px 6px; border-radius: 8px;
+  }
+  .drawer header #ld-save.dirty .dirty-count { display: inline-block; }
+
   .drawer .body { padding: 16px 20px; overflow-y: auto; flex: 1; }
-  .drawer footer {
-    padding: 12px 20px; border-top: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+
+  /* Hero block — Lead Summary at the top, accent-coloured. */
+  .drawer .hero {
+    border: 1px solid rgba(255,77,42,.25); background: rgba(255,77,42,.04);
+    border-radius: 10px; padding: 14px; margin-bottom: 16px;
   }
-  .drawer .group { margin-bottom: 16px; }
+  .drawer .hero .hero-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px; gap: 8px;
+  }
+  .drawer .hero .hero-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--accent); font-weight: 600;
+  }
+
+  /* Accordion sections via <details>. */
+  .drawer details.group {
+    margin-bottom: 10px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--surface);
+  }
+  .drawer details.group > summary {
+    list-style: none; cursor: pointer; padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); font-weight: 600; user-select: none;
+  }
+  .drawer details.group > summary::-webkit-details-marker { display: none; }
+  .drawer details.group > summary::before {
+    content: '▸'; color: var(--text-muted); font-size: 10px;
+    margin-right: 6px; transition: transform .12s;
+    display: inline-block; width: 10px;
+  }
+  .drawer details.group[open] > summary::before { transform: rotate(90deg); }
+  .drawer details.group[open] > summary { border-bottom: 1px solid var(--border); }
+  .drawer details.group > .section-body { padding: 12px 14px; }
+  .drawer details.group .section-count {
+    background: var(--surface-2); color: var(--text-dim);
+    font-size: 10px; padding: 1px 7px; border-radius: 10px; letter-spacing: 0;
+    text-transform: none;
+  }
+  .drawer details.group.has-changes > summary { color: var(--accent); }
+  .drawer details.group.has-changes > summary::before { color: var(--accent); }
+
+  /* Legacy h4 styling kept for back-compat in case anything still uses it. */
   .drawer .group h4 {
     margin: 4px 0 8px; font-size: 11px; text-transform: uppercase;
     letter-spacing: .07em; color: var(--text-muted); font-weight: 600;
@@ -722,41 +790,92 @@
 <div id="drawer-overlay" class="drawer-overlay"></div>
 <aside id="lead-drawer" class="drawer" aria-hidden="true">
   <header>
-    <div>
+    <div style="flex:1;min-width:0;">
       <div class="title" id="ld-title">Lead</div>
       <div class="meta" id="ld-meta"></div>
-      <div id="ld-group-chip" style="margin-top:6px;display:none;"></div>
+      <div class="subtitle-row">
+        <span class="icp-pill" id="ld-icp">—</span>
+        <span class="status-chip" id="ld-status-chip" style="display:none;"></span>
+        <span id="ld-group-chip"></span>
+      </div>
     </div>
-    <div class="btn-row">
-      <button id="ld-close" class="btn ghost" type="button" style="padding:6px 10px;font-size:11px;">✕ Close</button>
+    <div class="btn-row" style="flex-shrink:0;">
+      <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
+        Save<span class="dirty-count" id="ld-dirty-count"></span>
+      </button>
+      <button id="ld-close" class="btn ghost" type="button" style="padding:7px 10px;font-size:11px;">✕</button>
     </div>
   </header>
   <div class="body">
 
-    <div class="group">
-      <h4>Identity</h4>
-      <div class="field">
-        <label>Parent group <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— is this brand part of a larger group? (e.g. KFC → Yum! Brands)</span></label>
-        <div id="ld-parent-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input type="text" id="ld-parent-search" placeholder="Search existing accounts, or type a new parent name…" style="flex:1;min-width:220px;" autocomplete="off" />
-          <button class="btn ghost" id="ld-parent-clear" type="button" style="padding:6px 10px;font-size:11px;display:none;">× Unlink</button>
+    <!-- HERO: Lead Summary moved to the top — most important context. -->
+    <div class="hero" id="ld-hero">
+      <div class="hero-head">
+        <span class="hero-title" id="ld-summary-heading">Lead Summary</span>
+        <div class="btn-row">
+          <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
         </div>
-        <div id="ld-parent-suggestions" style="margin-top:4px;"></div>
-        <div id="ld-parent-error" class="muted" style="color:var(--red);font-size:11px;margin-top:4px;display:none;"></div>
       </div>
-      <div id="ld-children-panel" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Brands in this group <span id="ld-children-count" style="color:var(--accent);"></span></div>
-          <button class="btn ghost" type="button" id="ld-add-brand" style="padding:4px 10px;font-size:11px;">+ Add brand under this group</button>
-        </div>
-        <div id="ld-children-list"></div>
-      </div>
-      <div class="field"><label>Company</label><input type="text" data-ld="company" /></div>
-      <div class="field"><label>Website / URL</label><input type="url" data-ld="url" /></div>
+      <div class="muted" id="ld-summary-subheading" style="font-size:10px;margin-bottom:8px;">— AI synthesis across notes + qualification</div>
+      <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
     </div>
 
-    <div class="group">
-      <h4>Qualification</h4>
+    <!-- Calls & Notes — open by default, most-touched section -->
+    <details class="group" open data-section="calls">
+      <summary>
+        <span><span data-section-label>Calls &amp; Notes</span> <span class="section-count" id="ld-calls-count"></span></span>
+      </summary>
+      <div class="section-body">
+        <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-bottom:10px;">
+          <div class="row-2">
+            <div class="field">
+              <label>Type</label>
+              <select id="ld-new-call-type">
+                <option value="call">Call</option>
+                <option value="note">Note</option>
+                <option value="transcript">Transcript</option>
+                <option value="email">Email</option>
+              </select>
+            </div>
+            <div class="field"><label>Title (optional)</label><input type="text" id="ld-new-call-title" placeholder="e.g. Discovery #2" /></div>
+          </div>
+          <div class="field"><label>Content / paste transcript</label><textarea rows="5" id="ld-new-call-content" placeholder="Paste call notes, transcript snippets, or write a quick recap…" style="font-family:var(--mono);font-size:12px;"></textarea></div>
+          <div class="btn-row">
+            <button id="ld-add-call" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save note now</button>
+            <span class="muted" id="ld-call-status" style="font-size:11px;">Or hit <strong>Save</strong> at the top to commit everything together.</span>
+          </div>
+        </div>
+        <div id="ld-calls-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    </details>
+
+    <details class="group" data-section="identity">
+      <summary><span data-section-label>Identity</span></summary>
+      <div class="section-body">
+        <div class="field">
+          <label>Parent group <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— is this brand part of a larger group? (e.g. KFC → Yum! Brands)</span></label>
+          <div id="ld-parent-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="ld-parent-search" placeholder="Search existing accounts, or type a new parent name…" style="flex:1;min-width:220px;" autocomplete="off" />
+            <button class="btn ghost" id="ld-parent-clear" type="button" style="padding:6px 10px;font-size:11px;display:none;">× Unlink</button>
+          </div>
+          <div id="ld-parent-suggestions" style="margin-top:4px;"></div>
+          <div id="ld-parent-error" class="muted" style="color:var(--red);font-size:11px;margin-top:4px;display:none;"></div>
+        </div>
+        <div id="ld-children-panel" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Brands in this group <span id="ld-children-count" style="color:var(--accent);"></span></div>
+            <button class="btn ghost" type="button" id="ld-add-brand" style="padding:4px 10px;font-size:11px;">+ Add brand under this group</button>
+          </div>
+          <div id="ld-children-list"></div>
+        </div>
+        <div class="field"><label>Company</label><input type="text" data-ld="company" /></div>
+        <div class="field"><label>Website / URL</label><input type="url" data-ld="url" /></div>
+      </div>
+    </details>
+
+    <details class="group" data-section="qualification">
+      <summary><span data-section-label>Qualification</span></summary>
+      <div class="section-body">
       <div class="row-3">
         <div class="field">
           <label>Status</label>
@@ -834,10 +953,6 @@
           </select>
         </div>
       </div>
-      <div class="field">
-        <label>ICP Score (read-only)</label>
-        <div><span class="icp-pill" id="ld-icp">—</span></div>
-      </div>
       <div class="row-2">
         <div class="field">
           <label>Source of opportunity</label>
@@ -862,96 +977,71 @@
           <div id="ld-sourced-for" class="filters" style="margin-top:0;"></div>
         </div>
       </div>
-    </div>
-
-    <div class="group">
-      <h4>Discovered</h4>
-      <div class="row-2">
-        <div class="field"><label>Revenue</label><input type="text" data-ld="revenue" /></div>
-        <div class="field"><label>Employees</label><input type="text" data-ld="employees" /></div>
       </div>
-      <div class="row-2">
-        <div class="field"><label>Region</label><input type="text" data-ld="region" /></div>
-        <div class="field"><label>Deal Size</label><input type="text" data-ld="deal_size" /></div>
-      </div>
-      <div class="field"><label>Tech Stack</label><input type="text" data-ld="tech_stack" /></div>
-      <div class="field"><label>Complexity</label><input type="text" data-ld="complexity" /></div>
-    </div>
+    </details>
 
-    <div class="group">
-      <h4>Notes</h4>
-      <div class="field"><label>Fit Summary</label><textarea rows="3" data-ld="fit_summary"></textarea></div>
-      <div class="field"><label>Next Steps</label><textarea rows="3" data-ld="next_steps"></textarea></div>
-      <div class="field"><label>Positive Signals</label><textarea rows="2" data-ld="positive_signals"></textarea></div>
-      <div class="field"><label>Disqualifiers</label><textarea rows="2" data-ld="disqualifiers"></textarea></div>
-    </div>
-
-    <div class="group">
-      <h4>Project &amp; Pricing</h4>
-      <div id="ld-project-summary" class="muted" style="font-size:12px;">Loading…</div>
-    </div>
-
-    <div class="group">
-      <h4>Contacts</h4>
-      <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
-      <details style="margin-top: 10px;">
-        <summary style="cursor:pointer;color:var(--accent);font-size:12px;">+ Add contact manually</summary>
-        <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-top:8px;">
-          <div class="row-2">
-            <div class="field"><label>Name</label><input type="text" id="ld-new-contact-name" placeholder="Jane Doe" /></div>
-            <div class="field"><label>Title</label><input type="text" id="ld-new-contact-title" placeholder="VP Marketing" /></div>
-          </div>
-          <div class="row-2">
-            <div class="field"><label>Email</label><input type="email" id="ld-new-contact-email" placeholder="jane@..." /></div>
-            <div class="field"><label>LinkedIn URL</label><input type="url" id="ld-new-contact-linkedin" placeholder="linkedin.com/in/..." /></div>
-          </div>
-          <div class="btn-row">
-            <button id="ld-add-contact" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">Add contact</button>
-          </div>
-        </div>
-      </details>
-    </div>
-
-    <div class="group">
-      <h4 style="display:flex;align-items:center;justify-content:space-between;">
-        <span id="ld-summary-heading">Lead Summary <span class="muted" id="ld-summary-subheading" style="font-weight:400;font-size:10px;letter-spacing:0;text-transform:none;">— AI synthesis across notes + qualification</span></span>
-        <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
-      </h4>
-      <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
-    </div>
-
-    <div class="group">
-      <h4>Calls &amp; Notes</h4>
-      <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-bottom:10px;">
+    <details class="group" data-section="discovered">
+      <summary><span data-section-label>Discovered</span></summary>
+      <div class="section-body">
         <div class="row-2">
-          <div class="field">
-            <label>Type</label>
-            <select id="ld-new-call-type">
-              <option value="call">Call</option>
-              <option value="note">Note</option>
-              <option value="transcript">Transcript</option>
-              <option value="email">Email</option>
-            </select>
-          </div>
-          <div class="field"><label>Title (optional)</label><input type="text" id="ld-new-call-title" placeholder="e.g. Discovery #2" /></div>
+          <div class="field"><label>Revenue</label><input type="text" data-ld="revenue" /></div>
+          <div class="field"><label>Employees</label><input type="text" data-ld="employees" /></div>
         </div>
-        <div class="field"><label>Content / paste transcript</label><textarea rows="5" id="ld-new-call-content" placeholder="Paste call notes, transcript snippets, or write a quick recap…" style="font-family:var(--mono);font-size:12px;"></textarea></div>
-        <div class="btn-row">
-          <button id="ld-add-call" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save call / note</button>
-          <span class="muted" id="ld-call-status" style="font-size:11px;"></span>
+        <div class="row-2">
+          <div class="field"><label>Region</label><input type="text" data-ld="region" /></div>
+          <div class="field"><label>Deal Size</label><input type="text" data-ld="deal_size" /></div>
         </div>
+        <div class="field"><label>Tech Stack</label><input type="text" data-ld="tech_stack" /></div>
+        <div class="field"><label>Complexity</label><input type="text" data-ld="complexity" /></div>
       </div>
-      <div id="ld-calls-list" class="muted" style="font-size:12px;">Loading…</div>
-    </div>
+    </details>
+
+    <details class="group" data-section="notes">
+      <summary><span data-section-label>Notes &amp; Fit</span></summary>
+      <div class="section-body">
+        <div class="field"><label>Fit Summary</label><textarea rows="3" data-ld="fit_summary"></textarea></div>
+        <div class="field"><label>Next Steps</label><textarea rows="3" data-ld="next_steps"></textarea></div>
+        <div class="field"><label>Positive Signals</label><textarea rows="2" data-ld="positive_signals"></textarea></div>
+        <div class="field"><label>Disqualifiers</label><textarea rows="2" data-ld="disqualifiers"></textarea></div>
+      </div>
+    </details>
+
+    <details class="group" data-section="project">
+      <summary><span data-section-label>Project &amp; Pricing</span></summary>
+      <div class="section-body">
+        <div id="ld-project-summary" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    </details>
+
+    <details class="group" data-section="contacts">
+      <summary>
+        <span><span data-section-label>Contacts</span> <span class="section-count" id="ld-contacts-count"></span></span>
+      </summary>
+      <div class="section-body">
+        <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
+        <details style="margin-top: 10px;">
+          <summary style="cursor:pointer;color:var(--accent);font-size:12px;">+ Add contact manually</summary>
+          <div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-top:8px;">
+            <div class="row-2">
+              <div class="field"><label>Name</label><input type="text" id="ld-new-contact-name" placeholder="Jane Doe" /></div>
+              <div class="field"><label>Title</label><input type="text" id="ld-new-contact-title" placeholder="VP Marketing" /></div>
+            </div>
+            <div class="row-2">
+              <div class="field"><label>Email</label><input type="email" id="ld-new-contact-email" placeholder="jane@..." /></div>
+              <div class="field"><label>LinkedIn URL</label><input type="url" id="ld-new-contact-linkedin" placeholder="linkedin.com/in/..." /></div>
+            </div>
+            <div class="btn-row">
+              <button id="ld-add-contact" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">Add contact</button>
+            </div>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <!-- Minimal status line at the bottom, replaces the old footer. -->
+    <div id="ld-status" class="muted" style="font-size:11px;padding:8px 0;text-align:right;"></div>
 
   </div>
-  <footer>
-    <span id="ld-status" class="muted"></span>
-    <div class="btn-row">
-      <button id="ld-cancel" class="btn ghost" type="button">Cancel</button>
-      <button id="ld-save" class="btn" type="button">Save changes</button>
-    </div>
-  </footer>
 </aside>
 
 <div id="toast" class="toast"></div>
@@ -1803,6 +1893,9 @@
     try {
       const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`);
       const contacts = data.contacts || [];
+      // Section count badge
+      const cnt = $('#ld-contacts-count');
+      if (cnt) cnt.textContent = contacts.length ? `(${contacts.length})` : '';
       if (!contacts.length) {
         el.innerHTML = '<div class="muted" style="font-size:12px;">No contacts saved yet. Save discovered stakeholders from Qualify Lead, or add manually below.</div>';
         return;
@@ -1883,6 +1976,9 @@
       const data = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`);
       const calls = data.calls || [];
       _callsCache[leadId] = calls;
+      // Section count badge
+      const cnt = $('#ld-calls-count');
+      if (cnt) cnt.textContent = calls.length ? `(${calls.length})` : '';
       renderLeadSummary(calls, data.rolling || {});
       if (!calls.length) {
         const emptyBanner = aiIsOn()
@@ -2197,6 +2293,16 @@
       $('#ld-meta').textContent = lead.last_edited
         ? `Last edited ${new Date(lead.last_edited).toLocaleString()}`
         : '';
+      // v0.10.0g: status chip in the header subtitle row
+      const statusEl = $('#ld-status-chip');
+      if (statusEl) {
+        if (lead.status) {
+          statusEl.style.display = 'inline-block';
+          statusEl.textContent = lead.status;
+        } else {
+          statusEl.style.display = 'none';
+        }
+      }
       // Populate all fields by their data-ld key
       $$('#lead-drawer [data-ld]').forEach(el => {
         const key = el.dataset.ld;
@@ -2209,11 +2315,64 @@
       loadLeadContacts(pageId);
       loadLeadCalls(pageId);
       loadLeadProject(pageId, lead.company);
+      // Reset dirty state — freshly loaded data is the new baseline.
+      updateDirtyState();
     } catch (e) {
       $('#ld-title').textContent = 'Failed to load';
       $('#ld-status').textContent = e.body?.error || e.message;
       toast(`Load failed: ${e.body?.error || e.message}`, 'error');
     }
+  }
+
+  // v0.10.0g: dirty-state tracking for the unified Save button.
+  // Compares current data-ld values + draft note + pending parent link
+  // against drawerState.original. Updates button styling + count badge.
+  function countDirtyChanges() {
+    const original = drawerState.original || {};
+    let count = 0;
+    const dirtySections = new Set();
+    $$('#lead-drawer [data-ld]').forEach(el => {
+      const key = el.dataset.ld;
+      const orig = original[key] != null ? String(original[key]) : '';
+      if (el.value !== orig) {
+        count++;
+        // Find which section this field belongs to
+        const det = el.closest('details.group');
+        if (det) dirtySections.add(det.dataset.section);
+      }
+    });
+    // Sourced-for multi-select
+    const currentSF = collectDrawerSourcedFor().sort();
+    const origSF = (original.sourced_for_partners || []).slice().sort();
+    if (currentSF.join('|') !== origSF.join('|')) {
+      count++;
+      dirtySections.add('qualification');
+    }
+    // Draft note in the call composer
+    const noteText = ($('#ld-new-call-content')?.value || '').trim();
+    if (noteText) {
+      count++;
+      dirtySections.add('calls');
+    }
+    return { count, dirtySections };
+  }
+
+  function updateDirtyState() {
+    const btn = $('#ld-save');
+    if (!btn) return;
+    const { count, dirtySections } = countDirtyChanges();
+    if (count > 0) {
+      btn.classList.add('dirty');
+      $('#ld-dirty-count').textContent = String(count);
+    } else {
+      btn.classList.remove('dirty');
+      $('#ld-dirty-count').textContent = '';
+    }
+    // Highlight section summaries that have pending changes.
+    $$('#lead-drawer details.group').forEach(d => {
+      const section = d.dataset.section;
+      d.classList.toggle('has-changes', dirtySections.has(section));
+    });
   }
 
   function renderDrawerSourcedFor(selected) {
@@ -2290,13 +2449,13 @@
     const subheading = $('#ld-summary-subheading');
     if (heading && subheading) {
       if (kids.length) {
-        heading.firstChild.textContent = 'Portfolio Summary ';
+        heading.textContent = 'Portfolio Summary';
         subheading.textContent = '— AI synthesis across all brands in this group';
       } else if (group.parent) {
-        heading.firstChild.textContent = 'Lead Summary ';
+        heading.textContent = 'Lead Summary';
         subheading.textContent = '— AI synthesis, sibling-brand context included';
       } else {
-        heading.firstChild.textContent = 'Lead Summary ';
+        heading.textContent = 'Lead Summary';
         subheading.textContent = '— AI synthesis across notes + qualification';
       }
     }
@@ -2491,11 +2650,13 @@
         // doesn't affect the pipeline row).
         await refreshPipeline();
       }
+      updateDirtyState();  // values now match originals → button goes back to ghost
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
       $('#ld-status').textContent = e.body?.error || e.message;
     } finally {
-      btn.disabled = false; btn.innerHTML = 'Save changes';
+      btn.disabled = false;
+      btn.innerHTML = 'Save<span class="dirty-count" id="ld-dirty-count"></span>';
     }
   }
 
@@ -3868,7 +4029,7 @@
     $('#qf-parent-clear').addEventListener('click', clearQfParent);
     // Lead detail drawer
     $('#ld-close').addEventListener('click', closeLeadDrawer);
-    $('#ld-cancel').addEventListener('click', closeLeadDrawer);
+    // (footer Cancel button removed in v0.10.0g — header X serves the same role.)
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
     $('#ld-save').addEventListener('click', saveLead);
     $('#ld-add-contact').addEventListener('click', () => {
@@ -3878,6 +4039,26 @@
       if (drawerState.id) addCall(drawerState.id);
     });
     $('#ld-summary-refresh').addEventListener('click', refreshLeadSummary);
+    // v0.10.0g: dirty-state tracking. Any edit anywhere in the drawer
+    // bumps the Save button into "primary" mode + shows the count badge.
+    document.addEventListener('input', (e) => {
+      if (!e.target.closest('#lead-drawer')) return;
+      if (e.target.matches('[data-ld]') || e.target.id === 'ld-new-call-content'
+          || e.target.id === 'ld-new-call-title') {
+        updateDirtyState();
+      }
+    });
+    document.addEventListener('change', (e) => {
+      if (!e.target.closest('#lead-drawer')) return;
+      if (e.target.matches('[data-ld]')) updateDirtyState();
+    });
+    // Sourced-for chips also count as dirty.
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#ld-sourced-for [data-ld-partner]')) {
+        // Defer one tick so the toggle classList settles first.
+        setTimeout(updateDirtyState, 0);
+      }
+    });
     // Parent group picker (v0.10.0 Phase A)
     $('#ld-parent-search').addEventListener('input', (e) => {
       clearTimeout(_pickerDebounce);

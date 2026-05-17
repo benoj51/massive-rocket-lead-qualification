@@ -5,6 +5,70 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0g] — 2026-05-17 — Drawer redesign
+
+Single biggest UX upgrade since v0.1. The lead drawer was 7+ stacked
+sections deep with three competing save buttons; you'd open KFC and
+scroll to find anything. Now it has a sticky header, one save button,
+the Lead Summary surfaced as a hero block, and accordion sections
+collapsed by default so the most-touched part (Calls & Notes) is
+always visible without scrolling.
+
+### Changed (drawer)
+- **Sticky header redesigned:**
+  - Lead title bigger (17px vs 15px)
+  - ICP score pill + status chip + group chip aggregated into a
+    subtitle row (was three different places before)
+  - ONE primary **Save** button — ghost when nothing's pending,
+    accent-coloured with a count badge when there are unsaved changes
+    (e.g. *"Save · 3"*)
+  - **✕** button shrunk to a small ghost — the visual hierarchy is now
+    clear about which action matters
+- **Lead Summary moved to a hero block** at the top of the body, with
+  accent border + faint background so it reads as the entry point.
+  Was previously buried below 5 other sections.
+- **All 6 other sections converted to native `<details>` accordions**
+  (Identity / Qualification / Discovered / Notes & Fit / Project &
+  Pricing / Contacts / Calls & Notes). Caret rotates on open. Header
+  styled like an `<h4>` so the visual language stays consistent.
+- **Calls & Notes opens by default** — it's the most-touched section.
+  Everything else is collapsed so the drawer fits a single screen on
+  open.
+- **Section count badges** in summaries: *"Calls & Notes (4)"*,
+  *"Contacts (2)"*. Tells you what's there without expanding.
+- **Section dirty highlights:** when a section has pending changes
+  the summary turns accent-coloured + caret tints orange. You can see
+  at a glance which collapsed sections you've edited.
+- **Footer removed.** The status line drops to a small inline element
+  at the very bottom of the body; Save and Close both moved to the
+  header where they're always visible regardless of scroll position.
+
+### Added
+- **`updateDirtyState()`** — counts dirty `data-ld` fields + draft
+  note text + parent-link queue + sourced-for diff, updates the Save
+  button class + count badge + per-section accent highlight.
+- **Universal dirty listener** on `input` / `change` / sourced-for
+  chip clicks within `#lead-drawer`. One listener, fires on every
+  edit, never misses a field.
+
+### Removed
+- `#ld-cancel` button (the old footer Cancel — its job was "close
+  without saving" which is what ✕ already does)
+- The old footer entirely
+- The duplicated read-only ICP pill inside the Qualification section
+  (still rendered in the header)
+- The old `<h4>` "Lead Summary" header (now lives in `.hero .hero-title`)
+
+### Why this matters
+The recent *"Save changes / No changes to save"* bug was a symptom of
+the design: three save buttons and seven sections is too many for the
+AE to track. With one save button and accordion sections, the model
+is obvious — type anywhere, see the Save button light up, click it.
+
+### Tests
+- 280 total. Layout change only, no Python behaviour change. JS sanity
+  parse green.
+
 ## [0.10.0f] — 2026-05-17 — Save changes commits pending notes + Lead Summary syncs to Notion
 
 Two issues raised after Phase E rollout:
