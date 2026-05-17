@@ -877,7 +877,10 @@
     </div>
 
     <div class="group">
-      <h4>Lead Summary <span class="muted" style="font-weight:400;font-size:10px;letter-spacing:0;text-transform:none;">— rolled-up across all calls/notes</span></h4>
+      <h4 style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Lead Summary <span class="muted" style="font-weight:400;font-size:10px;letter-spacing:0;text-transform:none;">— AI synthesis across notes + qualification</span></span>
+        <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
+      </h4>
       <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
     </div>
 
@@ -1707,20 +1710,23 @@
     }
   }
 
-  function renderLeadSummary(calls, rolling) {
+  async function renderLeadSummary(calls, rolling) {
     const el = $('#ld-notes-summary');
-    if (!el) return;
+    if (!el || !drawerState.id) return;
     if (!calls.length) {
-      el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes yet — what we learn from each call will roll up here.</div>';
+      el.innerHTML = '<div class="muted" style="font-size:12px;">No calls or notes yet — add one to start building a summary.</div>';
       return;
     }
-    // Pull the most recent call's headline + collected MEDDPICC values
-    const latest = calls[0];  // calls is newest-first
-    const latestNote = latest.note || latest.extracted?.synthesised_note || '';
-    // Extract the first ## Headline line from the latest note
-    const headlineMatch = latestNote.match(/^##\s+Headline\s*\n+([^\n]+)/m);
-    const headline = headlineMatch ? headlineMatch[1].trim() : '';
-    // MEDDPICC roll-up — most recent value per key across all calls
+    // Try the cached AI summary first
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/summary`);
+      const ai = data?.summary;
+      if (ai && ai.state_of_play) {
+        renderAiLeadSummary(ai, calls);
+        return;
+      }
+    } catch (_) { /* no cached summary; fall through */ }
+    // Fallback: roll-up view + prompt to refresh
     const meddpicc = rolling.meddpicc || {};
     const meddpiccBullets = [
       ['metrics', 'Metrics'],
@@ -1734,22 +1740,74 @@
     ].filter(([k]) => meddpicc[k]?.value).map(([k, label]) => {
       return `<li style="margin:3px 0;"><strong style="color:var(--text);">${label}:</strong> ${escapeHtml(meddpicc[k].value)}</li>`;
     });
-    const scope = rolling.project_scope;
     el.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
-        ${headline ? `<div style="font-size:13px;color:var(--text);font-weight:500;margin-bottom:8px;">${escapeHtml(headline)}</div>
-                       <div class="muted" style="font-size:10px;margin-bottom:8px;">From latest ${escapeHtml(latest.type)} on ${escapeHtml(latest.created_at ? new Date(latest.created_at).toLocaleString() : '')}</div>` : ''}
+        <div class="muted" style="font-size:11px;margin-bottom:8px;">No AI summary yet. Click <strong>✨ Refresh</strong> to generate one from the call history + qualification.</div>
         ${meddpiccBullets.length ? `
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">Discovery so far</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">Discovery so far (raw)</div>
           <ul style="margin:0 0 8px 18px;padding:0;font-size:12px;color:var(--text-dim);">${meddpiccBullets.join('')}</ul>
         ` : ''}
-        ${scope ? `
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">Project shaping</div>
-          <div style="font-size:12px;color:var(--text-dim);">${escapeHtml(scope)}</div>
-        ` : ''}
-        <div class="muted" style="font-size:10px;margin-top:8px;">${calls.length} call${calls.length === 1 ? '' : 's'} / note${calls.length === 1 ? '' : 's'} logged.</div>
+        <div class="muted" style="font-size:10px;">${calls.length} call${calls.length === 1 ? '' : 's'} / note${calls.length === 1 ? '' : 's'} logged.</div>
       </div>
     `;
+  }
+
+  function renderAiLeadSummary(ai, calls) {
+    const el = $('#ld-notes-summary');
+    const when = ai.generated_at ? new Date(ai.generated_at).toLocaleString() : '';
+    const factsHtml = (ai.key_facts || []).map(f =>
+      `<li style="margin:3px 0;">${escapeHtml(f)}</li>`).join('');
+    const questionsHtml = (ai.open_questions || []).map(q =>
+      `<li style="margin:3px 0;">${escapeHtml(q)}</li>`).join('');
+    const risksHtml = (ai.risks || []).map(r =>
+      `<li style="margin:3px 0;color:var(--red);">${escapeHtml(r)}</li>`).join('');
+    el.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px;">
+          ${escapeHtml(ai.state_of_play || '')}
+        </div>
+        ${factsHtml ? `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);margin-bottom:4px;">What we know</div>
+          <ul style="margin:0 0 10px 18px;padding:0;font-size:12px;color:var(--text);">${factsHtml}</ul>
+        ` : ''}
+        ${questionsHtml ? `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);margin-bottom:4px;">Open questions</div>
+          <ul style="margin:0 0 10px 18px;padding:0;font-size:12px;color:var(--text-dim);">${questionsHtml}</ul>
+        ` : ''}
+        ${ai.next_action ? `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin-bottom:4px;">Next move</div>
+          <div style="font-size:12px;color:var(--text);font-weight:500;margin-bottom:10px;">${escapeHtml(ai.next_action)}</div>
+        ` : ''}
+        ${risksHtml ? `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);margin-bottom:4px;">Risks</div>
+          <ul style="margin:0 0 8px 18px;padding:0;font-size:12px;">${risksHtml}</ul>
+        ` : ''}
+        <div class="muted" style="font-size:10px;border-top:1px solid var(--border);padding-top:6px;margin-top:8px;">
+          ✨ AI synthesis from ${calls.length} call${calls.length === 1 ? '' : 's'} · generated ${when}
+        </div>
+      </div>
+    `;
+  }
+
+  async function refreshLeadSummary() {
+    if (!drawerState.id) return;
+    const btn = $('#ld-summary-refresh');
+    const original = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Synthesising…';
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const calls = _callsCache[drawerState.id] || [];
+      renderAiLeadSummary(data.summary, calls);
+      toast('Lead summary refreshed', 'success');
+    } catch (e) {
+      toast(`Refresh failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false; btn.innerHTML = original;
+    }
   }
 
   function renderCallNote(md) {
@@ -3214,6 +3272,7 @@
     $('#ld-add-call').addEventListener('click', () => {
       if (drawerState.id) addCall(drawerState.id);
     });
+    $('#ld-summary-refresh').addEventListener('click', refreshLeadSummary);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && drawerState.id) closeLeadDrawer();
     });

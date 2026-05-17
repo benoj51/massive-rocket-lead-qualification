@@ -5,6 +5,53 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-05-17
+
+Claude-driven aggregated lead summary at the top of the drawer.
+Previously a static roll-up of the latest call's headline + MEDDPICC
+fields; now a real synthesis across every call, scope criterion,
+MEDDPICC entry, and contact.
+
+### Added
+- **`ai_summary.synthesise_lead(payload)`** — Claude Haiku 4.5 prompt
+  that takes the full lead context and returns a 4-section summary:
+  - `state_of_play` (2–3 sentences)
+  - `key_facts` (3–5 grounded bullets)
+  - `open_questions` (3–4 things to ask next)
+  - `next_action` (one concrete move)
+  - `risks` (optional, only if concrete)
+- **`lead_summary_store.py`** — JSON-per-lead cache at
+  `cache/lead_summaries/<lead_id>.json`. Avoids re-running Claude on
+  every drawer open.
+- **`/api/lead/<id>/summary`** endpoints:
+  - `GET` returns the cached summary (or `null`).
+  - `POST` gathers full context — Notion lead, scope, rolling
+    MEDDPICC, up to 6 recent calls (synthesised + raw excerpt),
+    contacts — runs Claude, caches the result.
+- **Lead Summary panel redesigned** in the drawer:
+  - 13px state-of-play block at the top
+  - Green "What we know" bullets
+  - Yellow "Open questions" bullets
+  - Accent "Next move" line
+  - Red "Risks" bullets (only if any)
+  - Footer with generation timestamp + call count
+- **✨ Refresh button** in the section header. AE clicks to regenerate
+  after adding new notes or qualification changes. Falls back to the
+  raw MEDDPICC roll-up if no cached summary exists yet.
+- Audit log captures `lead_summary_refreshed` events with call count.
+
+### Notes
+- AI synthesis requires `ANTHROPIC_API_KEY`. Without it the endpoint
+  returns 503; the drawer falls back to a "no AI summary yet" notice
+  with the raw MEDDPICC roll-up.
+- The synthesis is cached per lead. Refresh is on-demand so we don't
+  burn tokens automatically. A future v0.9.3 could auto-refresh after
+  call save — left explicit for now.
+
+### Tests
+- 244 total (+6). Covers store round-trip, prompt schema, endpoint
+  behaviour under no-Anthropic-key.
+
 ## [0.9.1] — 2026-05-17
 
 Pricing progress is now saved. Close the tab, come back, everything's

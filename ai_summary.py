@@ -214,6 +214,94 @@ def suggest_roadmap(*, total_months: int, current_milestones: list[dict],
     return data
 
 
+# ---------------------------------------------------------------------------
+# Lead-level synthesis — rolls call history + scope + MEDDPICC into a single
+# scannable summary for the top of the drawer
+# ---------------------------------------------------------------------------
+
+_LEAD_SUMMARY_SYSTEM_PROMPT = """You synthesise everything Massive Rocket
+knows about a sales lead into a tight summary the AE can scan in 15
+seconds. You receive: company info, the ICP score + status, the current
+project streams, MEDDPICC entries collected so far, any project scope
+notes, the full call/note history (synthesised + raw), and the contact
+list.
+
+Return ONE JSON object, no preamble, no markdown fences:
+
+{
+  "state_of_play": "<2-3 sentence summary of where the deal sits right now>",
+  "key_facts": [
+    "<bullet 1 — what we know with confidence>",
+    "<bullet 2>",
+    "<bullet 3-5>"
+  ],
+  "open_questions": [
+    "<bullet 1 — what we still need to learn>",
+    "<bullet 2>",
+    "<bullet 3-4>"
+  ],
+  "next_action": "<one sentence: the AE's next concrete move>",
+  "risks": [
+    "<concrete risk worth flagging, or omit the array entirely if none>"
+  ]
+}
+
+Rules:
+- 2–3 sentences for state_of_play. No fluff. Lead with the most important
+  thing.
+- 3–5 key_facts. Ground every bullet in the data — no fabrication.
+- 3–4 open_questions — what specifically the AE should ask on the next
+  call.
+- next_action must be concrete and doable this week.
+- Plain English. No em-dashes. No marketing tone.
+- If the data is thin (e.g. only one note), say so honestly in
+  state_of_play.
+"""
+
+
+def synthesise_lead(payload: dict) -> dict | None:
+    """Aggregate everything known about a lead into a scannable summary.
+
+    Returns the structured dict from the schema above, or None if AI
+    is unconfigured / fails.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+
+    try:
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_DEFAULT_MODEL, max_tokens=1500,
+            system=_LEAD_SUMMARY_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(payload, default=str)}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+        data = json.loads(text)
+    except Exception as e:
+        log.warning("Lead synthesis failed: %s", e)
+        return None
+    # Normalise
+    return {
+        "state_of_play": str(data.get("state_of_play") or "").strip(),
+        "key_facts": [str(b).strip() for b in (data.get("key_facts") or []) if str(b).strip()][:6],
+        "open_questions": [str(b).strip() for b in (data.get("open_questions") or []) if str(b).strip()][:6],
+        "next_action": str(data.get("next_action") or "").strip(),
+        "risks": [str(b).strip() for b in (data.get("risks") or []) if str(b).strip()][:5],
+    }
+
+
 def suggest_extended_engagement(*, current_scope_streams: list[str],
                                  current_package_keys: list[str] | None,
                                  package_catalogue: list[dict],

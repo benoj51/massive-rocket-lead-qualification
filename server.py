@@ -38,6 +38,7 @@ import calls_store
 import contacts_store
 import criteria_store
 import hubspot_sync
+import lead_summary_store
 import packages
 import pricing
 import pricing_store
@@ -689,6 +690,73 @@ def api_pricing_preview():
         return jsonify(quote)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+
+# --- Lead-level Claude synthesis ----------------------------------------
+
+def _gather_lead_context(lead_id: str) -> dict:
+    """Pull everything we know about a lead into a single dict for Claude."""
+    ctx: dict = {"lead_id": lead_id}
+    # Notion-side lead data
+    try:
+        sync = NotionSync()
+        ctx["notion_lead"] = sync.get_page(lead_id)
+    except Exception:
+        ctx["notion_lead"] = None
+    # Scope
+    p = project_store.load(lead_id)
+    if p:
+        ctx["project_summary"] = scope_module.project_summary(p)
+        ctx["streams"] = [
+            {
+                "project_type": s.project_type,
+                "criteria": [
+                    {"key": c.key, "value": c.value, "status": c.status}
+                    for c in s.criteria if (c.value or c.status != "unqualified")
+                ],
+            }
+            for s in p.streams
+        ]
+    # Rolling MEDDPICC + scope synthesis across calls
+    ctx["rolling_extractions"] = calls_store.aggregate_extractions(lead_id)
+    # Latest 6 calls (full, including AI-synthesised note + raw content)
+    calls = calls_store.list_calls(lead_id)
+    ctx["calls"] = [
+        {
+            "type": c.get("type"),
+            "title": c.get("title"),
+            "created_at": c.get("created_at"),
+            "note": c.get("note") or "",
+            "content_excerpt": (c.get("content") or "")[:1500],
+            "extracted_meddpicc": c.get("extracted", {}).get("meddpicc"),
+        }
+        for c in calls[:6]
+    ]
+    ctx["calls_total"] = len(calls)
+    # Contacts
+    ctx["contacts"] = contacts_store.list_contacts(lead_id)
+    return ctx
+
+
+@app.route("/api/lead/<lead_id>/summary", methods=["GET"])
+def api_lead_summary_get(lead_id: str):
+    cached = lead_summary_store.load(lead_id)
+    return jsonify({"summary": cached})
+
+
+@app.route("/api/lead/<lead_id>/summary", methods=["POST"])
+def api_lead_summary_refresh(lead_id: str):
+    """Run Claude over the lead's full context, cache + return the result."""
+    if not ai_summary.is_configured():
+        return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
+    ctx = _gather_lead_context(lead_id)
+    result = ai_summary.synthesise_lead(ctx)
+    if result is None:
+        return jsonify({"error": "Synthesis failed"}), 502
+    saved = lead_summary_store.save(lead_id, result)
+    audit.log_event("lead_summary_refreshed", actor=_actor(), lead_id=lead_id,
+                    calls_used=len(ctx.get("calls") or []))
+    return jsonify({"summary": saved})
 
 
 # --- Roadmap -------------------------------------------------------------
