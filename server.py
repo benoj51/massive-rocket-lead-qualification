@@ -770,7 +770,85 @@ def _gather_lead_context(lead_id: str) -> dict:
     ctx["calls_total"] = len(calls)
     # Contacts
     ctx["contacts"] = contacts_store.list_contacts(lead_id)
+    # v0.10.0 Phase D: account-group context. If this lead is a child of a
+    # parent (or is itself a parent), include sibling-brand state so Claude
+    # can write portfolio-aware commentary ("Yum operating companies in
+    # pipeline: Pizza Hut closed-won 2024, Taco Bell qualifying...").
+    try:
+        ctx["group"] = _gather_group_context(lead_id)
+    except Exception as e:
+        log.warning("Group context build failed for %s: %s", lead_id, e)
+        ctx["group"] = None
     return ctx
+
+
+def _gather_group_context(lead_id: str) -> dict | None:
+    """Build the parent/siblings/children context block for Claude.
+
+    Returns:
+      For a child: {role: "child", parent: {...}, siblings: [...]}
+      For a parent: {role: "parent", children: [...]}
+      For a standalone: None
+    """
+    parent_slug = accounts_graph.parent_of(lead_id)
+    own_slug = project_store.slugify(lead_id)
+    sync = None
+    pipeline: list[dict] = []
+
+    def _ensure_pipeline():
+        nonlocal sync, pipeline
+        if sync is None:
+            sync = NotionSync()
+            pipeline = sync.list_pipeline(limit=500)
+        return pipeline
+
+    def _row_for(slug: str) -> dict | None:
+        for r in _ensure_pipeline():
+            if project_store.slugify(r.get("id") or r.get("company") or "") == slug:
+                return r
+        return None
+
+    def _trim(r: dict) -> dict:
+        return {
+            "id": r.get("id"),
+            "company": r.get("company"),
+            "icp_normalised": r.get("icp_normalised"),
+            "status": r.get("status"),
+            "sales_stage": r.get("sales_stage"),
+            "vertical": r.get("vertical"),
+            "opportunity_type": r.get("opportunity_type"),
+        }
+
+    if parent_slug:
+        # This lead is a child. Find the parent + sibling brands.
+        parent_row = _row_for(parent_slug)
+        sibling_slugs = [s for s in accounts_graph.children_of(parent_slug) if s != own_slug]
+        siblings: list[dict] = []
+        for s in sibling_slugs:
+            r = _row_for(s)
+            if r:
+                siblings.append(_trim(r))
+            else:
+                siblings.append({"id": s, "company": s, "_missing": True})
+        return {
+            "role": "child",
+            "parent": _trim(parent_row) if parent_row else {"id": parent_slug, "company": parent_slug},
+            "siblings": siblings,
+        }
+
+    child_slugs = accounts_graph.children_of(lead_id)
+    if child_slugs:
+        # This lead is a parent. Pull children for portfolio context.
+        children: list[dict] = []
+        for s in child_slugs:
+            r = _row_for(s)
+            if r:
+                children.append(_trim(r))
+            else:
+                children.append({"id": s, "company": s, "_missing": True})
+        return {"role": "parent", "children": children}
+
+    return None
 
 
 @app.route("/api/lead/<lead_id>/summary", methods=["GET"])

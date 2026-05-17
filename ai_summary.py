@@ -223,8 +223,10 @@ _LEAD_SUMMARY_SYSTEM_PROMPT = """You synthesise everything Massive Rocket
 knows about a sales lead into a tight summary the AE can scan in 15
 seconds. You receive: company info, the ICP score + status, the current
 project streams, MEDDPICC entries collected so far, any project scope
-notes, the full call/note history (synthesised + raw), and the contact
-list.
+notes, the full call/note history (synthesised + raw), the contact
+list, and optionally a `group` block with parent/sibling brand context
+(e.g. KFC's payload includes Yum! Brands as the parent plus Pizza Hut,
+Taco Bell, Habit Burger as sibling brands with their statuses).
 
 Return ONE JSON object, no preamble, no markdown fences:
 
@@ -256,6 +258,23 @@ Rules:
 - Plain English. No em-dashes. No marketing tone.
 - If the data is thin (e.g. only one note), say so honestly in
   state_of_play.
+
+GROUP CONTEXT (when present):
+- If `group.role == "child"`: the parent + sibling brands describe a
+  family this lead belongs to (e.g. KFC inside Yum! Brands alongside
+  Pizza Hut / Taco Bell / Habit Burger). Weave portfolio reality into
+  the summary where it matters: surface sibling wins as reference
+  points ("Pizza Hut is closed-won on a similar CDP build — use as
+  proof"), call out central-buying risk if the parent looks like the
+  real economic buyer, flag sibling status patterns ("3 of 4 Yum
+  brands are mid-discovery — momentum") in key_facts. Do NOT pad
+  open_questions with sibling info — keep questions specific to THIS
+  lead.
+- If `group.role == "parent"`: this lead is a holding/portfolio
+  account. State of play should describe portfolio-wide momentum
+  ("Yum portfolio: 2 of 4 brands in active discovery, 1 closed-won,
+  1 dormant"). next_action is typically a portfolio-level move
+  (executive briefing, MSA renewal, cross-brand reference call).
 """
 
 

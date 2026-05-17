@@ -51,6 +51,17 @@ class AiSynthesisPromptSchemaTests(unittest.TestCase):
                     "next_action", "risks"):
             self.assertIn(key, ai_summary._LEAD_SUMMARY_SYSTEM_PROMPT)
 
+    def test_prompt_documents_group_context(self):
+        """v0.10.0d: prompt teaches Claude about parent/sibling context."""
+        import ai_summary
+        prompt = ai_summary._LEAD_SUMMARY_SYSTEM_PROMPT
+        # Must explain what to do when the lead is a child or parent.
+        self.assertIn("group", prompt.lower())
+        self.assertIn("sibling", prompt.lower())
+        # Must mention both roles.
+        self.assertIn('"child"', prompt)
+        self.assertIn('"parent"', prompt)
+
     def test_synthesise_lead_without_anthropic_returns_none(self):
         import ai_summary
         os.environ.pop("ANTHROPIC_API_KEY", None)
@@ -110,6 +121,15 @@ class GatherLeadContextNoneExtractedTests(unittest.TestCase):
         os.environ.pop("CALLS_STORE_DIR", None)
         os.environ.pop("LEAD_SUMMARY_STORE_DIR", None)
         shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_group_context_none_for_standalone(self):
+        """v0.10.0d: standalone leads get group=None in the context."""
+        import calls_store
+        calls_store.add_call("solo-lead", {
+            "type": "note", "content": "isolated", "extracted": {},
+        })
+        ctx = self.server._gather_lead_context("solo-lead")
+        self.assertIsNone(ctx.get("group"))
 
     def test_gather_context_handles_none_extracted(self):
         # Write a call with extracted=None directly (mirrors what

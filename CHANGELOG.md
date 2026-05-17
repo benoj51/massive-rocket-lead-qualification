@@ -5,6 +5,69 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0d] — 2026-05-17 — Account Groups (Phase D): AI sibling + portfolio context
+
+Final phase of the Account Groups feature. Claude now writes
+portfolio-aware Lead Summaries. When you ✨ Refresh on KFC, the
+summary draws on Pizza Hut / Taco Bell / Habit Burger state too:
+*"Pizza Hut is closed-won on a similar CDP build — use as proof on
+this call."* When you open Yum! Brands' drawer, the section is
+relabelled **Portfolio Summary** and Claude writes group-wide
+commentary across all 4 brands.
+
+### Added
+- **`_gather_group_context(lead_id)`** in server.py builds the parent /
+  siblings / children block for Claude. Resolves slugs to display
+  names via the pipeline. Returns one of three shapes:
+  - `{role: "child", parent: {...}, siblings: [...]}` — brand under
+    a parent
+  - `{role: "parent", children: [...]}` — parent group, with each
+    child's ICP, status, stage, vertical, opp type
+  - `None` — standalone
+- **`_gather_lead_context()` now includes** the `group` block on
+  every summary call (wrapped in try/except so a graph lookup failure
+  never blocks the summary).
+- **`_LEAD_SUMMARY_SYSTEM_PROMPT` updated** with explicit GROUP
+  CONTEXT rules teaching Claude to:
+  - For children: surface sibling wins as reference points, call out
+    central-buying risk when the parent looks like the economic
+    buyer, flag sibling-status patterns in key_facts. Keep
+    open_questions specific to THIS lead, not siblings.
+  - For parents: describe portfolio-wide momentum; next_action is a
+    portfolio-level move (exec briefing, MSA renewal, cross-brand
+    reference call).
+- **Drawer Lead Summary card relabels** based on the group role:
+  - Parent → "Portfolio Summary — AI synthesis across all brands in
+    this group"
+  - Child → "Lead Summary — AI synthesis, sibling-brand context
+    included"
+  - Standalone → "Lead Summary — AI synthesis across notes +
+    qualification" (unchanged)
+
+### Tests
+- 278 total (+2). New `test_group_context_none_for_standalone`
+  verifies the default; `test_prompt_documents_group_context`
+  pins the prompt schema so a future refactor can't silently drop
+  the group-context teaching.
+
+### Account Groups feature — complete summary
+After Phase A → B → C → D, you can:
+1. **Manually link** a brand to a parent via the drawer picker.
+2. **Auto-suggested links** appear after qualification when Apollo
+   data hints at a parent.
+3. **Pipeline shows** parents grouped with their brands collapsed,
+   filterable by group.
+4. **Claude writes** portfolio-aware analysis from both directions
+   (child sees siblings, parent sees portfolio).
+
+What's deliberately out of scope:
+- Multi-level (Corp → Division → Brand). One level only.
+- Mirror to Notion. The graph lives in `cache/` until you mount a
+  Railway volume or migrate to Postgres.
+- Group-level TCV roll-up in pipeline. Backlog.
+- Auto-creating brand leads when a parent enriches. The AE always
+  confirms each child link.
+
 ## [0.10.0c] — 2026-05-17 — Account Groups (Phase C): grouped pipeline view
 
 The Pipeline view now has a **Flat / Grouped** toggle and a **Group**

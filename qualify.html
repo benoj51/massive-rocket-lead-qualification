@@ -900,7 +900,7 @@
 
     <div class="group">
       <h4 style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Lead Summary <span class="muted" style="font-weight:400;font-size:10px;letter-spacing:0;text-transform:none;">— AI synthesis across notes + qualification</span></span>
+        <span id="ld-summary-heading">Lead Summary <span class="muted" id="ld-summary-subheading" style="font-weight:400;font-size:10px;letter-spacing:0;text-transform:none;">— AI synthesis across notes + qualification</span></span>
         <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
       </h4>
       <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
@@ -2202,6 +2202,22 @@
 
     // Children panel: "Brands in this group" (visible when parent of others)
     const kids = group.children || [];
+    // v0.10.0d: relabel the Lead Summary card on parent drawers — Claude
+    // writes portfolio-aware analysis when group.role === "parent".
+    const heading = $('#ld-summary-heading');
+    const subheading = $('#ld-summary-subheading');
+    if (heading && subheading) {
+      if (kids.length) {
+        heading.firstChild.textContent = 'Portfolio Summary ';
+        subheading.textContent = '— AI synthesis across all brands in this group';
+      } else if (group.parent) {
+        heading.firstChild.textContent = 'Lead Summary ';
+        subheading.textContent = '— AI synthesis, sibling-brand context included';
+      } else {
+        heading.firstChild.textContent = 'Lead Summary ';
+        subheading.textContent = '— AI synthesis across notes + qualification';
+      }
+    }
     if (kids.length) {
       childrenPanel.style.display = 'block';
       childrenCount.textContent = `(${kids.length})`;
