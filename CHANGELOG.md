@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] — 2026-05-17
+
+Three fixes + one new feature on top of v0.8.2.
+
+### Fixed
+- **Status toggle buttons in Project Build didn't respond to clicks.**
+  When the AE ticked a stream chip, `renderScopePanels()` rendered the
+  criteria rows but never re-wired the click handlers — `statusToggleBindings()`
+  was only called by `pbSave` and `pbLoadProject`. Moved the binding
+  call into `renderScopePanels()` itself so every render is fully
+  interactive. Same root cause as the v0.8.2 ccy bug pattern: rebuild
+  the DOM, forget to rewire the handlers.
+- **Edit → Cancel removed the raw transcript.** The previous call-card
+  layout hid the raw content inside a collapsed `<details>` block.
+  When AEs clicked Edit → Cancel, the synthesised note restored but
+  the user-perceived "transcript gone" was actually the details still
+  collapsed. New layout shows both side-by-side, so Edit/Cancel only
+  swaps the synthesised-note view — raw stays visible the whole time.
+
+### Added
+- **Lead Summary at top of drawer.** Above the Calls & Notes list, a
+  new "Lead Summary" panel rolls up across every call/note for the
+  lead:
+  - Headline from the latest call
+  - MEDDPICC entries with most-recent value (Metrics, Economic Buyer,
+    Decision Criteria, Decision Process, Paper Process, Pain,
+    Champion, Competition) — only fields with content show
+  - Project Scope synthesis if any call has produced one
+  - Footer: count of calls/notes logged
+  - Auto-refreshes whenever a call is added or edited.
+- **Redesigned call card.** Synthesised note rendered in a clean panel,
+  followed by Raw transcript / source in a labelled, scrollable
+  monospace block (no more hide-in-details). Both always visible.
+
+### Changed
+- **Project Build criteria rows** got a design pass:
+  - More breathing room (14px/16px padding, 12px gaps)
+  - Larger status toggle buttons (7px/10px padding vs 5px/8px)
+  - New "role-driver" pill style for "↗ CRM Developer effort"
+    instead of inline run-on text
+  - Input fields now have visible borders + focus state
+  - Hover state on the row itself (border strengthens)
+  - Bigger ✎ / × buttons (6px/10px padding)
+- Status toggle now supports both MEDDPICC tones (not_started /
+  in_progress / confirmed) and Scope tones (unqualified / qualifying /
+  qualified) with consistent colors.
+
+### Tests
+- 217 total (unchanged for this round — fixes + UI only, no new
+  backend code paths).
+
 ## [0.8.2] — 2026-05-17
 
 Hotfix + editable AI-synthesised call notes.
