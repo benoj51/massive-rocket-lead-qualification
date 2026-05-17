@@ -97,6 +97,172 @@ def is_configured() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Roadmap suggestion + Extended Engagement suggestion
+# ---------------------------------------------------------------------------
+
+_ROADMAP_SYSTEM_PROMPT = """You take Massive Rocket's qualification data
+(MEDDPICC, scope, call notes) and existing roadmap milestones and produce
+a *refined* set of milestones — adjusting, adding, or removing — to reflect
+what we now know about the prospect.
+
+Return ONE JSON object only. No preamble. No markdown fences.
+
+Schema:
+{
+  "milestones": [
+    {
+      "workstream":      "<one of: CRM Strategy, CRM Build, CRM Execute, Data, Engineering, Cross-cutting>",
+      "title":           "<short milestone label, max ~50 chars>",
+      "month_offset":    <integer; 0 = project start>,
+      "duration_months": <integer >= 1>,
+      "phase":           "<one of: Understand, Execute, Accelerate>",
+      "description":     "<one short sentence, optional>"
+    },
+    ...
+  ],
+  "rationale": "<one short paragraph: how the notes/MEDDPICC moved the plan>"
+}
+
+Rules:
+- Output 4–10 milestones total. More than 10 = too granular for a roadmap.
+- Use the project's total months as the constraint: month_offset + duration_months <= total_months.
+- If the call notes surface a specific pain or timeline, reflect it
+  (e.g. "Q2 renewal" → migration must finish by month 5).
+- Keep workstreams distinct. Don't put strategy work under CRM Build.
+- No marketing tone. No em-dashes. Plain English.
+"""
+
+
+_EXTENDED_SYSTEM_PROMPT = """You propose 3 to 5 follow-on engagements for
+a Massive Rocket client beyond their initial scope. You see the current
+scope, the package catalogue, and what we've learned from calls. You're
+helping the AE pitch what year 2 / year 3 with MR looks like.
+
+Return ONE JSON object. No preamble. No markdown fences.
+
+Schema:
+{
+  "items": [
+    {
+      "year":             <integer >= 2>,
+      "title":            "<short label>",
+      "description":      "<one to two sentences on why this fits>",
+      "package_key":      "<exact key from the package catalogue, or null>",
+      "estimated_hours":  <integer or 0 if unknown>,
+      "estimated_price_usd": <number or 0 if unknown>
+    },
+    ...
+  ]
+}
+
+Rules:
+- Year 2 first, then year 3, then beyond. Don't dump everything into year 2.
+- Pick from the package catalogue where there's a sensible match. Use the
+  exact `key`. Fall back to a custom title only when no package fits.
+- Estimate prices conservatively. Use $200/h * hours when unsure.
+- Don't propose work the client just paid for in year 1.
+- Plain English. No buzzwords. No em-dashes.
+"""
+
+
+def suggest_roadmap(*, total_months: int, current_milestones: list[dict],
+                    scope: dict | None, calls: list[dict] | None,
+                    project_streams: list[str] | None = None) -> dict | None:
+    """Run Claude over the qual context and propose a refined milestone list."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+
+    context = {
+        "total_months": int(total_months or 12),
+        "project_streams": project_streams or [],
+        "current_milestones": current_milestones or [],
+        "scope_summary": (scope or {}).get("summary"),
+        "scope_streams": [s.get("project_type") for s in (scope or {}).get("streams", [])],
+        "recent_call_notes": [
+            {
+                "type": c.get("type"),
+                "title": c.get("title") or "",
+                "note": (c.get("note") or c.get("extracted", {}).get("synthesised_note") or "")[:1200],
+            }
+            for c in (calls or [])[:5]
+        ],
+    }
+    try:
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_DEFAULT_MODEL, max_tokens=1500,
+            system=_ROADMAP_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(context, default=str)}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+        data = json.loads(text)
+    except Exception as e:
+        log.warning("Roadmap suggestion failed: %s", e)
+        return None
+    return data
+
+
+def suggest_extended_engagement(*, current_scope_streams: list[str],
+                                 current_package_keys: list[str] | None,
+                                 package_catalogue: list[dict],
+                                 calls: list[dict] | None) -> dict | None:
+    """Propose what year 2 / year 3 / beyond with MR could look like."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+    context = {
+        "current_scope_streams": current_scope_streams or [],
+        "current_package_keys": current_package_keys or [],
+        "package_catalogue": [
+            {"key": p.get("key"), "name": p.get("name"),
+             "hours": p.get("total_hours"), "duration_months": p.get("duration_months"),
+             "notes": p.get("notes") or ""}
+            for p in (package_catalogue or [])
+        ],
+        "recent_call_notes": [
+            {"note": (c.get("note") or c.get("extracted", {}).get("synthesised_note") or "")[:1000]}
+            for c in (calls or [])[:5]
+        ],
+    }
+    try:
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_DEFAULT_MODEL, max_tokens=1500,
+            system=_EXTENDED_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(context, default=str)}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+        data = json.loads(text)
+    except Exception as e:
+        log.warning("Extended engagement suggestion failed: %s", e)
+        return None
+    return data
+
+
+# ---------------------------------------------------------------------------
 # Note extraction: turn raw call notes / transcripts into structured fills
 # ---------------------------------------------------------------------------
 

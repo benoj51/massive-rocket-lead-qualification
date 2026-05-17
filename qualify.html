@@ -602,6 +602,52 @@
       <div id="pb-pricing-table" style="margin-top: 14px;"></div>
     </div>
 
+    <div id="pb-roadmap-card" class="card" style="display:none;">
+      <h2>Roadmap</h2>
+      <p class="muted" style="margin: 0 0 12px;">Phased timeline anchored to project start. Updates pull from notes + qualification details when you refine.</p>
+
+      <div class="row row-3" style="margin-bottom: 12px;">
+        <div>
+          <label>Start date</label>
+          <input type="date" id="pb-roadmap-start" />
+        </div>
+        <div>
+          <label>Months</label>
+          <input type="number" id="pb-roadmap-months" min="1" max="36" step="1" value="12" />
+        </div>
+        <div>
+          <label>End date <small style="color:var(--text-muted);font-size:10px;">(auto from start + months)</small></label>
+          <input type="date" id="pb-roadmap-end" />
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-bottom: 14px;">
+        <select id="pb-roadmap-pkg" style="min-width: 220px;"><option value="">— seed from package —</option></select>
+        <button class="btn ghost" id="pb-roadmap-seed" type="button">Seed milestones</button>
+        <button class="btn ghost" id="pb-roadmap-refine" type="button">✨ Refine from notes</button>
+        <button class="btn" id="pb-roadmap-save" type="button">Save roadmap</button>
+        <span class="muted" id="pb-roadmap-status" style="font-size:11px;"></span>
+      </div>
+
+      <div id="pb-roadmap-rationale" class="muted" style="font-size:11px;margin-bottom:10px;"></div>
+
+      <div id="pb-roadmap-timeline" style="margin-bottom: 14px;"></div>
+
+      <div id="pb-roadmap-table"></div>
+
+      <div class="btn-row" style="margin-top: 10px;">
+        <button class="btn ghost" id="pb-roadmap-add" type="button">+ Add milestone</button>
+      </div>
+
+      <h3 style="margin-top: 22px;">Beyond Year 1 — Extended Engagement</h3>
+      <p class="muted" style="margin: 0 0 12px;">What else MR could deliver in an ongoing relationship.</p>
+      <div class="btn-row" style="margin-bottom: 10px;">
+        <button class="btn ghost" id="pb-extended-suggest" type="button">✨ Suggest based on notes</button>
+        <button class="btn ghost" id="pb-extended-add" type="button">+ Add idea</button>
+      </div>
+      <div id="pb-extended-list"></div>
+    </div>
+
     <div id="pb-sow-card" class="card" style="display:none;">
       <h2>Draft SOW</h2>
       <p class="muted" style="margin: 0 0 10px;">Generate a snapshot Statement of Work from the current Apollo + scope + pricing state. Each click creates a new version. Earlier versions stay accessible.</p>
@@ -907,6 +953,17 @@
   ];
   const MEDDPICC_KEYS = MEDDICC_ROWS.map(r => r.key);
   const PARTNER_OPTIONS = ['Braze', 'Hightouch', 'Snowflake', 'Talon.one', 'Voucherify', 'mParticle', 'Segment'];
+
+  const ROADMAP_WORKSTREAMS = ['CRM Strategy', 'CRM Build', 'CRM Execute', 'Data', 'Engineering', 'Cross-cutting'];
+  const ROADMAP_PHASES = ['Understand', 'Execute', 'Accelerate'];
+  const WORKSTREAM_COLOR = {
+    'CRM Strategy': '#60a5fa',
+    'CRM Build': '#ff4d2a',
+    'CRM Execute': '#f97316',
+    'Data': '#4ade80',
+    'Engineering': '#a78bfa',
+    'Cross-cutting': '#9898aa',
+  };
 
   // ---- Utilities --------------------------------------------------------
   const $ = (sel) => document.querySelector(sel);
@@ -1443,6 +1500,19 @@
       const streams = (summary.streams || []).join(', ') || '(none yet)';
       const valColor = { validated: 'qualify_in', pending_validation: 'borderline',
                           rejected: 'qualify_out', draft: 'borderline' };
+      // Best-effort roadmap chip
+      let roadmapLine = '';
+      try {
+        const rdata = await jsonFetch(`/api/roadmap/${encodeURIComponent(leadId)}`);
+        const rm = rdata?.roadmap;
+        if (rm && (rm.start_date || rm.milestones?.length)) {
+          const ms = rm.milestones?.length || 0;
+          const ext = rm.extended_engagement?.length || 0;
+          const dates = (rm.start_date || rm.end_date) ?
+            `${rm.start_date || '?'} → ${rm.end_date || '?'}` : `${rm.months || 12}mo`;
+          roadmapLine = `<div style="font-size:12px;"><strong style="color:var(--text);">Roadmap:</strong> ${escapeHtml(dates)} · ${ms} milestone${ms === 1 ? '' : 's'}${ext ? ` · ${ext} Year 2+ idea${ext === 1 ? '' : 's'}` : ''}</div>`;
+        }
+      } catch (_) { /* roadmap optional */ }
       el.innerHTML = `
         <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
@@ -1450,7 +1520,8 @@
             <span class="muted" style="font-size:11px;">${stats.qualified_pct ?? 0}% qualified · ${escapeHtml(summary.confidence || 'low')} confidence</span>
           </div>
           <div style="font-size:12px;margin-bottom:6px;"><strong style="color:var(--text);">Streams:</strong> ${escapeHtml(streams)}</div>
-          ${pricingNet != null ? `<div style="font-size:12px;"><strong style="color:var(--text);">Forecast (net):</strong> ${fmtUSD(pricingNet)}</div>` : ''}
+          ${pricingNet != null ? `<div style="font-size:12px;margin-bottom:6px;"><strong style="color:var(--text);">Forecast (net):</strong> ${fmtUSD(pricingNet)}</div>` : ''}
+          ${roadmapLine}
           <div class="btn-row" style="margin-top:10px;">
             <button class="btn" type="button" data-open-pb="${escapeAttr(leadId)}" style="padding:5px 12px;font-size:11px;">Open Project Build →</button>
           </div>
@@ -2287,6 +2358,7 @@
       renderValidationBanner();
       $('#pb-sow-card').style.display = 'block';
       await refreshSowVersions();
+      await pbLoadRoadmap(leadId);
     } catch (e) {
       toast(`Load failed: ${e.body?.error || e.message}`, 'error');
     }
@@ -2361,6 +2433,277 @@
       });
       renderPricing(q);
     } catch (e) { toast(`Pricing failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  // ---- Roadmap state ---------------------------------------------------
+  pbState.roadmap = null;  // { lead_id, months, start_date, end_date, milestones, extended_engagement }
+
+  function emptyRoadmap(leadId) {
+    return {
+      lead_id: leadId, months: 12,
+      start_date: new Date().toISOString().slice(0, 10),
+      end_date: '',
+      milestones: [],
+      extended_engagement: [],
+    };
+  }
+
+  async function pbLoadRoadmap(leadId) {
+    if (!leadId) { pbState.roadmap = null; return; }
+    try {
+      const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(leadId)}`);
+      pbState.roadmap = data.roadmap || emptyRoadmap(leadId);
+    } catch (e) {
+      pbState.roadmap = emptyRoadmap(leadId);
+    }
+    renderRoadmap();
+  }
+
+  function renderRoadmap() {
+    const r = pbState.roadmap;
+    const card = $('#pb-roadmap-card');
+    if (!r || !pbState.currentLeadId) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    $('#pb-roadmap-start').value = r.start_date || '';
+    $('#pb-roadmap-end').value = r.end_date || '';
+    $('#pb-roadmap-months').value = r.months || 12;
+    // Populate package picker once
+    const pkgSel = $('#pb-roadmap-pkg');
+    if (pkgSel && !pkgSel.dataset.populated) {
+      const packs = pbState.pricingLibrary?.packages || [];
+      pkgSel.innerHTML = '<option value="">— seed from package —</option>' +
+        packs.map(p => `<option value="${escapeAttr(p.key)}">${escapeHtml(p.name)} (${p.total_hours}h, ${p.duration_months}mo)</option>`).join('');
+      pkgSel.dataset.populated = '1';
+    }
+    renderRoadmapTimeline(r);
+    renderRoadmapTable(r);
+    renderExtendedEngagement(r);
+  }
+
+  function renderRoadmapTimeline(r) {
+    const months = Math.max(1, r.months || 12);
+    const tl = $('#pb-roadmap-timeline');
+    if (!r.milestones.length) {
+      tl.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">No milestones yet. Seed from a package or click + Add milestone.</div>';
+      return;
+    }
+    const startDate = r.start_date ? new Date(r.start_date) : null;
+    const monthLabel = (i) => {
+      if (!startDate) return `M${i + 1}`;
+      const d = new Date(startDate); d.setMonth(d.getMonth() + i);
+      return d.toLocaleString('en-GB', { month: 'short', year: '2-digit' });
+    };
+    const headerCells = Array.from({ length: months }, (_, i) =>
+      `<div style="font-size:9px;color:var(--text-muted);text-align:center;padding:4px 2px;border-right:1px solid var(--border);">${monthLabel(i)}</div>`
+    ).join('');
+    const rows = r.milestones.map((m, idx) => {
+      const start = Math.max(0, Math.min(months - 1, m.month_offset || 0));
+      const dur = Math.max(1, Math.min(months - start, m.duration_months || 1));
+      const color = WORKSTREAM_COLOR[m.workstream] || '#9898aa';
+      const cells = Array.from({ length: months }, (_, i) => {
+        const inBar = i >= start && i < start + dur;
+        const first = i === start;
+        const last = i === start + dur - 1;
+        if (inBar) {
+          return `<div style="background:${color};opacity:.85;height:24px;border-right:1px solid var(--bg);${first ? 'border-top-left-radius:4px;border-bottom-left-radius:4px;' : ''}${last ? 'border-top-right-radius:4px;border-bottom-right-radius:4px;' : ''};display:flex;align-items:center;padding:0 6px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${first ? escapeHtml(m.title) : ''}</div>`;
+        }
+        return `<div style="height:24px;border-right:1px solid rgba(255,255,255,.02);"></div>`;
+      }).join('');
+      return `
+        <div style="font-size:11px;color:var(--text-dim);padding:4px 8px;border-right:1px solid var(--border);background:var(--surface-2);">${escapeHtml(m.workstream)}</div>
+        ${cells}
+      `;
+    }).join('');
+    tl.innerHTML = `
+      <div style="display:grid;grid-template-columns:120px repeat(${months}, 1fr);gap:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+        <div style="background:var(--surface-2);border-right:1px solid var(--border);"></div>
+        ${headerCells}
+        ${rows}
+      </div>
+    `;
+  }
+
+  function renderRoadmapTable(r) {
+    const tbl = $('#pb-roadmap-table');
+    if (!r.milestones.length) { tbl.innerHTML = ''; return; }
+    tbl.innerHTML = `
+      <table class="stakeholders" style="font-size:12px;">
+        <thead><tr><th>Workstream</th><th>Title</th><th style="width:60px;">Start (M)</th><th style="width:60px;">Months</th><th>Phase</th><th></th></tr></thead>
+        <tbody>${r.milestones.map((m, idx) => `
+          <tr data-milestone-idx="${idx}">
+            <td><select data-mile-field="workstream" data-idx="${idx}" style="font-size:11px;padding:3px 6px;">${ROADMAP_WORKSTREAMS.map(w => `<option ${w === m.workstream ? 'selected' : ''}>${escapeHtml(w)}</option>`).join('')}</select></td>
+            <td><input type="text" data-mile-field="title" data-idx="${idx}" value="${escapeAttr(m.title || '')}" style="font-size:12px;padding:3px 6px;width:100%;" /></td>
+            <td><input type="number" data-mile-field="month_offset" data-idx="${idx}" min="0" max="${r.months - 1}" value="${m.month_offset || 0}" style="font-size:12px;padding:3px 6px;width:55px;" /></td>
+            <td><input type="number" data-mile-field="duration_months" data-idx="${idx}" min="1" max="${r.months}" value="${m.duration_months || 1}" style="font-size:12px;padding:3px 6px;width:55px;" /></td>
+            <td><select data-mile-field="phase" data-idx="${idx}" style="font-size:11px;padding:3px 6px;">${ROADMAP_PHASES.map(p => `<option ${p === m.phase ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></td>
+            <td style="text-align:right;"><button class="btn ghost" type="button" data-mile-del="${idx}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button></td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+    tbl.querySelectorAll('[data-mile-field]').forEach(el => {
+      el.addEventListener('change', () => {
+        const idx = parseInt(el.dataset.idx, 10);
+        const field = el.dataset.mileField;
+        let value = el.value;
+        if (field === 'month_offset' || field === 'duration_months') value = parseInt(value, 10) || 0;
+        pbState.roadmap.milestones[idx][field] = value;
+        renderRoadmapTimeline(pbState.roadmap);
+      });
+    });
+    tbl.querySelectorAll('[data-mile-del]').forEach(b => {
+      b.addEventListener('click', () => {
+        const idx = parseInt(b.dataset.mileDel, 10);
+        pbState.roadmap.milestones.splice(idx, 1);
+        renderRoadmapTimeline(pbState.roadmap);
+        renderRoadmapTable(pbState.roadmap);
+      });
+    });
+  }
+
+  function renderExtendedEngagement(r) {
+    const list = $('#pb-extended-list');
+    if (!r.extended_engagement.length) {
+      list.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">No extended ideas yet. Click ✨ Suggest to let AI propose what year 2+ could look like.</div>';
+      return;
+    }
+    // Group by year
+    const byYear = {};
+    r.extended_engagement.forEach((item, idx) => {
+      (byYear[item.year] ||= []).push({ ...item, _idx: idx });
+    });
+    const years = Object.keys(byYear).map(Number).sort();
+    list.innerHTML = years.map(year => `
+      <div style="margin-bottom: 14px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">Year ${year}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+          ${byYear[year].map(item => `
+            <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative;">
+              <button class="btn ghost" type="button" data-ext-del="${item._idx}" style="position:absolute;top:6px;right:6px;padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              <input type="text" data-ext-field="title" data-idx="${item._idx}" value="${escapeAttr(item.title || '')}" style="font-size:13px;font-weight:600;width:calc(100% - 30px);padding:2px 4px;background:transparent;border:0;color:var(--text);margin-bottom:6px;" placeholder="Idea title" />
+              <textarea data-ext-field="description" data-idx="${item._idx}" rows="2" style="font-size:11px;width:100%;padding:4px 6px;background:var(--surface);" placeholder="Why this fits…">${escapeHtml(item.description || '')}</textarea>
+              <div class="muted" style="font-size:10px;margin-top:6px;display:flex;justify-content:space-between;">
+                <span>${item.package_key ? '📦 ' + escapeHtml(item.package_key) : 'Custom'}</span>
+                <span>${item.estimated_hours ? item.estimated_hours + 'h' : ''}${item.estimated_price_usd ? ' · ' + fmtUSD(item.estimated_price_usd) : ''}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-ext-field]').forEach(el => {
+      el.addEventListener('input', () => {
+        const idx = parseInt(el.dataset.idx, 10);
+        const field = el.dataset.extField;
+        pbState.roadmap.extended_engagement[idx][field] = el.value;
+      });
+    });
+    list.querySelectorAll('[data-ext-del]').forEach(b => {
+      b.addEventListener('click', () => {
+        const idx = parseInt(b.dataset.extDel, 10);
+        pbState.roadmap.extended_engagement.splice(idx, 1);
+        renderExtendedEngagement(pbState.roadmap);
+      });
+    });
+  }
+
+  function rmAddMilestone() {
+    if (!pbState.roadmap) return;
+    pbState.roadmap.milestones.push({
+      id: '', workstream: 'Cross-cutting', title: 'New milestone',
+      month_offset: 0, duration_months: 1, phase: 'Execute', description: '',
+    });
+    renderRoadmapTimeline(pbState.roadmap);
+    renderRoadmapTable(pbState.roadmap);
+  }
+
+  function rmAddExtended() {
+    if (!pbState.roadmap) return;
+    pbState.roadmap.extended_engagement.push({
+      id: '', year: 2, title: 'New idea', description: '',
+      package_key: null, estimated_hours: 0, estimated_price_usd: 0,
+    });
+    renderExtendedEngagement(pbState.roadmap);
+  }
+
+  async function rmSave() {
+    if (!pbState.roadmap || !pbState.currentLeadId) return;
+    pbState.roadmap.start_date = $('#pb-roadmap-start').value;
+    pbState.roadmap.months = parseInt($('#pb-roadmap-months').value, 10) || 12;
+    pbState.roadmap.end_date = $('#pb-roadmap-end').value;
+    try {
+      const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(pbState.currentLeadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pbState.roadmap),
+      });
+      pbState.roadmap = data.roadmap;
+      $('#pb-roadmap-end').value = pbState.roadmap.end_date || '';
+      $('#pb-roadmap-status').textContent = `Saved ${pbState.roadmap.milestones.length} milestone${pbState.roadmap.milestones.length === 1 ? '' : 's'} · ${pbState.roadmap.extended_engagement.length} year-2+ idea${pbState.roadmap.extended_engagement.length === 1 ? '' : 's'}`;
+      renderRoadmap();
+      toast('Roadmap saved', 'success');
+    } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function rmSeedFromPackage() {
+    const pkgKey = $('#pb-roadmap-pkg').value;
+    if (!pkgKey) { toast('Pick a package first', 'error'); return; }
+    if (pbState.roadmap?.milestones?.length &&
+        !window.confirm('Replace existing milestones with the package template?')) return;
+    try {
+      const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(pbState.currentLeadId)}/seed-from-package`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package_key: pkgKey,
+          start_date: $('#pb-roadmap-start').value || pbState.roadmap?.start_date || '' }),
+      });
+      pbState.roadmap = data.roadmap;
+      renderRoadmap();
+      toast(`Seeded ${pbState.roadmap.milestones.length} milestones`, 'success');
+    } catch (e) { toast(`Seed failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function rmAiRefine() {
+    if (!pbState.currentLeadId) { toast('Save a lead first', 'error'); return; }
+    if (!pbState.roadmap?.milestones?.length) {
+      // Create an empty roadmap server-side first
+      pbState.roadmap = pbState.roadmap || emptyRoadmap(pbState.currentLeadId);
+      await rmSave();
+    }
+    const btn = $('#pb-roadmap-refine');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Refining…';
+    try {
+      const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(pbState.currentLeadId)}/ai-refine`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      pbState.roadmap = data.roadmap;
+      $('#pb-roadmap-rationale').textContent = data.rationale || '';
+      renderRoadmap();
+      toast(`AI refined → ${pbState.roadmap.milestones.length} milestones`, 'success');
+    } catch (e) { toast(`Refine failed: ${e.body?.error || e.message}`, 'error');
+    } finally { btn.disabled = false; btn.innerHTML = '✨ Refine from notes'; }
+  }
+
+  async function rmAiSuggestExtended() {
+    if (!pbState.currentLeadId) { toast('Save a lead first', 'error'); return; }
+    const btn = $('#pb-extended-suggest');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Thinking…';
+    try {
+      const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(pbState.currentLeadId)}/ai-suggest-extended`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const items = data.items || [];
+      // Merge into the current roadmap's extended_engagement (replace AI-generated entries).
+      pbState.roadmap.extended_engagement = items.map(it => ({
+        id: '', year: it.year || 2, title: it.title || '', description: it.description || '',
+        package_key: it.package_key || null,
+        estimated_hours: it.estimated_hours || 0,
+        estimated_price_usd: it.estimated_price_usd || 0,
+      }));
+      renderExtendedEngagement(pbState.roadmap);
+      toast(`Suggested ${items.length} idea${items.length === 1 ? '' : 's'}`, 'success');
+    } catch (e) { toast(`Suggest failed: ${e.body?.error || e.message}`, 'error');
+    } finally { btn.disabled = false; btn.innerHTML = '✨ Suggest based on notes'; }
   }
 
   function applySelectedPackage() {
@@ -2756,6 +3099,23 @@
     $('#pb-reject').addEventListener('click', () => pbTransition('rejected'));
     $('#pb-reopen').addEventListener('click', () => pbTransition('draft'));
     $('#pb-draft-sow').addEventListener('click', pbDraftSow);
+    // Roadmap wiring
+    $('#pb-roadmap-save').addEventListener('click', rmSave);
+    $('#pb-roadmap-seed').addEventListener('click', rmSeedFromPackage);
+    $('#pb-roadmap-refine').addEventListener('click', rmAiRefine);
+    $('#pb-roadmap-add').addEventListener('click', rmAddMilestone);
+    $('#pb-extended-suggest').addEventListener('click', rmAiSuggestExtended);
+    $('#pb-extended-add').addEventListener('click', rmAddExtended);
+    // Auto-derive end_date when start or months changes
+    function _syncEnd() {
+      const s = $('#pb-roadmap-start').value;
+      const m = parseInt($('#pb-roadmap-months').value, 10) || 12;
+      if (!s) return;
+      const d = new Date(s); d.setMonth(d.getMonth() + m);
+      $('#pb-roadmap-end').value = d.toISOString().slice(0, 10);
+    }
+    $('#pb-roadmap-start').addEventListener('change', _syncEnd);
+    $('#pb-roadmap-months').addEventListener('change', _syncEnd);
     $('#btn-qualify').addEventListener('click', () => { state.overrides = {}; runQualify({}); });
     $('#btn-rescore').addEventListener('click', () => runQualify(state.overrides));
     $('#btn-clear').addEventListener('click', () => {

@@ -5,6 +5,78 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-05-17
+
+Project Roadmap + Extended Engagement. A roadmap lives between scope and
+SOW, anchored to real dates, refined by Claude based on the notes +
+qualification details we already collect.
+
+### Added
+- **`roadmap.py`** — `Milestone` and `ExtendedItem` data classes, plus
+  a JSON-per-lead store at `cache/roadmaps/<lead_id>.json`.
+  - Each milestone: workstream / title / month_offset / duration_months
+    / phase / description.
+  - Each extended item: year / title / description / package_key /
+    estimated_hours / estimated_price_usd.
+  - `seed_milestones_from_package(roadmap, package)` converts any of
+    the 35 packages into a milestone list with workstream and phase
+    auto-tagged from the role mix.
+- **AI roadmap helpers** in `ai_summary.py`:
+  - `suggest_roadmap(...)` — refines milestones using current scope,
+    MEDDPICC, and the 5 most recent call notes. Returns a rationale
+    sentence so the AE knows what shifted.
+  - `suggest_extended_engagement(...)` — proposes 3-5 follow-on
+    engagements anchored to the package catalogue, with rough hours
+    + price.
+- **Five new endpoints:**
+  - `GET    /api/roadmap/<lead_id>`
+  - `POST   /api/roadmap/<lead_id>` (upsert)
+  - `POST   /api/roadmap/<lead_id>/seed-from-package`
+  - `POST   /api/roadmap/<lead_id>/ai-refine`
+  - `POST   /api/roadmap/<lead_id>/ai-suggest-extended`
+- **Project Build: Roadmap card.**
+  - Start date / Months / End date (auto-derived). Edit either and
+    the others stay in sync.
+  - Seed milestones from any package (35 options).
+  - "✨ Refine from notes" runs Claude over the call history + scope
+    and rewrites the milestone list, with a rationale shown above.
+  - Gantt-lite visualisation: month-by-month grid with milestone bars
+    coloured per workstream (CRM Strategy / CRM Build / CRM Execute /
+    Data / Engineering / Cross-cutting).
+  - Editable milestone table below the timeline: change workstream,
+    title, start, duration, phase, or delete. Visualisation updates
+    live.
+- **Project Build: Extended Engagement section.**
+  - Year 2 / Year 3 / Beyond cards.
+  - "✨ Suggest based on notes" populates the cards from Claude's
+    proposal (grounded in the package catalogue + call history).
+  - Each card is editable in place — title, description, package
+    reference, estimated hours, price.
+- **SOW: two new sections** when a roadmap exists:
+  - "Roadmap" — table of phase / workstream / milestone / start / duration
+  - "Beyond Year 1 — Future Engagement" — grouped by year, with
+    estimated hours + price inline
+- **Lead Detail drawer: roadmap line** in the Project & Pricing
+  summary — "Roadmap: 2026-07 → 2027-06 · 7 milestones · 4 Year 2+ ideas"
+  with a click-through to Project Build.
+
+### Notes
+- Roadmap is optional. SOW renders without it. Drawer chip only shows
+  when at least one of `start_date` or `milestones` is present.
+- AI refinement reads the actual call notes (synthesised + raw) and
+  MEDDPICC entries, so the roadmap moves when discovery details
+  change. Re-running it overwrites the current milestones; AE then
+  refines manually.
+- Extended engagement uses package keys where possible so the
+  estimates stay grounded in real hours.
+
+### Tests
+- 231 total (+14). New: roadmap store CRUD, end_date auto-derivation,
+  workstreams-from-scope mapping, package seeding, milestone
+  normalisation, round-trip via dict, endpoint contract under
+  no-Anthropic-key, SOW snapshot + HTML render include the roadmap
+  sections.
+
 ## [0.8.3] — 2026-05-17
 
 Three fixes + one new feature on top of v0.8.2.

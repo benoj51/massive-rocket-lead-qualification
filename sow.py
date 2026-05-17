@@ -166,6 +166,14 @@ def build_snapshot(lead_id: str, *, months: int = 12,
         effort_multipliers=multipliers,
     ))
 
+    # Roadmap is optional — only render if the AE has built one
+    try:
+        import roadmap as roadmap_module
+        rm = roadmap_module.load(lead_id)
+        roadmap_block = roadmap_module.to_dict(rm) if rm else None
+    except Exception:
+        roadmap_block = None
+
     snapshot = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "lead_id": lead_id,
@@ -181,6 +189,7 @@ def build_snapshot(lead_id: str, *, months: int = 12,
             "investment": _investment_summary(quote),
             "assumptions": list(ASSUMPTIONS_BOILERPLATE),
             "out_of_scope": list(OUT_OF_SCOPE_BOILERPLATE),
+            "roadmap": roadmap_block,
         },
     }
     return snapshot
@@ -390,6 +399,57 @@ def render_html(snapshot: dict[str, Any], version: int) -> str:
             f"<td>${m['net_usd']:,.0f}</td></tr>"
         )
     parts.append("</tbody></table>")
+
+    # Roadmap (optional) — only render if the AE built one
+    roadmap_block = sections.get("roadmap")
+    if roadmap_block and roadmap_block.get("milestones"):
+        parts.append("<h2>Roadmap</h2>")
+        rm = roadmap_block
+        date_line = ""
+        if rm.get("start_date"):
+            date_line += f"Start: {escape(rm['start_date'])} · "
+        if rm.get("end_date"):
+            date_line += f"End: {escape(rm['end_date'])} · "
+        date_line += f"{rm.get('months', 12)} months"
+        parts.append(f"<p class='meta'>{date_line}</p>")
+        parts.append("<table><thead><tr><th>Phase</th><th>Workstream</th><th>Milestone</th><th>Start (M)</th><th>Duration</th></tr></thead><tbody>")
+        for m in rm.get("milestones", []):
+            parts.append(
+                f"<tr><td>{escape(m.get('phase', ''))}</td>"
+                f"<td>{escape(m.get('workstream', ''))}</td>"
+                f"<td><strong>{escape(m.get('title', ''))}</strong>"
+                + (f"<br><span class='meta'>{escape(m.get('description', ''))}</span>" if m.get('description') else '')
+                + f"</td>"
+                f"<td>M{(m.get('month_offset', 0) or 0) + 1}</td>"
+                f"<td>{m.get('duration_months', 1)} mo</td></tr>"
+            )
+        parts.append("</tbody></table>")
+
+    # Beyond Year 1 — only if extended_engagement items exist
+    if roadmap_block and roadmap_block.get("extended_engagement"):
+        parts.append("<h2>Beyond Year 1 — Future Engagement</h2>")
+        parts.append("<p>This engagement is the starting point. Over an extended "
+                     "relationship, Massive Rocket would also support:</p>")
+        by_year: dict[int, list[dict]] = {}
+        for item in roadmap_block["extended_engagement"]:
+            by_year.setdefault(int(item.get("year", 2)), []).append(item)
+        for year in sorted(by_year.keys()):
+            parts.append(f"<h3>Year {year}</h3><ul>")
+            for item in by_year[year]:
+                price = item.get("estimated_price_usd") or 0
+                hours = item.get("estimated_hours") or 0
+                price_str = ""
+                if price or hours:
+                    bits = []
+                    if hours: bits.append(f"~{int(hours):,}h")
+                    if price: bits.append(f"~${int(price):,}")
+                    price_str = f" <span class='meta'>({' · '.join(bits)})</span>"
+                parts.append(
+                    f"<li><strong>{escape(item.get('title', ''))}</strong>{price_str}"
+                    + (f"<br><span class='meta'>{escape(item.get('description', ''))}</span>" if item.get('description') else '')
+                    + "</li>"
+                )
+            parts.append("</ul>")
 
     # Assumptions + Out of Scope
     parts.append("<h2>Assumptions</h2><ul>")

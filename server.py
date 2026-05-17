@@ -43,6 +43,7 @@ import pricing
 import project_store
 import qualify_service
 import rate_cards
+import roadmap as roadmap_module
 import scope as scope_module
 import slack_digest
 import sow
@@ -673,6 +674,116 @@ def api_pricing_preview():
         return jsonify(quote)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+
+# --- Roadmap -------------------------------------------------------------
+
+@app.route("/api/roadmap/<lead_id>", methods=["GET"])
+def api_roadmap_get(lead_id: str):
+    r = roadmap_module.load(lead_id)
+    if r is None:
+        return jsonify({"roadmap": None})
+    return jsonify({"roadmap": roadmap_module.to_dict(r)})
+
+
+@app.route("/api/roadmap/<lead_id>", methods=["POST", "PUT"])
+def api_roadmap_save(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    body["lead_id"] = lead_id
+    r = roadmap_module.save(lead_id, body)
+    audit.log_event("roadmap_saved", actor=_actor(), lead_id=lead_id,
+                    milestones=len(r.milestones),
+                    extended=len(r.extended_engagement))
+    return jsonify({"roadmap": roadmap_module.to_dict(r)})
+
+
+@app.route("/api/roadmap/<lead_id>/seed-from-package", methods=["POST"])
+def api_roadmap_seed_from_package(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    pkg_key = (body.get("package_key") or "").strip()
+    pkg = packages.get_package(pkg_key) if pkg_key else None
+    if not pkg:
+        return jsonify({"error": f"Unknown package: {pkg_key}"}), 400
+    r = roadmap_module.load(lead_id) or roadmap_module.new_roadmap(
+        lead_id, months=pkg.get("duration_months") or 12,
+        start_date=body.get("start_date", ""),
+    )
+    roadmap_module.seed_milestones_from_package(r, pkg)
+    roadmap_module.save(lead_id, r)
+    audit.log_event("roadmap_seeded_from_package", actor=_actor(),
+                    lead_id=lead_id, package_key=pkg_key,
+                    milestones=len(r.milestones))
+    return jsonify({"roadmap": roadmap_module.to_dict(r)})
+
+
+@app.route("/api/roadmap/<lead_id>/ai-refine", methods=["POST"])
+def api_roadmap_ai_refine(lead_id: str):
+    if not ai_summary.is_configured():
+        return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
+    r = roadmap_module.load(lead_id)
+    if r is None:
+        return jsonify({"error": "No roadmap to refine — create one first"}), 404
+    # Pull context: current milestones, scope, calls.
+    project = project_store.load(lead_id)
+    scope_dict = None
+    project_streams: list[str] = []
+    if project is not None:
+        scope_dict = {
+            "summary": scope_module.project_summary(project),
+            "streams": [{"project_type": s.project_type,
+                          "criteria": [
+                              {"key": c.key, "value": c.value, "status": c.status}
+                              for c in s.criteria
+                          ]}
+                         for s in project.streams],
+        }
+        project_streams = [s.project_type for s in project.streams]
+    calls = calls_store.list_calls(lead_id)
+    result = ai_summary.suggest_roadmap(
+        total_months=r.months,
+        current_milestones=[roadmap_module.to_dict(r)["milestones"]][0] if r.milestones else [],
+        scope=scope_dict, calls=calls, project_streams=project_streams,
+    )
+    if result is None:
+        return jsonify({"error": "AI suggestion failed"}), 502
+    # Apply the suggested milestones over the current roadmap. We replace
+    # the milestone list wholesale — the AE can hit Undo or refine again.
+    new_milestones = []
+    for m in (result.get("milestones") or [])[:12]:
+        new_milestones.append(roadmap_module.Milestone(
+            id="",
+            workstream=m.get("workstream") or "Cross-cutting",
+            title=m.get("title") or "",
+            month_offset=m.get("month_offset") or 0,
+            duration_months=m.get("duration_months") or 1,
+            phase=m.get("phase") or "Execute",
+            description=m.get("description") or "",
+        ))
+    r.milestones = new_milestones
+    roadmap_module.save(lead_id, r)
+    audit.log_event("roadmap_ai_refined", actor=_actor(), lead_id=lead_id,
+                    milestones=len(new_milestones))
+    return jsonify({"roadmap": roadmap_module.to_dict(r),
+                    "rationale": result.get("rationale") or ""})
+
+
+@app.route("/api/roadmap/<lead_id>/ai-suggest-extended", methods=["POST"])
+def api_roadmap_ai_suggest_extended(lead_id: str):
+    if not ai_summary.is_configured():
+        return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
+    project = project_store.load(lead_id)
+    current_streams = [s.project_type for s in project.streams] if project else []
+    current_packages = []  # tracked via roadmap state — empty for now
+    calls = calls_store.list_calls(lead_id)
+    result = ai_summary.suggest_extended_engagement(
+        current_scope_streams=current_streams,
+        current_package_keys=current_packages,
+        package_catalogue=packages.list_packages(),
+        calls=calls,
+    )
+    if result is None:
+        return jsonify({"error": "AI suggestion failed"}), 502
+    return jsonify({"items": result.get("items") or []})
 
 
 # --- SOW (Statement of Work) ---------------------------------------------
