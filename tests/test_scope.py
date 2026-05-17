@@ -206,6 +206,33 @@ class LibraryTests(unittest.TestCase):
                 self.assertIn("role_driver", c)
                 self.assertIn("scale_factor", c)
 
+    def test_engineering_includes_sdk_implementation_block(self):
+        """v0.10.0o: SDK implementation criteria — per-platform counts +
+        which SDK vendor + implementation complexity."""
+        import scope
+        keys = {c["key"] for c in scope.DEFAULT_CRITERIA_LIBRARY["engineering"]}
+        sdk_keys = {
+            "sdk_platform",
+            "sdk_websites_count",
+            "sdk_ios_apps_count",
+            "sdk_android_apps_count",
+            "sdk_hybrid_apps_count",
+            "sdk_other_surfaces",
+            "sdk_complexity",
+        }
+        missing = sdk_keys - keys
+        self.assertFalse(missing, f"engineering missing SDK criteria: {missing}")
+
+    def test_sdk_count_criteria_drive_software_engineer_role(self):
+        import scope
+        per_platform_keys = {"sdk_websites_count", "sdk_ios_apps_count",
+                             "sdk_android_apps_count", "sdk_hybrid_apps_count"}
+        for c in scope.DEFAULT_CRITERIA_LIBRARY["engineering"]:
+            if c["key"] in per_platform_keys:
+                self.assertEqual(c["role_driver"], "Software Engineer",
+                                 f"{c['key']} should drive Software Engineer effort")
+                self.assertGreater(c["scale_factor"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

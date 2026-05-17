@@ -5,6 +5,60 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0o] — 2026-05-17 — SDK implementation criteria under Engineering
+
+Adds an SDK implementation block to the Engineering project type so
+the AE can capture, per opportunity, exactly how many surfaces need
+the SDK and which vendor we're implementing. Drives the pricing
+model — each surface is real dev + QA work.
+
+### Added — 7 new criteria under `engineering`
+- **`sdk_platform`** — which SDK vendor (Braze, Iterable, mParticle,
+  Segment, Firebase, AppsFlyer, etc.). Free text. No role driver
+  (qualitative, doesn't scale a role on its own).
+- **`sdk_websites_count`** — number of websites. Drives Software
+  Engineer effort at scale_factor 1.0.
+- **`sdk_ios_apps_count`** — iOS native apps. White-label brand
+  variants count separately. SE × 1.2.
+- **`sdk_android_apps_count`** — Android native apps. Same rule. SE × 1.2.
+- **`sdk_hybrid_apps_count`** — React Native / Flutter / Cordova /
+  Ionic etc. Bridge work less than fully native. SE × 0.9.
+- **`sdk_other_surfaces`** — Connected TV, kiosks, in-store, voice,
+  watch apps. Free text. Drives Architect effort at × 0.8 for the
+  unusual-platform tax.
+- **`sdk_complexity`** (1-5) — greenfield (1) vs identity merge /
+  custom mapping (3) vs legacy GTM/Tealium → SDK migration (5).
+  Drives Architect at × 0.6.
+
+### Why discrete per-platform counts
+Asked rather than computed because per-surface effort isn't linear:
+two iOS apps with shared SDK config takes ~1.4× one; same for
+Android. White-label brand variants are the common multiplier
+(QSR / retail with 4-8 brand apps each get their own implementation).
+The AE captures the count once during discovery; pricing scales
+predictably.
+
+### Where it shows up
+- **Project Build → Engineering stream**: when an AE adds Engineering
+  to a project's scope, the 7 SDK fields appear alongside the
+  existing integrations / APIs / infra criteria.
+- **Roadmap**: SDK rows count toward Software Engineer effort in the
+  pricing preview, so the team budget reflects realistic build cost.
+- **Criteria admin UI**: existing edit / delete / reset paths work
+  on these the same as any other criterion.
+
+### Tests
+- 304 total (+2). Pin the SDK keys exist on engineering;
+  per-platform counts must drive Software Engineer with positive
+  scale_factor.
+
+### Action note
+Railway's `cache/` is ephemeral. If you've never customised
+engineering criteria via the admin UI, the new SDK fields appear
+on next redeploy automatically. If you HAVE customised, hit
+**Reset to defaults** for the Engineering stream in admin to pick
+up the new fields (you'll lose any custom edits).
+
 ## [0.10.0n] — 2026-05-17 — Save · 1 stale badge fix (root cause found)
 
 The "Save button bug" was a stale badge, not a broken handler.
