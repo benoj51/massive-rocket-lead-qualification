@@ -860,7 +860,8 @@
       </div>
     </div>
     <div class="btn-row" style="flex-shrink:0;">
-      <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
+      <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;"
+              onclick="alert('NATIVE onclick fired — drawerState.id=' + (window.drawerState ? window.drawerState.id : 'undefined'));">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
       </button>
       <button id="ld-close" class="btn ghost" type="button" style="padding:7px 10px;font-size:11px;">✕</button>
@@ -1921,6 +1922,8 @@
 
   // ---- Lead Detail Drawer ---------------------------------------------
   const drawerState = { id: null, original: null, current: null };
+  // v0.10.0L diagnostic: expose to window so the native onclick on #ld-save can read it.
+  window.drawerState = drawerState;
 
   function openLeadDrawer(pageId) {
     if (!pageId) return;
