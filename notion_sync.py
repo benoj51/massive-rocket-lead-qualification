@@ -654,6 +654,27 @@ class NotionSync:
             if key in edits:
                 props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}
 
+        # v0.10.0p: numeric ICP score writes — enables re-scoring on lead
+        # update when scoring-relevant fields change.
+        if "icp_normalised" in edits:
+            val = edits["icp_normalised"]
+            if val is None or val == "":
+                props["ICP Normalised"] = {"number": None}
+            else:
+                props["ICP Normalised"] = {"number": float(val)}
+        if "icp_total" in edits:
+            val = edits["icp_total"]
+            if val is None or val == "":
+                props["ICP Score"] = {"number": None}
+            else:
+                props["ICP Score"] = {"number": float(val)}
+        # Opportunity Type from re-scoring (uses the same select mapping
+        # as the qualify flow).
+        if "opportunity_type_key" in edits:
+            okey = edits["opportunity_type_key"]
+            if okey and okey in _OPPORTUNITY_MAP:
+                props["Opportunity Type"] = {"select": {"name": _OPPORTUNITY_MAP[okey]}}
+
         # Source of opportunity — single select on Notion "Partner Source"
         if "opportunity_source" in edits:
             val = edits["opportunity_source"]

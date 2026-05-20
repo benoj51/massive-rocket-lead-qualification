@@ -348,8 +348,39 @@ def api_calls_add(lead_id: str):
     audit.log_event("call_added", actor=_actor(), lead_id=lead_id,
                     call_id=record["id"], type=record["type"],
                     extracted=bool(extracted))
-    return jsonify({"call": record,
-                    "rolling": calls_store.aggregate_extractions(lead_id)})
+
+    # v0.10.0p: auto-refresh the lead summary so the AE doesn't have to
+    # re-read every previous note. Inline (synchronous) — adds ~2s latency
+    # to the save but means the summary tile reflects this call by the
+    # time the UI re-renders. Safe to fail: any error here is logged but
+    # doesn't break the call save.
+    fresh_summary = None
+    if ai_summary.is_configured() and extracted is not None:
+        try:
+            ctx = _gather_lead_context(lead_id)
+            synth = ai_summary.synthesise_lead(ctx)
+            if synth:
+                fresh_summary = lead_summary_store.save(lead_id, synth)
+                # Mirror to Notion (best-effort, same pattern as the
+                # explicit refresh endpoint).
+                try:
+                    formatted = _format_summary_for_notion(fresh_summary)
+                    NotionSync().update_page(lead_id, {"lead_summary": formatted})
+                except Exception as e:
+                    log.warning("Notion summary mirror failed in auto-refresh: %s", e)
+                audit.log_event("lead_summary_auto_refreshed",
+                                actor=_actor(), lead_id=lead_id,
+                                trigger="call_added", call_id=record["id"])
+        except Exception as e:
+            log.warning("Auto-summary refresh failed for %s: %s", lead_id, e)
+
+    return jsonify({
+        "call": record,
+        "rolling": calls_store.aggregate_extractions(lead_id),
+        # New: the freshly-synthesised summary if AI re-ran successfully.
+        # UI renders this without an extra GET to /summary.
+        "summary": fresh_summary,
+    })
 
 
 @app.route("/api/calls/<lead_id>/<call_id>", methods=["PATCH"])
@@ -421,9 +452,25 @@ def api_lead_get(page_id: str):
     return jsonify({"lead": lead, "group": group})
 
 
+# v0.10.0p: scoring-relevant fields. When any of these change via the
+# drawer save, we re-run calculate_icp_score and PATCH the new score
+# back to Notion so the ICP pill in the UI stays honest.
+_SCORING_FIELDS = {
+    "revenue", "employees", "vertical", "tech_stack",
+    "complexity", "region", "deal_size", "stack_confidence",
+}
+
+
 @app.route("/api/lead/<page_id>", methods=["PATCH"])
 def api_lead_update(page_id: str):
-    """Update editable fields on a lead. Body keys match the get_page shape."""
+    """Update editable fields on a lead. Body keys match the get_page shape.
+
+    If any scoring-relevant field changed (revenue, employees, vertical,
+    tech_stack, complexity, region, deal_size, stack_confidence), re-run
+    the ICP score after the Notion update lands and write the new
+    icp_normalised back. UI gets the new score in the response so the
+    drawer pill updates without a separate fetch.
+    """
     body = request.get_json(silent=True) or {}
     if not body:
         return jsonify({"error": "no edits supplied"}), 400
@@ -432,6 +479,51 @@ def api_lead_update(page_id: str):
         result = sync.update_page(page_id, body)
         audit.log_event("lead_updated", actor=_actor(), page_id=page_id,
                         fields=sorted([k for k in body.keys() if k != "id"]))
+
+        # Re-score if scoring-relevant fields changed.
+        scoring_changed = set(body.keys()) & _SCORING_FIELDS
+        if scoring_changed:
+            try:
+                from scoring import calculate_icp_score
+                lead = result.get("lead") or {}
+                company_data = {
+                    "revenue":          lead.get("revenue"),
+                    "employees":        lead.get("employees"),
+                    "vertical":         lead.get("vertical"),
+                    "tech_stack":       lead.get("tech_stack"),
+                    "complexity":       lead.get("complexity"),
+                    "region":           lead.get("region"),
+                    "deal_size":        lead.get("deal_size"),
+                    "stack_confidence": (lead.get("stack_confidence") or "confirmed").lower(),
+                }
+                new_score = calculate_icp_score(company_data)
+                # Write new score + opportunity type back. Use a second
+                # PATCH so the first one (user-visible fields) commits
+                # first; if scoring write fails, the user's data is safe.
+                sync.update_page(page_id, {
+                    "icp_normalised": new_score.get("normalized_score"),
+                    "icp_total": new_score.get("total_weighted"),
+                    "opportunity_type_key": new_score.get("opportunity_type"),
+                })
+                result["rescored"] = True
+                result["new_score"] = {
+                    "normalized_score": new_score.get("normalized_score"),
+                    "status":           new_score.get("status"),
+                    "status_label":     new_score.get("status_label"),
+                    "opportunity_type": new_score.get("opportunity_type"),
+                    "opportunity_label": new_score.get("opportunity_label"),
+                    "changed_fields":   sorted(scoring_changed),
+                }
+                # Bump the icp_normalised on the lead dict in the response
+                # so the UI doesn't have to re-fetch.
+                if isinstance(result.get("lead"), dict):
+                    result["lead"]["icp_normalised"] = new_score.get("normalized_score")
+                audit.log_event("lead_rescored", actor=_actor(), page_id=page_id,
+                                new_score=new_score.get("normalized_score"),
+                                changed=sorted(scoring_changed))
+            except Exception as e:
+                log.warning("Re-score after lead update failed: %s", e)
+                result["rescore_error"] = str(e)
         return jsonify(result)
     except (NotionSyncError, ValueError) as e:
         log.warning("Lead update failed: %s", e)

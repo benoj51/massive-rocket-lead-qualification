@@ -30,9 +30,23 @@
 
   * { box-sizing: border-box; }
   html, body { background: var(--bg); color: var(--text); margin: 0; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
-  body { min-height: 100vh; line-height: 1.45; }
+  body {
+    min-height: 100vh; line-height: 1.45;
+    /* v0.10.0p polish: subtle radial gradient at the top, with a fine grid
+       texture overlay. Adds depth without distraction; fades to flat by
+       ~600px so most of the scroll area stays calm. */
+    background-image:
+      radial-gradient(1200px 600px at 50% -200px, rgba(255,77,42,.08) 0%, transparent 60%),
+      radial-gradient(800px 400px at 100% 0%, rgba(96,165,250,.04) 0%, transparent 50%),
+      linear-gradient(180deg, #0e0e16 0%, var(--bg) 600px);
+    background-attachment: fixed, fixed, scroll;
+  }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  /* v0.10.0p: typography refinement. Tighter line-height + better numeric
+     rendering for score/money figures. */
+  h1, h2, h3, h4 { font-feature-settings: "ss01", "cv11"; letter-spacing: -0.01em; }
+  .num, .icp-pill, .score-num { font-variant-numeric: tabular-nums; }
 
   header.top {
     position: sticky; top: 0; z-index: 30;
@@ -71,7 +85,13 @@
     padding: var(--pad);
     margin-bottom: 18px;
     box-shadow: var(--shadow);
+    /* v0.10.0p polish: subtle top-edge highlight so cards feel slightly lit.
+       Pseudo-element gradient on the inside top border. */
+    position: relative;
+    background-image: linear-gradient(180deg, rgba(255,255,255,.025) 0%, transparent 4%);
+    transition: border-color .15s ease-out;
   }
+  .card:hover { border-color: var(--border-strong); }
   .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
   .card h3 { margin: 18px 0 10px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
   .row { display: grid; gap: 14px; }
@@ -89,7 +109,11 @@
     padding: 10px 12px; font-size: 14px; font-family: var(--sans);
     transition: border-color .15s, background .15s;
   }
-  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); background: #1f1f2b; }
+  input:focus, textarea:focus, select:focus {
+    outline: none; border-color: var(--accent); background: #1f1f2b;
+    /* v0.10.0p: soft focus ring instead of harsh border-only change. */
+    box-shadow: 0 0 0 3px rgba(255,77,42,.12);
+  }
   textarea { resize: vertical; min-height: 60px; }
 
   button.btn {
@@ -98,8 +122,9 @@
     padding: 10px 18px; border-radius: 8px; font-weight: 600;
     cursor: pointer; font-size: 14px; transition: filter .15s, transform .05s;
   }
-  button.btn:hover { filter: brightness(1.08); }
-  button.btn:active { transform: translateY(1px); }
+  button.btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255,77,42,.25); }
+  button.btn:active { transform: translateY(0); }
+  button.btn.ghost:hover { box-shadow: none; }
   button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; }
   button.btn.ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   button.btn.ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
@@ -109,9 +134,14 @@
   /* Discovered field tiles ------------------------------------- */
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   .tile {
-    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-2);
+    background-image: linear-gradient(180deg, rgba(255,255,255,.018) 0%, transparent 30%);
+    border: 1px solid var(--border); border-radius: 10px;
     padding: 12px 14px; position: relative;
+    transition: border-color .12s ease-out, transform .08s ease-out;
   }
+  .tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+  .tile.manual { border-color: rgba(255,77,42,.4); background-color: rgba(255,77,42,.04); }
   .tile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
   .tile .val { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--text); }
   .tile input { background: transparent; border: 0; padding: 0; margin-top: 4px; font-size: 14px; color: var(--text); font-weight: 500; }
@@ -137,10 +167,28 @@
   @media (max-width: 720px) { .score-grid { grid-template-columns: 1fr; } }
   .score-big {
     text-align: center; background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 12px; padding: 24px 16px;
+    border-radius: 14px; padding: 28px 16px 22px;
+    /* v0.10.0p: subtle radial glow centred on the number. Colour shifts
+       per status via .num.qualify_in / .borderline / .qualify_out classes. */
+    position: relative; overflow: hidden;
   }
-  .score-big .num { font-size: 64px; font-weight: 700; line-height: 1; font-family: var(--mono); }
-  .score-big .num .out { font-size: 22px; color: var(--text-muted); }
+  .score-big::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at 50% 30%, rgba(255,77,42,.08) 0%, transparent 60%);
+  }
+  .score-big .num {
+    font-size: 72px; font-weight: 800; line-height: 1;
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+    background: linear-gradient(180deg, var(--text) 0%, var(--text-dim) 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+  }
+  .score-big .num.qualify_in  { background: linear-gradient(180deg, #6ee7a3 0%, var(--green) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .score-big .num.borderline  { background: linear-gradient(180deg, #fde68a 0%, var(--yellow) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .score-big .num.qualify_out { background: linear-gradient(180deg, #fca5a5 0%, var(--red) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .score-big .num .out { font-size: 22px; color: var(--text-muted); -webkit-text-fill-color: var(--text-muted); }
   .score-big .badge { display: inline-block; margin-top: 12px; padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
   .badge.qualify_in { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
   .badge.borderline { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
@@ -330,7 +378,10 @@
   .drawer header {
     padding: 14px 20px; border-bottom: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
-    background: var(--surface);
+    /* v0.10.0p: glass effect — semi-transparent + backdrop blur. */
+    background: rgba(19,19,26,.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
   .drawer header .title { font-size: 17px; font-weight: 600; line-height: 1.2; }
   .drawer header .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
@@ -353,8 +404,10 @@
   }
   .drawer header #ld-save.dirty {
     background: var(--accent); border-color: var(--accent); color: white;
+    /* v0.10.0p: soft glow when there are pending changes — draws the eye. */
+    box-shadow: 0 0 0 3px rgba(255,77,42,.15), 0 4px 14px rgba(255,77,42,.35);
   }
-  .drawer header #ld-save.dirty:hover { filter: brightness(1.1); }
+  .drawer header #ld-save.dirty:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px rgba(255,77,42,.2), 0 6px 18px rgba(255,77,42,.45); }
   .drawer header #ld-save .dirty-count {
     display: none; margin-left: 6px; font-size: 10px;
     background: rgba(255,255,255,.25); padding: 1px 6px; border-radius: 8px;
@@ -2419,7 +2472,15 @@
       } else {
         $('#ld-call-status').textContent = 'Saved — Claude returned nothing extractable from this content.';
       }
-      toast('Call saved', 'success');
+      // v0.10.0p: server auto-refreshes the lead summary on call add.
+      // Render it immediately so the AE sees the new state-of-play without
+      // a manual ✨ Refresh.
+      if (data.summary) {
+        renderAiLeadSummary(data.summary, _callsCache[leadId] || []);
+        toast('Note saved · summary updated', 'success');
+      } else {
+        toast('Call saved', 'success');
+      }
       await loadLeadCalls(leadId);
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
@@ -2781,6 +2842,19 @@
         drawerState.original = data.lead;
         drawerState.current = { ...data.lead };
         summary.push(`${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`);
+        // v0.10.0p: server re-scores when scoring-relevant fields change.
+        // Reflect the new ICP in the drawer header pill + add a toast.
+        if (data.rescored && data.new_score) {
+          const ns = data.new_score;
+          const score = ns.normalized_score;
+          const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+          const icp = $('#ld-icp');
+          if (icp) {
+            icp.className = `icp-pill ${cls}`;
+            icp.textContent = score != null ? `${score}/10` : '—';
+          }
+          summary.push(`re-scored → ${score}/10`);
+        }
       }
       // 2) Pending note → save as a call
       if (pendingNote) {
@@ -2790,7 +2864,7 @@
           content: pendingNote,
           company_name: drawerState.original?.company || '',
         };
-        await jsonFetch(`/api/calls/${encodeURIComponent(drawerState.id)}`, {
+        const callRes = await jsonFetch(`/api/calls/${encodeURIComponent(drawerState.id)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -2798,7 +2872,13 @@
         $('#ld-new-call-content').value = '';
         if ($('#ld-new-call-title')) $('#ld-new-call-title').value = '';
         await loadLeadCalls(drawerState.id);
-        summary.push('note');
+        // v0.10.0p: server auto-refreshes the summary — render new state-of-play.
+        if (callRes?.summary) {
+          renderAiLeadSummary(callRes.summary, _callsCache[drawerState.id] || []);
+          summary.push('note + summary');
+        } else {
+          summary.push('note');
+        }
       }
       const msg = `Saved ${summary.join(' + ')}`;
       $('#ld-status').textContent = msg;

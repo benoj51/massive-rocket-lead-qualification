@@ -5,6 +5,65 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0p] — 2026-05-17 — Re-score on lead edit + auto-summary on note save + visual polish
+
+Three asks from Ben in one release.
+
+### Fixed: editing scoring fields doesn't re-score the lead
+Editing Tech Stack (or revenue, employees, vertical, complexity,
+region, deal_size, stack_confidence) in the drawer was landing the
+change in Notion but leaving the ICP score stale. Now the PATCH
+endpoint re-runs `calculate_icp_score` whenever any scoring-relevant
+field changes, writes the new score back to Notion, and returns it in
+the response. The drawer header pill updates instantly.
+
+- `notion_sync.update_page` now accepts `icp_normalised`, `icp_total`,
+  `opportunity_type_key` so the rescoring write can land cleanly.
+- New `_SCORING_FIELDS` constant in server.py defines the trigger
+  set; only changes inside that set kick off a rescore.
+- Audit log captures `lead_rescored` events with new score + changed
+  fields.
+
+### Added: auto-summary refresh on note save
+Previously the AE had to click ✨ Refresh to merge a new call's
+content into the Lead Summary. Now `api_calls_add` re-runs
+`synthesise_lead` inline after each note save and writes the updated
+summary back. ~2 seconds of added latency, much better UX.
+
+- Summary mirrors to Notion the same way the explicit refresh does.
+- Returned on the call POST response as `summary`, so the UI renders
+  the new state-of-play immediately without an extra GET.
+- Both addCall (inline button) and saveLead's pending-note path
+  consume the fresh summary.
+
+### Visual polish (CSS only)
+Lighter touch — no HTML restructuring, no breaking changes.
+
+- **Background gradient**: subtle radial accent glow at the top of
+  the page + faint blue counterpoint top-right + linear fade to flat
+  bg by ~600px. Adds depth without distraction.
+- **Cards**: subtle top-edge highlight + border-color hover.
+- **Tiles**: subtle gradient overlay + lift-on-hover + accent-tinted
+  background when manually overridden.
+- **Score number**: bumped 64px → 72px, weight 700 → 800, gradient
+  text fill that shifts colour with the qualify status (green for
+  qualified, yellow for borderline, red for out). Tabular numerics
+  so the digits don't jiggle on update.
+- **Input focus**: soft 3px accent ring instead of just a border
+  colour change.
+- **Buttons**: lift-on-hover + accent-tinted shadow for primary; no
+  shadow for ghost variant.
+- **Drawer header**: backdrop-blur glass effect.
+- **Dirty Save button**: stronger accent glow (3px ring + 14px
+  shadow) so the call to action is unmissable.
+- **Typography**: tighter letter-spacing on headings + tabular
+  numerics on score/pill displays.
+
+### Tests
+- 304 total. No new tests — UI/CSS changes + server-side logic
+  paths covered by existing endpoint tests with no behavioural
+  regression.
+
 ## [0.10.0o] — 2026-05-17 — SDK implementation criteria under Engineering
 
 Adds an SDK implementation block to the Engineering project type so
