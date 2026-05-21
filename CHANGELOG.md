@@ -5,6 +5,65 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0j] — 2026-05-21 — Auto-seed Command Centre on boot
+
+Ben reported Braze + Hightouch weren't visible on the deployed app
+after v1.0.0h shipped. Root cause: the seed file *exists* in the
+codebase and the tests run it against temp dirs, but it had never
+been executed against the production instance's `cache/` directory.
+
+### Boot-time auto-seed (idempotent)
+
+`_boot_auto_seed_command_centre` runs at app startup:
+- Checks if the Braze partner record exists in `partners_store`
+- If absent → runs `seed_command_centre_partners.seed()` (181 contacts
+  across Braze + Hightouch)
+- If present → skips, on the assumption the seed has already run AND
+  any user-deletions since should stay deleted (we don't want
+  re-deploys magically recreating contacts the user has removed)
+
+Captured into `_COMMAND_CENTRE_SEED_STATUS` so `/api/diagnostics/health`
+shows exactly what happened on the most recent boot.
+
+### Manual re-seed endpoint
+
+`POST /api/admin/seed/command-centre` — for the rare case where the
+user wants to force a re-seed (e.g. after a recovery scenario, or to
+add new contacts that were appended to the seed file). Idempotent via
+stable IDs so it never duplicates.
+
+Returns:
+```json
+{
+  "ok": true,
+  "partners": ["Braze", "Hightouch"],
+  "contacts_created": 181,
+  "contacts_skipped": []
+}
+```
+
+### Test environment
+
+Tests opt out of the auto-seed via the new `SKIP_COMMAND_CENTRE_SEED`
+env var (set in the test runner) so they don't accidentally hit the
+real `cache/` directory.
+
+### What Ben sees on next deploy
+
+Once Railway redeploys with v1.0.0j:
+1. Boot self-heal ensures the Notion "State Backup" property exists
+2. Boot auto-seed creates Braze + Hightouch + 181 contacts in the now-persistent cache
+3. `/api/diagnostics/health` reports `command_centre_seed.ran: true`
+4. Open the **Partners** view in the app — Braze + Hightouch are there
+   with the full hierarchy + cadence + email-inferred tags
+
+If the boot seed somehow doesn't run (env var, edge case), Ben can
+trigger it manually:
+```bash
+curl -X POST -H "Authorization: Bearer $APP_AUTH_TOKEN" \
+  https://web-production-b7cb5.up.railway.app/api/admin/seed/command-centre
+```
+
 ## [1.0.0i] — 2026-05-21 — Bulletproof the backup mirror + cache-wipe banner
 
 Ben reported notes are still missing after v1.0.0g. Triage showed:

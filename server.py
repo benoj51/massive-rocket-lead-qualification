@@ -2439,6 +2439,7 @@ def api_diagnostics_health():
                 "this permanent. See RAILWAY_VOLUME_MOUNT.md."
             ),
         },
+        "command_centre_seed": _COMMAND_CENTRE_SEED_STATUS,
     })
 
 
@@ -2498,11 +2499,92 @@ def _boot_self_heal_backup_property():
         log.warning("Boot self-heal threw: %s", e)
 
 
+# v1.0.0j: auto-seed the Command Centre partners on first boot. Only
+# runs if the Braze partner doesn't already exist (so re-deploys are
+# no-ops, and user-deleted contacts don't get magically recreated).
+# Captures the seed status into a module-level so /api/diagnostics
+# and the manual /api/admin/seed endpoint can both report on it.
+_COMMAND_CENTRE_SEED_STATUS: dict = {"attempted": False, "ran": False,
+                                       "skipped_reason": None,
+                                       "summary": None, "error": None}
+
+
+def _boot_auto_seed_command_centre():
+    """Idempotent first-boot seed of Braze + Hightouch partner records.
+    Runs only when the Braze partner is absent — so re-deploys skip,
+    and any user-deleted contacts STAY deleted across boots.
+    """
+    global _COMMAND_CENTRE_SEED_STATUS
+    _COMMAND_CENTRE_SEED_STATUS["attempted"] = True
+    try:
+        import partners_store
+        if partners_store.get_partner("braze") is not None:
+            _COMMAND_CENTRE_SEED_STATUS["skipped_reason"] = (
+                "Braze partner already exists — seed considered already-run. "
+                "Hit POST /api/admin/seed/command-centre to force a re-run."
+            )
+            log.info("Skipping Command Centre auto-seed (Braze partner exists).")
+            return
+        import seed_command_centre_partners
+        summary = seed_command_centre_partners.seed()
+        _COMMAND_CENTRE_SEED_STATUS["ran"] = True
+        _COMMAND_CENTRE_SEED_STATUS["summary"] = {
+            "partners": len(summary["partners_seeded"]),
+            "contacts": len(summary["contacts_seeded"]),
+            "skipped": len(summary["contacts_skipped"]),
+        }
+        log.info("Auto-seeded Command Centre: %d partners + %d contacts",
+                  len(summary["partners_seeded"]),
+                  len(summary["contacts_seeded"]))
+    except Exception as e:
+        _COMMAND_CENTRE_SEED_STATUS["error"] = str(e)
+        log.warning("Command Centre auto-seed failed: %s", e)
+
+
+@app.route("/api/admin/seed/command-centre", methods=["POST"])
+def api_admin_seed_command_centre():
+    """Force re-run the Command Centre seed. Idempotent — upserts by
+    stable id, won't duplicate rows. Returns the full summary so the
+    user can verify exactly what landed."""
+    try:
+        import seed_command_centre_partners
+        summary = seed_command_centre_partners.seed()
+        global _COMMAND_CENTRE_SEED_STATUS
+        _COMMAND_CENTRE_SEED_STATUS = {
+            "attempted": True,
+            "ran": True,
+            "skipped_reason": None,
+            "summary": {
+                "partners": len(summary["partners_seeded"]),
+                "contacts": len(summary["contacts_seeded"]),
+                "skipped": len(summary["contacts_skipped"]),
+            },
+            "error": None,
+        }
+        audit.log_event("command_centre_reseeded", actor=_actor(),
+                        partners=len(summary["partners_seeded"]),
+                        contacts=len(summary["contacts_seeded"]))
+        return jsonify({
+            "ok": True,
+            "partners": [p["name"] for p in summary["partners_seeded"]],
+            "contacts_created": len(summary["contacts_seeded"]),
+            "contacts_skipped": summary["contacts_skipped"],
+        })
+    except Exception as e:
+        log.exception("Manual Command Centre seed failed")
+        return jsonify({"error": str(e)}), 500
+
+
 # Run the self-heal at import time so it executes whether we're
 # launched via `python server.py` or via gunicorn (Railway). Guarded so
 # tests + the CLI don't trigger Notion calls when creds are absent.
 if os.environ.get("NOTION_API_KEY") and not os.environ.get("SKIP_NOTION_BOOT"):
     _boot_self_heal_backup_property()
+
+# v1.0.0j: auto-seed on boot (cheap — local file writes only, no Notion
+# calls). Gated by SKIP_COMMAND_CENTRE_SEED so tests can opt out.
+if not os.environ.get("SKIP_COMMAND_CENTRE_SEED"):
+    _boot_auto_seed_command_centre()
 
 
 if __name__ == "__main__":
