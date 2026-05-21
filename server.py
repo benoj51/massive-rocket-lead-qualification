@@ -677,6 +677,43 @@ def api_calls_add(lead_id: str):
         except Exception as e:
             log.warning("Auto-summary refresh failed for %s: %s", lead_id, e)
 
+    # v1.0.0f (Tier 3c): contact suggestions. Dedupe AI-extracted names
+    # against existing lead contacts so the UI only offers genuinely
+    # new ones. Match is case-insensitive on name OR email.
+    contact_suggestions: list[dict] = []
+    if extracted and isinstance(extracted.get("contacts_mentioned"), list):
+        try:
+            existing = contacts_store.list_contacts(lead_id)
+            existing_names = {(c.get("name") or "").strip().lower()
+                              for c in existing if c.get("name")}
+            existing_emails = {(c.get("email") or "").strip().lower()
+                               for c in existing if c.get("email")}
+            for m in extracted["contacts_mentioned"]:
+                if not isinstance(m, dict):
+                    continue
+                name = (m.get("name") or "").strip()
+                if not name:
+                    continue
+                if name.lower() in existing_names:
+                    continue
+                email = (m.get("email") or "").strip()
+                if email and email.lower() in existing_emails:
+                    continue
+                # Skip MR-side and partner-side people — they don't belong
+                # in the LEAD's contact list. Surface only prospect-side
+                # and unknown (AE can confirm).
+                role = (m.get("role") or "unknown").lower()
+                if role in ("mr-side", "partner-side"):
+                    continue
+                contact_suggestions.append({
+                    "name": name,
+                    "title": m.get("title"),
+                    "email": email or None,
+                    "role": role,
+                })
+        except Exception as e:
+            log.warning("Contact suggestion dedupe failed for %s: %s", lead_id, e)
+
     return jsonify({
         "call": record,
         "rolling": calls_store.aggregate_extractions(lead_id),
@@ -688,6 +725,10 @@ def api_calls_add(lead_id: str):
         # was auto-filled. UI uses this to show a "✨ AI pre-filled N
         # criteria" toast + visual hint on the Project Build view.
         "scope_prefill": scope_prefill_applied,
+        # v1.0.0f: new contacts the AI noticed in the notes that aren't
+        # already in the lead's contact list. UI offers a one-click
+        # "Add these" panel.
+        "contact_suggestions": contact_suggestions,
     })
 
 

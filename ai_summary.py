@@ -406,8 +406,27 @@ Schema:
     "data_work": {"sources_to_connect": "<count, or null>", "cdp_target": "<vendor or null>", "warehouse_target": "<vendor or null>"},
     "engineering": {"integrations_count": "<count, or null>", "apis_to_build": "<count, or null>", "sdk_platform": "<Braze|Iterable|mParticle|Segment|Firebase|... or null>", "sdk_websites_count": "<count, or null>", "sdk_ios_apps_count": "<count, or null>", "sdk_android_apps_count": "<count, or null>", "sdk_hybrid_apps_count": "<count, or null>", "sdk_complexity": "<1-5, or null>"}
   },
+  "contacts_mentioned": [
+    {"name": "<full name as spoken>", "title": "<title if mentioned, else null>", "email": "<if mentioned, else null>", "role": "<prospect-side | mr-side | partner-side | unknown>"}
+  ],
   "synthesised_note": "<a structured call summary in the MR Call Note format — see below>"
 }
+
+CONTACTS_MENTIONED rubric:
+- Only include named people. Skip generic references ("the marketing
+  team", "their VP", "someone in IT").
+- Capture every person mentioned — attendees, people referenced ("Sara
+  in legal still needs to review"), CC'd people, anyone identified by
+  name.
+- `role`:
+  - "prospect-side" — people who work at the prospect/customer org
+  - "mr-side" — people who work at Massive Rocket
+  - "partner-side" — people at a technology partner (Braze, Snowflake,
+    Hightouch, mParticle, etc.)
+  - "unknown" — can't determine from context
+- Don't fabricate emails or titles. If only the name was said, leave
+  title and email as null.
+- Return an empty array (not null) when no named people are mentioned.
 
 SCOPE_CRITERIA rubric:
 - Only fill values that are EXPLICITLY supported by the notes. Numbers and counts
@@ -582,9 +601,38 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
             if cleaned:
                 scope_criteria_out[str(pt)] = cleaned
 
+    # v1.0.0f (Tier 3c): named people mentioned in the notes.
+    # Filtered for plausible names only — at minimum a name string,
+    # and `role` falls back to "unknown".
+    contacts_mentioned_out: list[dict[str, Any]] = []
+    _valid_roles = {"prospect-side", "mr-side", "partner-side", "unknown"}
+    for entry in data.get("contacts_mentioned") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get("name") or "").strip()
+        if not name or name.lower() == "null":
+            continue
+        title = entry.get("title")
+        if title and str(title).lower() != "null":
+            title = str(title).strip() or None
+        else:
+            title = None
+        email = entry.get("email")
+        if email and str(email).lower() != "null":
+            email = str(email).strip() or None
+        else:
+            email = None
+        role = str(entry.get("role") or "unknown").strip().lower()
+        if role not in _valid_roles:
+            role = "unknown"
+        contacts_mentioned_out.append({
+            "name": name, "title": title, "email": email, "role": role,
+        })
+
     return {
         "meddpicc": meddpicc_out,
         "project_scope": project_scope,
         "synthesised_note": synthesised_note,
         "scope_criteria": scope_criteria_out or None,
+        "contacts_mentioned": contacts_mentioned_out,
     }

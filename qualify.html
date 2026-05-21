@@ -1307,6 +1307,10 @@
             <span class="muted" id="ld-call-status" style="font-size:11px;">Or hit <strong>Save</strong> at the top to commit everything together.</span>
           </div>
         </div>
+        <!-- v1.0.0f (Tier 3c): AI contact suggestions panel — appears
+             after a note save when the AI spotted named people not
+             already in this lead's contacts. -->
+        <div id="ld-contact-suggestions" style="display:none;margin-bottom:10px;"></div>
         <div id="ld-calls-list" class="muted" style="font-size:12px;">Loading…</div>
       </div>
     </details>
@@ -2837,6 +2841,86 @@
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  // v1.0.0f (Tier 3c): AI contact suggestions from notes.
+  // Server returns `contact_suggestions: [{name, title, email, role}]`
+  // on the call-add response — names the AI spotted in the transcript
+  // that aren't already in the lead's contacts. UI renders a panel
+  // with checkboxes for each so the AE can bulk-save the genuinely
+  // new ones.
+  function renderContactSuggestions(leadId, suggestions) {
+    const el = $('#ld-contact-suggestions');
+    if (!el) return;
+    if (!Array.isArray(suggestions) || !suggestions.length) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    el.style.display = 'block';
+    const roleBadge = (role) => {
+      if (role === 'prospect-side') return `<span style="background:rgba(255,77,42,.12);color:var(--accent-text);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">PROSPECT</span>`;
+      return `<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">UNCLEAR</span>`;
+    };
+    el.innerHTML = `
+      <div style="background:rgba(255,77,42,.06);border:1px solid rgba(255,77,42,.3);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">✨ AI spotted ${suggestions.length} new contact${suggestions.length === 1 ? '' : 's'} in this note</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">Pick the ones to add to this lead. MR-side and partner-side names were filtered out.</div>
+          </div>
+          <button id="ld-cs-dismiss" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Dismiss</button>
+        </div>
+        ${suggestions.map((s, i) => `
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer;">
+            <input type="checkbox" data-cs-idx="${i}" checked style="margin-top:3px;" />
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;">
+                <strong>${escapeHtml(s.name)}</strong>${roleBadge(s.role)}
+              </div>
+              <div class="muted" style="font-size:11px;">${escapeHtml(s.title || '(no title mentioned)')}${s.email ? ' · ' + escapeHtml(s.email) : ''}</div>
+            </div>
+          </label>
+        `).join('')}
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="ld-cs-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add selected to lead →</button>
+          <span class="muted" id="ld-cs-status" style="font-size:11px;"></span>
+        </div>
+      </div>
+    `;
+    $('#ld-cs-dismiss').addEventListener('click', () => {
+      el.style.display = 'none'; el.innerHTML = '';
+    });
+    $('#ld-cs-save').addEventListener('click', async () => {
+      const picks = Array.from(el.querySelectorAll('input[type=checkbox]:checked'))
+                          .map(b => suggestions[parseInt(b.dataset.csIdx, 10)])
+                          .filter(Boolean);
+      if (!picks.length) {
+        toast('Pick at least one to add', 'error'); return;
+      }
+      const saveBtn = $('#ld-cs-save');
+      const statusEl = $('#ld-cs-status');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner"></span> Adding…';
+      try {
+        // Bulk add via the existing array-shape POST.
+        const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contacts: picks.map(p => ({
+            name: p.name, title: p.title, email: p.email, source: 'ai_extract',
+          })) }),
+        });
+        const n = (data?.saved || []).length;
+        toast(`Added ${n} contact${n === 1 ? '' : 's'} to lead`, 'success');
+        el.style.display = 'none'; el.innerHTML = '';
+        await loadLeadContacts(leadId);
+      } catch (e) {
+        toast(`Add failed: ${e.body?.error || e.message}`, 'error');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Add selected to lead →';
+      }
+    });
+  }
+
   // v1.0.0b (Tier 1d): per-lead-contact engagement timeline.
   // Panel mirrors the partner-side notes panel — newest-first list,
   // type pill per entry, add-note input above. Adding a note auto-bumps
@@ -3530,6 +3614,8 @@
           .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
         toast(`✨ AI pre-filled ${prefilled.length} project criteria (${summary})`, 'success');
       }
+      // v1.0.0f: render contact suggestions panel if AI spotted new people.
+      renderContactSuggestions(leadId, data.contact_suggestions || []);
       await loadLeadCalls(leadId);
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
@@ -3949,6 +4035,8 @@
             .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
           toast(`✨ AI pre-filled ${prefilled.length} project criteria (${tally})`, 'success');
         }
+        // v1.0.0f: contact suggestions panel (same path).
+        renderContactSuggestions(drawerState.id, callRes?.contact_suggestions || []);
       }
       const msg = `Saved ${summary.join(' + ')}`;
       $('#ld-status').textContent = msg;

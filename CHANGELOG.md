@@ -5,6 +5,72 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0f] — 2026-05-21 — Tier 3c + Command Centre seed (Braze + Hightouch)
+
+Closes Tier 3 of the contact-management plan + seeds the Partners CRM
+with the Braze + Hightouch records referenced in Ben's Command Centre
+working memory.
+
+### Added — Tier 3c: AI contact extraction from notes
+- **`contacts_mentioned`** field added to the `extract_from_notes`
+  Claude prompt schema. Each entry: `{name, title?, email?, role}`
+  where role ∈ `prospect-side` / `mr-side` / `partner-side` / `unknown`.
+- Normaliser filters entries down to ones with a real name + clamps
+  role to the valid enum + drops fabricated emails/titles.
+- **`/api/calls/<id>` POST returns `contact_suggestions`** —
+  AI-extracted prospect-side names that aren't already in the lead's
+  contacts. Case-insensitive dedupe on name OR email. MR-side and
+  partner-side roles are stripped (they belong elsewhere).
+- **"✨ AI spotted N new contacts" panel** in the lead drawer's
+  Calls & Notes section after a save. Checkboxes pre-checked, role
+  badges (PROSPECT / UNCLEAR), one-click bulk-add to lead contacts
+  via the existing array-shape POST. Dismiss to hide.
+
+### Added — Command Centre seed script
+- **`seed_command_centre_partners.py`** — idempotent seed for the
+  Partners CRM. Adds:
+  - **Braze** partner record + 2 contacts:
+    - **Glenn Bonforte** — Partner Success, US, multi-region (East
+      Coast + West Coast + Central), multi-territory (Strategic +
+      Enterprise), QSR + Retail + Travel & Hospitality, 30-day cadence
+    - **Marina Klusas** — Strategic Enterprise AE on Popeyes US, East
+      Coast, Strategic Enterprise, QSR, 21-day cadence
+  - **Hightouch** partner record (no contacts seeded — the AE
+    populates via UI when known; we don't fabricate names)
+- Run with: `python3 seed_command_centre_partners.py` (Apollo
+  fixtures recommended for safety: `APOLLO_USE_FIXTURES=1 python3 ...`).
+- Hierarchy: Glenn (Partner Success) and Marina (Sales) are
+  intentionally not linked via `reports_to_id` — they're in different
+  functions. AE adjusts the org chart in the UI as needed.
+- `tags: ["command_centre_seed"]` on every seeded contact so they're
+  filterable later (e.g. for cleanup or re-seeds).
+
+### Tests
+- 425 total (+11). New `test_contact_extraction.py`:
+  - Prompt schema documents contacts_mentioned + the role enum
+  - Server returns suggestions for new prospect contacts
+  - MR-side names filtered out
+  - Partner-side names filtered out
+  - Existing contacts deduped by name (case-insensitive)
+  - Seed creates both partners + Braze contacts with the right
+    multi-tag metadata
+  - Seed is idempotent (re-run doesn't duplicate)
+  - Hightouch partner created without fabricated contacts
+
+### Contact-management plan — DONE
+- ✅ Tier 1a · Partner cadence + overdue (v0.10.0z)
+- ✅ Tier 1b · Partner ↔ lead assignments (v0.11.0)
+- ✅ Tier 1c · Lead-side cadence + status parity (v1.0.0a)
+- ✅ Tier 1d · Engagement timeline per contact (v1.0.0b)
+- ✅ Tier 2a · Cross-surface search (v1.0.0c)
+- ✅ Tier 2b · "My contacts" view (v1.0.0c)
+- ✅ Tier 3a · Partner org chart (v1.0.0d)
+- ✅ Tier 3b · Multi-tag territory + region (v1.0.0e)
+- ✅ **Tier 3c · AI contact extraction from notes (this release)**
+
+All 9 tiers shipped. The contact-management surface is feature-complete
+against the plan agreed in v0.10.0z.
+
 ## [1.0.0e] — 2026-05-21 — Tier 3b: multi-tag territory + region
 
 A partner contact can now own multiple territories AND multiple regions
