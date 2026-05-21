@@ -101,16 +101,48 @@ def _write_raw(partner_id: str, contacts: list[dict[str, Any]]) -> None:
         _path(partner_id).write_text(json.dumps(contacts, indent=2))
 
 
+def _coerce_tag_list(value: Any) -> list[str]:
+    """Accept either a string (legacy single value), comma-separated
+    string (CSV imports), or list. Always return a deduped, trimmed list."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        # Comma-separated OR single value — both end up as a list.
+        items = [s.strip() for s in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        items = [str(s).strip() for s in value]
+    else:
+        items = [str(value).strip()]
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in items:
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
     name = (contact.get("name") or "").strip()
     email = (contact.get("email") or "").strip()
     if not name and not email:
         raise PartnerContactsStoreError("Contact requires at least name or email")
     cid = (contact.get("id") or "").strip() or uuid.uuid4().hex[:12]
-    industries = contact.get("industries") or []
-    if isinstance(industries, str):
-        industries = [s.strip() for s in industries.split(",") if s.strip()]
-    industries = [str(i).strip() for i in industries if str(i).strip()]
+    # v1.0.0e (Tier 3b): territory + region are now multi-tag. Industries
+    # were already multi. Accepts legacy single-string input for backward
+    # compat (someone owns US OR they own US + Canada — both work).
+    # Prefer the plural key (sent by the new UI); fall back to the
+    # singular for old payloads or CSV imports.
+    territories = _coerce_tag_list(
+        contact.get("territories") if contact.get("territories") is not None
+        else contact.get("territory")
+    )
+    regions = _coerce_tag_list(
+        contact.get("regions") if contact.get("regions") is not None
+        else contact.get("region")
+    )
+    industries = _coerce_tag_list(contact.get("industries"))
     # v0.10.0z: touch cadence fields. Defaults to 30 days. last_touched_at
     # bumps automatically when a note is added; the AE-edit flow does NOT
     # bump it (only intentional outreach counts as a touch).
@@ -131,8 +163,15 @@ def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
         "email": email or None,
         "linkedin_url": (contact.get("linkedin_url") or "").strip() or None,
         "phone": (contact.get("phone") or "").strip() or None,
-        "territory": (contact.get("territory") or "").strip() or None,
-        "region": (contact.get("region") or "").strip() or None,
+        # v1.0.0e: territory + region are now lists. Empty list means
+        # "no tag" (replaces the old None convention).
+        "territories": territories,
+        "regions": regions,
+        # Backward-compat shims: `territory` / `region` (singular) still
+        # exposed as the FIRST tag for any caller that reads them. UI
+        # writes always go through the multi-select chips → list path.
+        "territory": territories[0] if territories else None,
+        "region": regions[0] if regions else None,
         "country": (contact.get("country") or "").strip() or None,
         "industries": industries,
         "mr_owner": (contact.get("mr_owner") or "").strip() or None,

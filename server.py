@@ -519,10 +519,17 @@ def api_contacts_search():
                         continue
                     if not _matches_owner(c):
                         continue
-                    if territory_filter and c.get("territory") != territory_filter:
-                        continue
-                    if region_filter and c.get("region") != region_filter:
-                        continue
+                    # v1.0.0e: territory/region are now lists. Match if
+                    # the filter is in EITHER the list (new shape) OR
+                    # equals the singular field (legacy shape).
+                    if territory_filter:
+                        terrs = c.get("territories") or []
+                        if territory_filter not in terrs and c.get("territory") != territory_filter:
+                            continue
+                    if region_filter:
+                        regs = c.get("regions") or []
+                        if region_filter not in regs and c.get("region") != region_filter:
+                            continue
                     if industry_filter and industry_filter not in (c.get("industries") or []):
                         continue
                     partner_hits.append({

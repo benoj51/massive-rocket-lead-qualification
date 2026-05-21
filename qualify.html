@@ -2567,8 +2567,10 @@
       }
       el.innerHTML = rows.map(r => {
         const c = r.contact || {};
-        const territory = c.territory ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(c.territory)}</span>` : '';
-        const region = c.region ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(c.region)}</span>` : '';
+        const territoryText = _tagText(c, 'territories', 'territory');
+        const territory = territoryText ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(territoryText)}</span>` : '';
+        const regionText = _tagText(c, 'regions', 'region');
+        const region = regionText ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(regionText)}</span>` : '';
         const inds = (c.industries || []).slice(0, 3).map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('');
         const overdue = c.overdue ? `<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">${Math.abs(c.days_until_due || 0)}d overdue</span>` : '';
         return `
@@ -2697,7 +2699,7 @@
                 <div style="font-size:13px;"><strong>${escapeHtml(c.name || '—')}</strong>
                   ${already ? '<span style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">ALREADY ASSIGNED</span>' : ''}
                 </div>
-                <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '—')}${c.territory ? ' · ' + escapeHtml(c.territory) : ''}${c.region ? ' · ' + escapeHtml(c.region) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
+                <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '—')}${_tagText(c, 'territories', 'territory') ? ' · ' + escapeHtml(_tagText(c, 'territories', 'territory')) : ''}${_tagText(c, 'regions', 'region') ? ' · ' + escapeHtml(_tagText(c, 'regions', 'region')) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
                 ${(c.industries || []).length ? `<div style="margin-top:3px;">${c.industries.map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('')}</div>` : ''}
               </div>
             </label>
@@ -5582,8 +5584,8 @@
         c.surface === 'lead' ? '<span style="color:var(--accent-text);font-weight:600;">Lead</span>' : '<span style="color:var(--blue);font-weight:600;">Partner</span>',
         escapeHtml(c.parent_name || c.parent_id),
         c.title ? escapeHtml(c.title) : '',
-        c.territory ? escapeHtml(c.territory) : '',
-        c.region ? escapeHtml(c.region) : '',
+        _tagText(c, 'territories', 'territory') ? escapeHtml(_tagText(c, 'territories', 'territory')) : '',
+        _tagText(c, 'regions', 'region') ? escapeHtml(_tagText(c, 'regions', 'region')) : '',
         c.country ? escapeHtml(c.country) : '',
       ].filter(Boolean).join(' · ');
       const inds = (c.industries || []).slice(0, 3)
@@ -6050,6 +6052,29 @@
     }
   }
 
+  // v1.0.0e (Tier 3b): pull the multi-tag list for a partner-contact
+  // field, falling back to the singular field for legacy data.
+  // Returns a list of strings (possibly empty).
+  function _tagList(c, pluralKey, singularKey) {
+    const list = c?.[pluralKey];
+    if (Array.isArray(list) && list.length) return list;
+    const single = c?.[singularKey];
+    if (single) return [String(single)];
+    return [];
+  }
+
+  function _tagText(c, pluralKey, singularKey, sep = ', ') {
+    const list = _tagList(c, pluralKey, singularKey);
+    return list.join(sep);
+  }
+
+  // True if `value` (the active filter) matches any item in the tag list.
+  function _tagListIncludes(c, pluralKey, singularKey, value) {
+    if (!value) return true;
+    const list = _tagList(c, pluralKey, singularKey);
+    return list.includes(value);
+  }
+
   // Friendly relative date — "today", "1d ago", "12d ago", "3mo ago".
   function _fmtDaysAgo(days) {
     if (days == null) return 'never';
@@ -6265,8 +6290,9 @@
     // Compute the filtered subset for highlighting; matched nodes get
     // border-accent. Non-matched nodes still render but at lower opacity.
     const matched = new Set(all.filter(c => {
-      if (f.territory && c.territory !== f.territory) return false;
-      if (f.region && c.region !== f.region) return false;
+      // v1.0.0e: multi-tag — match if filter is in the tag list.
+      if (f.territory && !_tagListIncludes(c, 'territories', 'territory', f.territory)) return false;
+      if (f.region && !_tagListIncludes(c, 'regions', 'region', f.region)) return false;
       if (f.status && (c.status || '') !== f.status) return false;
       if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
       if (f.industry && !(c.industries || []).includes(f.industry)) return false;
@@ -6306,10 +6332,11 @@
       const overdue = contact.overdue;
       const statusCls = contact.status !== 'active' ? contact.status : '';
       const dim = matched.size > 0 && !matched.has(contact.id) ? 'opacity:.5;' : '';
-      const territoryPill = contact.territory
-        ? `<span class="n-pill territory">${escapeHtml(contact.territory)}</span>` : '';
-      const regionPill = contact.region
-        ? `<span class="n-pill">${escapeHtml(contact.region)}</span>` : '';
+      // v1.0.0e: render every territory + region as its own pill (multi-tag).
+      const territoryPills = _tagList(contact, 'territories', 'territory')
+        .map(t => `<span class="n-pill territory">${escapeHtml(t)}</span>`).join('');
+      const regionPills = _tagList(contact, 'regions', 'region')
+        .map(r => `<span class="n-pill">${escapeHtml(r)}</span>`).join('');
       const indPill = (contact.industries || []).slice(0, 2)
         .map(i => `<span class="n-pill">${escapeHtml(i)}</span>`).join('');
       const overduePill = overdue
@@ -6324,7 +6351,7 @@
             <div class="n-name">${escapeHtml(contact.name || '—')}${contact.status === 'left' ? ' <span style="font-size:9px;color:var(--text-muted);">(left)</span>' : contact.status === 'dormant' ? ' <span style="font-size:9px;color:var(--yellow);">(dormant)</span>' : ''}</div>
             <div class="n-title">${escapeHtml(contact.title || '')}</div>
             <div class="n-meta">${escapeHtml(lastTouch)} · cadence ${contact.cadence_days}d${contact.mr_owner ? ' · ' + escapeHtml(contact.mr_owner) : ''}</div>
-            <div class="n-pills">${territoryPill}${regionPill}${indPill}${overduePill}</div>
+            <div class="n-pills">${territoryPills}${regionPills}${indPill}${overduePill}</div>
           </div>
           ${children.length ? `<ul>${children.map(c => renderNode(c, depth + 1)).join('')}</ul>` : ''}
         </li>
@@ -6353,8 +6380,9 @@
     const all = partner.contacts || [];
     const f = partnersState.filter;
     const filtered = all.filter(c => {
-      if (f.territory && c.territory !== f.territory) return false;
-      if (f.region && c.region !== f.region) return false;
+      // v1.0.0e: multi-tag — match if filter is in the tag list.
+      if (f.territory && !_tagListIncludes(c, 'territories', 'territory', f.territory)) return false;
+      if (f.region && !_tagListIncludes(c, 'regions', 'region', f.region)) return false;
       if (f.status && (c.status || '') !== f.status) return false;
       if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
       if (f.industry && !(c.industries || []).includes(f.industry)) return false;
@@ -6394,8 +6422,8 @@
             <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
               <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}${c.linkedin_url ? `<br><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener" style="font-size:10px;">LinkedIn ↗</a>` : ''}</td>
               <td>${escapeHtml(c.title || '—')}</td>
-              <td>${escapeHtml(c.territory || '—')}</td>
-              <td>${escapeHtml(c.region || '—')}${c.country ? ' · ' + escapeHtml(c.country) : ''}</td>
+              <td>${(_tagList(c, 'territories', 'territory').map(t => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(t)}</span>`).join('')) || '—'}</td>
+              <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}${c.country ? '<div class="muted" style="font-size:10px;margin-top:2px;">' + escapeHtml(c.country) + '</div>' : ''}</td>
               <td>${(c.industries || []).map(i => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(i)}</span>`).join('') || '—'}</td>
               <td>${escapeHtml(c.mr_owner || '—')}</td>
               <td>${touchCell(c)}</td>
@@ -6459,9 +6487,17 @@
           <div class="field"><label>Email</label><input id="ptn-c-email" type="email" value="${escapeAttr(c.email || '')}" /></div>
           <div class="field"><label>LinkedIn URL</label><input id="ptn-c-linkedin" type="url" value="${escapeAttr(c.linkedin_url || '')}" /></div>
         </div>
-        <div class="row row-2">
-          <div class="field"><label>Territory</label><select id="ptn-c-territory">${opt(enums.territories, c.territory)}</select></div>
-          <div class="field"><label>Region</label><select id="ptn-c-region">${opt(enums.regions, c.region)}</select></div>
+        <div class="field">
+          <label>Territories (multi-select) <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— a contact can own multiple, e.g. Strategic Enterprise + Enterprise</span></label>
+          <div id="ptn-c-territories" class="filters" style="margin-top:4px;">
+            ${(enums.territories || []).map(t => `<button type="button" class="chip ${(c.territories || (c.territory ? [c.territory] : [])).includes(t) ? 'active' : ''}" data-territory="${escapeAttr(t)}">${escapeHtml(t)}</button>`).join('')}
+          </div>
+        </div>
+        <div class="field">
+          <label>Regions (multi-select) <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— e.g. East Coast + Central</span></label>
+          <div id="ptn-c-regions" class="filters" style="margin-top:4px;">
+            ${(enums.regions || []).map(r => `<button type="button" class="chip ${(c.regions || (c.region ? [c.region] : [])).includes(r) ? 'active' : ''}" data-region="${escapeAttr(r)}">${escapeHtml(r)}</button>`).join('')}
+          </div>
         </div>
         <div class="row row-2">
           <div class="field"><label>Country</label><input id="ptn-c-country" type="text" value="${escapeAttr(c.country || '')}" placeholder="e.g. United States" /></div>
@@ -6504,22 +6540,32 @@
         </div>
       </div>
     `;
-    detailEl.querySelectorAll('#ptn-c-industries [data-industry]').forEach(b => {
-      b.addEventListener('click', () => b.classList.toggle('active'));
+    // v1.0.0e: all three tag groups now use chip multi-select.
+    [['#ptn-c-territories', 'data-territory'],
+     ['#ptn-c-regions', 'data-region'],
+     ['#ptn-c-industries', 'data-industry']].forEach(([sel, attr]) => {
+      detailEl.querySelectorAll(`${sel} [${attr}]`).forEach(b => {
+        b.addEventListener('click', () => b.classList.toggle('active'));
+      });
     });
+    const _collectChips = (sel, attr) => Array.from(
+      detailEl.querySelectorAll(`${sel} [${attr}].active`)
+    ).map(b => b.dataset[attr.replace('data-', '').replace(/-([a-z])/g, (_, c) => c.toUpperCase())]);
     $('#ptn-c-save').addEventListener('click', async () => {
       const name = $('#ptn-c-name').value.trim();
       const email = $('#ptn-c-email').value.trim();
       if (!name && !email) { toast('Name or email required', 'error'); return; }
-      const industries = Array.from(detailEl.querySelectorAll('#ptn-c-industries [data-industry].active'))
-                              .map(b => b.dataset.industry);
+      const territories = _collectChips('#ptn-c-territories', 'data-territory');
+      const regions = _collectChips('#ptn-c-regions', 'data-region');
+      const industries = _collectChips('#ptn-c-industries', 'data-industry');
       const payload = {
         name,
         title: $('#ptn-c-title').value.trim(),
         email,
         linkedin_url: $('#ptn-c-linkedin').value.trim(),
-        territory: $('#ptn-c-territory').value,
-        region: $('#ptn-c-region').value,
+        // v1.0.0e: multi-tag — pass the full lists; the server stores them.
+        territories,
+        regions,
         country: $('#ptn-c-country').value.trim(),
         mr_owner: $('#ptn-c-mr-owner').value.trim(),
         industries,

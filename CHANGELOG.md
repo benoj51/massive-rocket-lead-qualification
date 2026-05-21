@@ -5,6 +5,76 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0e] — 2026-05-21 — Tier 3b: multi-tag territory + region
+
+A partner contact can now own multiple territories AND multiple regions
+simultaneously — same pattern as industries already had. Marina at
+Braze can cover Strategic Enterprise + Enterprise, East Coast +
+Central, and QSR + Retail all on one record.
+
+### Schema (`partner_contacts_store`)
+- **`territories: list[str]`** — primary tag list.
+- **`regions: list[str]`** — primary tag list.
+- **`territory: str | None`** — backward-compat shim, exposed as the
+  first item in `territories`. Same for `region` ↔ `regions`. Any
+  reader that hasn't moved to the plural still works.
+- New `_coerce_tag_list()` helper handles all input shapes uniformly:
+  - List → kept as-is (deduped, trimmed)
+  - Comma-separated string ("A, B, C") → split on commas
+  - Single string ("A") → single-item list
+  - None / empty → empty list
+- **Plural wins when both shapes are in the payload** — the new UI
+  always sends the plural; the singular is only consulted for legacy /
+  CSV / API consumers.
+
+### Server (`/api/contacts/search`)
+- Territory / region filters now match the new tag list OR fall back
+  to the legacy singular field. A search for `territory=Enterprise`
+  surfaces contacts tagged Strategic Enterprise + Enterprise + anyone
+  with the legacy single value.
+
+### UI (contact form + everywhere it's displayed)
+- **Contact form**: territory and region dropdowns replaced with chip
+  multi-select (same pattern as industries) — *"Territories
+  (multi-select) — a contact can own multiple, e.g. Strategic
+  Enterprise + Enterprise"*. Chips toggle active on click; payload
+  sends `territories: [...]` + `regions: [...]`.
+- **Contacts table** in partner detail: territory + region now render
+  as chip stacks rather than single cells.
+- **Org chart node cards**: every territory + region tag becomes its
+  own pill (territory pills accent-coloured for hierarchy).
+- **Lead drawer "Partner contacts on this account"** + **global
+  search modal**: tag lists joined with `", "` in the metadata row.
+- **Assignment picker** in the lead drawer: same — tag lists join
+  cleanly in the candidate row metadata.
+- **All filter logic** (partner detail panel + lead-side picker)
+  routed through a new `_tagListIncludes(c, plural, singular, value)`
+  helper so the back-compat path is uniform.
+
+### Helpers (qualify.html)
+- `_tagList(c, plural, singular)` → list (always)
+- `_tagText(c, plural, singular, sep=', ')` → joined string
+- `_tagListIncludes(c, plural, singular, value)` → bool
+
+### Tests
+- 414 total (+9). New `test_partner_contact_multitag.py`:
+  - List input kept as list + dedupe
+  - Legacy singular input lifted to single-item list
+  - Comma-separated string parsed correctly
+  - Empty input → empty list + None singular
+  - Plural shape wins when both keys present
+  - Round-trip (load → save) doesn't drift
+  - Search matches secondary territory (not just primary)
+  - Search matches secondary region
+  - Legacy-singular contacts still surface in search
+
+### Contact-management plan — progress
+- ✅ Tier 1 (a-d): cadence + assignments + timeline
+- ✅ Tier 2 (a-b): search + my contacts
+- ✅ Tier 3a · Partner org chart (v1.0.0d)
+- ✅ **Tier 3b · Multi-tag territory + region (this release)**
+- Next: Tier 3c · AI-extract contacts from call transcripts.
+
 ## [1.0.0d] — 2026-05-21 — Tier 3a: partner org chart visualisation
 
 The `reports_to_id` field has been quietly collecting data on partner
