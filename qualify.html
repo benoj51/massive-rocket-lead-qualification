@@ -434,6 +434,51 @@
   }
   .drawer-overlay.open { opacity: 1; pointer-events: auto; }
 
+  /* Org chart (v1.0.0d) ------------------------------------- */
+  .org-tree { padding: 8px 0; overflow: auto; }
+  .org-tree ul {
+    list-style: none; padding-left: 28px; margin: 0;
+    position: relative;
+  }
+  .org-tree ul::before {
+    /* Vertical guide line down the left edge of a sibling group. */
+    content: ""; position: absolute; left: 12px; top: 0; bottom: 14px;
+    border-left: 1px solid var(--border-strong);
+  }
+  .org-tree li {
+    position: relative; padding: 8px 0 8px 18px; margin: 0;
+  }
+  .org-tree li::before {
+    /* Horizontal connector from the vertical guide to the node card. */
+    content: ""; position: absolute; left: -16px; top: 22px;
+    width: 24px; height: 1px; background: var(--border-strong);
+  }
+  .org-tree > ul { padding-left: 0; }
+  .org-tree > ul::before { display: none; }
+  .org-tree > ul > li::before { display: none; }
+  .org-tree > ul > li { padding-left: 0; }
+
+  .org-node {
+    display: inline-flex; flex-direction: column; gap: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; min-width: 220px;
+    transition: border-color .12s, transform .08s;
+    cursor: pointer; vertical-align: top;
+  }
+  .org-node:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .org-node.overdue { border-color: rgba(239,68,68,.45); background-image: linear-gradient(180deg, rgba(239,68,68,.04), transparent); }
+  .org-node.left, .org-node.dormant { opacity: .55; }
+  .org-node .n-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .org-node .n-title { font-size: 11px; color: var(--text-dim); }
+  .org-node .n-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .org-node .n-pills { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .org-node .n-pill {
+    font-size: 9px; padding: 2px 6px; border-radius: 10px;
+    background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .org-node .n-pill.overdue { background: rgba(239,68,68,.15); color: var(--red); border-color: rgba(239,68,68,.35); }
+  .org-node .n-pill.territory { background: rgba(255,77,42,.10); color: var(--accent-text); border-color: rgba(255,77,42,.25); }
+
   /* Document preview modal — v0.10.0u ----------------------- */
   .doc-preview-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.7);
@@ -5914,6 +5959,8 @@
     partners: [],        // [partner_dict]
     selectedId: null,    // currently expanded partner
     filter: { territory: '', region: '', country: '', industry: '', status: 'active' },
+    // v1.0.0d (Tier 3a): partner detail can render as Table OR Org chart.
+    viewMode: 'table',
   };
 
   async function initPartners() {
@@ -6144,6 +6191,11 @@
           ${p.description ? `<p class="muted" style="font-size:12px;margin:6px 0 0;">${escapeHtml(p.description)}</p>` : ''}
         </div>
         <div class="btn-row" style="flex-shrink:0;">
+          <!-- v1.0.0d (Tier 3a): table / org-chart view toggle -->
+          <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-right:6px;">
+            <button class="chip ${partnersState.viewMode === 'table' ? 'active' : ''}" data-ptn-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">📋 Table</button>
+            <button class="chip ${partnersState.viewMode === 'orgchart' ? 'active' : ''}" data-ptn-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">🗂 Org chart</button>
+          </div>
           <button class="btn ghost" id="ptn-close" type="button" style="padding:4px 10px;font-size:11px;">✕ Close</button>
         </div>
       </div>
@@ -6168,15 +6220,132 @@
     ['territory','region','industry','status'].forEach(k => {
       $('#ptn-filter-' + k).addEventListener('change', (e) => {
         partnersState.filter[k] = e.target.value;
-        renderPartnerContacts(p);
+        renderPartnerContactsForCurrentView(p);
       });
     });
     $('#ptn-filter-country').addEventListener('input', (e) => {
       partnersState.filter.country = e.target.value;
-      renderPartnerContacts(p);
+      renderPartnerContactsForCurrentView(p);
     });
     $('#ptn-add-contact').addEventListener('click', () => openContactForm(p, null));
-    renderPartnerContacts(p);
+    // v1.0.0d: wire the view-mode toggle.
+    document.querySelectorAll('[data-ptn-view]').forEach(b => {
+      b.addEventListener('click', () => {
+        partnersState.viewMode = b.dataset.ptnView;
+        // Re-paint the toggle chip state.
+        document.querySelectorAll('[data-ptn-view]').forEach(x =>
+          x.classList.toggle('active', x.dataset.ptnView === partnersState.viewMode));
+        renderPartnerContactsForCurrentView(p);
+      });
+    });
+    renderPartnerContactsForCurrentView(p);
+  }
+
+  function renderPartnerContactsForCurrentView(partner) {
+    if (partnersState.viewMode === 'orgchart') {
+      renderPartnerOrgChart(partner);
+    } else {
+      renderPartnerContacts(partner);
+    }
+  }
+
+  // v1.0.0d (Tier 3a): partner org chart. Vertical tree built from
+  // `reports_to_id` chains. Filters from the partnersState.filter apply
+  // BUT we always include managers above any matched contact so the
+  // tree stays anchored — otherwise filtering to "Strategic Enterprise"
+  // would hide their manager and break the visual hierarchy.
+  function renderPartnerOrgChart(partner) {
+    const wrap = $('#ptn-contacts-table');
+    const all = partner.contacts || [];
+    if (!all.length) {
+      wrap.innerHTML = `<div class="muted" style="font-size:12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;">No contacts yet — switch to Table view and click <strong>+ Add contact</strong> to start.</div>`;
+      return;
+    }
+    const f = partnersState.filter;
+    // Compute the filtered subset for highlighting; matched nodes get
+    // border-accent. Non-matched nodes still render but at lower opacity.
+    const matched = new Set(all.filter(c => {
+      if (f.territory && c.territory !== f.territory) return false;
+      if (f.region && c.region !== f.region) return false;
+      if (f.status && (c.status || '') !== f.status) return false;
+      if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
+      if (f.industry && !(c.industries || []).includes(f.industry)) return false;
+      return true;
+    }).map(c => c.id));
+
+    // Build the tree: group by reports_to_id.
+    const byId = new Map(all.map(c => [c.id, c]));
+    const childrenOf = new Map();  // parent_id → [child contact]
+    const roots = [];
+    all.forEach(c => {
+      const parentId = c.reports_to_id;
+      if (parentId && byId.has(parentId)) {
+        if (!childrenOf.has(parentId)) childrenOf.set(parentId, []);
+        childrenOf.get(parentId).push(c);
+      } else {
+        // No reports_to or pointing at a deleted contact → treat as root.
+        roots.push(c);
+      }
+    });
+    // Sort: managers (with reports) first inside each group, then alpha.
+    const sortNodes = (arr) => arr.sort((a, b) => {
+      const aHas = (childrenOf.get(a.id) || []).length > 0;
+      const bHas = (childrenOf.get(b.id) || []).length > 0;
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sortNodes(roots);
+    childrenOf.forEach(sortNodes);
+
+    // Cycle guard: bound recursion depth so a corrupted reports_to_id
+    // chain can't hang the render. Max 12 levels — plenty for any
+    // realistic partner team.
+    const renderNode = (contact, depth) => {
+      if (depth > 12) return '';
+      const children = childrenOf.get(contact.id) || [];
+      const overdue = contact.overdue;
+      const statusCls = contact.status !== 'active' ? contact.status : '';
+      const dim = matched.size > 0 && !matched.has(contact.id) ? 'opacity:.5;' : '';
+      const territoryPill = contact.territory
+        ? `<span class="n-pill territory">${escapeHtml(contact.territory)}</span>` : '';
+      const regionPill = contact.region
+        ? `<span class="n-pill">${escapeHtml(contact.region)}</span>` : '';
+      const indPill = (contact.industries || []).slice(0, 2)
+        .map(i => `<span class="n-pill">${escapeHtml(i)}</span>`).join('');
+      const overduePill = overdue
+        ? `<span class="n-pill overdue">${Math.abs(contact.days_until_due || 0)}d overdue</span>` : '';
+      const lastTouch = contact.last_touched_at
+        ? `Touched ${_fmtDaysAgo(contact.days_since_touch)}`
+        : 'Never touched';
+      return `
+        <li style="${dim}">
+          <div class="org-node ${overdue ? 'overdue' : ''} ${statusCls}"
+               data-org-contact="${escapeAttr(contact.id)}">
+            <div class="n-name">${escapeHtml(contact.name || '—')}${contact.status === 'left' ? ' <span style="font-size:9px;color:var(--text-muted);">(left)</span>' : contact.status === 'dormant' ? ' <span style="font-size:9px;color:var(--yellow);">(dormant)</span>' : ''}</div>
+            <div class="n-title">${escapeHtml(contact.title || '')}</div>
+            <div class="n-meta">${escapeHtml(lastTouch)} · cadence ${contact.cadence_days}d${contact.mr_owner ? ' · ' + escapeHtml(contact.mr_owner) : ''}</div>
+            <div class="n-pills">${territoryPill}${regionPill}${indPill}${overduePill}</div>
+          </div>
+          ${children.length ? `<ul>${children.map(c => renderNode(c, depth + 1)).join('')}</ul>` : ''}
+        </li>
+      `;
+    };
+
+    // Match counter for the footer.
+    const matchedCount = matched.size;
+    const hasFilters = !!(f.territory || f.region || f.country || f.industry || f.status);
+    wrap.innerHTML = `
+      <div class="org-tree">
+        <ul>${roots.map(c => renderNode(c, 0)).join('')}</ul>
+      </div>
+      <div class="muted" style="font-size:10px;margin-top:8px;">${all.length} contact${all.length === 1 ? '' : 's'}${hasFilters ? ` · ${matchedCount} match${matchedCount === 1 ? '' : 'es'} highlighted (others dimmed)` : ''} · Click any card to edit · Filters apply to highlighting; managers stay visible to keep the tree anchored.</div>
+    `;
+    wrap.querySelectorAll('[data-org-contact]').forEach(node => {
+      node.addEventListener('click', () => {
+        const c = (partner.contacts || []).find(x => x.id === node.dataset.orgContact);
+        if (c) openContactForm(partner, c);
+      });
+    });
   }
 
   function renderPartnerContacts(partner) {

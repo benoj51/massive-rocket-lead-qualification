@@ -5,6 +5,65 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0d] — 2026-05-21 — Tier 3a: partner org chart visualisation
+
+The `reports_to_id` field has been quietly collecting data on partner
+contacts since v0.10.0y (the contact form has the "Reports to" picker
+populated from sibling contacts). This release adds the visualisation.
+
+### Added — UI
+- **📋 Table / 🗂 Org chart view toggle** on the partner detail header
+  (next to ✕ Close). Persists in `partnersState.viewMode` for the
+  current session.
+- **Org chart renderer** (`renderPartnerOrgChart`) builds a vertical
+  tree from the contacts' `reports_to_id` chain:
+  - Each node is a card with name + title + last-touched + cadence +
+    MR owner
+  - Coloured pills below: **territory** (accent), region, industries
+    (max 2), **overdue** (red) when past cadence
+  - Click any card → opens the existing edit form (same UX as table)
+- **Pure-CSS connecting lines** — vertical guide on the left of each
+  sibling group + horizontal connector from the guide to each node
+  card. No SVG, no library. Scales to any depth.
+- **Roots-first sort** — managers (with reports) appear before
+  individual contributors inside any sibling group; then alpha.
+- **Orphan recovery** — a contact whose `reports_to_id` points to a
+  deleted contact is rendered as a root (rather than disappearing).
+- **Cycle guard** — recursion bounded to 12 levels in case a corrupt
+  `reports_to_id` chain forms a loop.
+- **Filter integration** — the partner detail's Territory / Region /
+  Country / Industry / Status filters apply to the chart by
+  **highlighting matched nodes** while dimming the rest. Managers
+  always stay visible so the tree stays anchored (otherwise filtering
+  to e.g. "Strategic Enterprise" would hide their reports' bosses).
+- **Status badges in-line** — `(left)` / `(dormant)` appended to the
+  name; non-active nodes get reduced opacity on the whole card.
+
+### CSS additions
+- `.org-tree`, `.org-tree ul`, `.org-tree li` — recursive list
+  structure with `::before` pseudo-elements drawing the connectors
+- `.org-node` — card style with hover transform + overdue / left /
+  dormant variants
+- `.org-node .n-pill` — base pill style for territory / region /
+  industry / overdue tags
+
+### Tests
+- 405 total (no new tests). The data model (`reports_to_id` field,
+  sibling picker validation, etc.) is already covered by the
+  `test_partners.py` suite. The renderer is pure UI / JS — sanity
+  verified via the inline parse check.
+
+### Contact-management plan — progress
+- ✅ Tier 1a · Partner cadence + overdue (v0.10.0z)
+- ✅ Tier 1b · Partner ↔ lead assignments (v0.11.0)
+- ✅ Tier 1c · Lead-side cadence + status parity (v1.0.0a)
+- ✅ Tier 1d · Engagement timeline per contact (v1.0.0b)
+- ✅ Tier 2a · Cross-surface search (v1.0.0c)
+- ✅ Tier 2b · "My contacts" view (v1.0.0c)
+- ✅ **Tier 3a · Partner org chart (this release)**
+- Next: Tier 3b (multi-tag — multiple territories/regions per contact),
+  Tier 3c (AI-extract contacts from call transcripts).
+
 ## [1.0.0c] — 2026-05-21 — Tier 2a + 2b: cross-surface contact search + "My contacts"
 
 Single global search that finds any contact across both surfaces
