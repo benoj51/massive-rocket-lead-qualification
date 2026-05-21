@@ -1043,9 +1043,13 @@
     </div>
 
     <div id="pb-sow-card" class="card" style="display:none;">
-      <h2>Draft SOW</h2>
-      <p class="muted" style="margin: 0 0 10px;">Generate a snapshot Statement of Work from the current Apollo + scope + pricing state. Each click creates a new version. Earlier versions stay accessible.</p>
+      <h2>Documents</h2>
+      <p class="muted" style="margin: 0 0 10px;">
+        <strong>Project briefing</strong> — quick internal one-pager with scope + BANT + pricing + roadmap + AI summary. No version, always current.<br>
+        <strong>SOW</strong> — formal statement of work, snapshotted as a versioned artifact.
+      </p>
       <div class="btn-row">
+        <button id="pb-preview-project" class="btn ghost" type="button">👁 Preview project briefing</button>
         <button id="pb-draft-sow" class="btn" type="button">📝 Draft SOW</button>
         <span id="pb-sow-status" class="muted"></span>
       </div>
@@ -4742,6 +4746,33 @@
   // print, or download without leaving the platform.
   const _docPreviewState = { html: null, leadId: null, version: null, filename: null };
 
+  // v0.10.0v: project briefing preview. Same modal as SOW, but the
+  // source is the live project state (scope + pricing + roadmap + AI
+  // summary) — no draft step.
+  async function previewProject(leadId) {
+    if (!leadId) { toast('Open a project first', 'error'); return; }
+    try {
+      const resp = await fetch(`/api/project/${encodeURIComponent(leadId)}/preview.html`, {
+        headers: authHeaders(),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const html = await resp.text();
+      const company = pbState.current?.company_name
+        || (pbState.current?.lead_id || leadId).replace(/[^a-z0-9_-]+/gi, '_');
+      _docPreviewState.html = html;
+      _docPreviewState.leadId = leadId;
+      _docPreviewState.version = null;
+      _docPreviewState.filename = `project_briefing_${company}.html`;
+      $('#doc-preview-title').textContent = `Project briefing — ${company}`;
+      $('#doc-preview-subtitle').textContent = `Lead: ${leadId} · ${new Date().toLocaleString()}`;
+      const iframe = $('#doc-preview-iframe');
+      iframe.srcdoc = html;
+      openDocPreview();
+    } catch (e) {
+      toast(`Preview failed: ${e.message}`, 'error');
+    }
+  }
+
   async function previewSow(leadId, version) {
     try {
       const resp = await fetch(`/api/sow/${encodeURIComponent(leadId)}/v${version}.html`, {
@@ -4882,6 +4913,10 @@
     $('#pb-reject').addEventListener('click', () => pbTransition('rejected'));
     $('#pb-reopen').addEventListener('click', () => pbTransition('draft'));
     $('#pb-draft-sow').addEventListener('click', pbDraftSow);
+    $('#pb-preview-project').addEventListener('click', () => {
+      if (!pbState.currentLeadId) { toast('Open a project first', 'error'); return; }
+      previewProject(pbState.currentLeadId);
+    });
     // Roadmap wiring
     $('#pb-roadmap-save').addEventListener('click', rmSave);
     $('#pb-roadmap-seed').addEventListener('click', rmSeedFromPackage);

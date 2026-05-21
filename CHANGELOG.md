@@ -5,6 +5,62 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0v] — 2026-05-21 — Project briefing preview (the SOW-style preview, but for the project)
+
+The SOW is a versioned formal document. Ben asked for the same
+preview pattern but on the **project** itself — a one-pager that
+rolls up the current state without drafting a new SOW each time.
+Same modal, different content.
+
+### Added
+- **`project_preview.py`** — renders the live project as a single
+  printable HTML document:
+  - **Header**: company, URL, region, vertical, ICP pill, status,
+    sales stage, opportunity type, owner
+  - **Hero**: AI Lead Summary state-of-play + next action
+  - **BANT-S Health strip**: 5 tiles with RAG colour
+  - **Key facts / Open questions / Risks** (from AI summary)
+  - **Scope**: per-stream criteria table with values + health pills
+  - **Pricing snapshot**: currency + rate card + grand total + by-phase + by-role
+  - **Roadmap**: milestones table + extended-engagement opportunities
+  - All sections gracefully omit themselves when data is missing —
+    a half-built project still renders cleanly.
+- **`GET /api/project/<lead_id>/preview.html`** — assembles the
+  snapshot from Notion lead + lead_summary_store + calls aggregate
+  + project_store + pricing_store + roadmap, renders via
+  `project_preview.render_html`. Same Content-Type as SOW.
+- **`_gather_project_preview_snapshot(lead_id)`** — server helper that
+  pulls everything in one pass. Best-effort: pricing/roadmap render
+  errors don't break the whole preview.
+- **Project Build → Documents card** (renamed from "Draft SOW"):
+  - **👁 Preview project briefing** (ghost) — opens the modal with
+    the current state
+  - **📝 Draft SOW** (primary) — unchanged, creates a versioned
+    snapshot
+
+### Same modal as SOW
+The preview reuses the v0.10.0u doc preview modal — Print / Download
+HTML / Open-in-new-tab / Esc-to-close all work identically. No new
+modal infrastructure.
+
+### Why this matters
+- AE shares a project briefing with delivery without committing to a
+  formal SOW snapshot
+- Updates instantly — every change to scope / pricing / roadmap /
+  notes is reflected next time you click Preview
+- Cleaner artifact than the drawer screenshot — printable A4 doc
+  with proper hierarchy and colour-coded BANT
+
+### Tests
+- 319 total (+7). `test_project_preview.py` covers:
+  - minimal snapshot renders valid HTML
+  - summary sections (state, facts, questions, risks) render
+  - BANT tiles get RAG classes
+  - scope streams + criteria render
+  - pricing totals format with currency symbol + phase/role breakdowns
+  - roadmap milestones + extended items render
+  - empty sections omit their headings cleanly
+
 ## [0.10.0u] — 2026-05-21 — Inline document preview modal
 
 SOWs used to open in a new browser tab (a Blob URL with no

@@ -37,6 +37,7 @@ import apollo
 import audit
 import bant_health
 import calls_store
+import project_preview
 import contacts_store
 import criteria_store
 import hubspot_sync
@@ -1269,6 +1270,145 @@ def api_sow_get_html(lead_id: str, version: int):
         return Response("Not found", status=404)
     html = sow.render_html(snapshot, version)
     return Response(html, mimetype="text/html; charset=utf-8")
+
+
+# v0.10.0v: Project briefing preview ----------------------------------------
+# Renders the full current Project Build state as a single printable HTML
+# document. Same modal-preview UX as SOW, but earlier in the cycle — an
+# internal briefing the AE shares with the delivery team or stakeholders
+# without drafting a formal SOW.
+
+def _gather_project_preview_snapshot(lead_id: str) -> dict:
+    """Build the snapshot project_preview.render_html expects."""
+    from datetime import datetime, timezone
+
+    ctx: dict = {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
+    # Lead identity (Notion-side)
+    try:
+        sync = NotionSync()
+        lead = sync.get_page(lead_id)
+        ctx["lead"] = lead or {}
+        ctx["company_name"] = (lead or {}).get("company") or lead_id
+    except Exception:
+        ctx["lead"] = {}
+        ctx["company_name"] = lead_id
+
+    # Cached AI summary
+    cached_summary = lead_summary_store.load(lead_id)
+    ctx["summary"] = cached_summary or None
+
+    # BANT health from rolling MEDDPICC + scope
+    rolling = calls_store.aggregate_extractions(lead_id)
+    scope_state_for_bant = None
+    p = project_store.load(lead_id)
+    if p is not None:
+        scope_state_for_bant = {
+            "streams": [
+                {"project_type": s.project_type,
+                 "validation_status": getattr(s, "validation_status", "draft")}
+                for s in p.streams
+            ],
+            "project_scope": (rolling or {}).get("project_scope") or "",
+        }
+    ctx["bant_health"] = bant_health.derive_bant_health(
+        (rolling or {}).get("meddpicc") or {},
+        scope_state=scope_state_for_bant,
+    )
+
+    # Scope (criteria with values)
+    if p is not None:
+        ctx["scope"] = {
+            "project_types": [s.project_type for s in p.streams],
+            "streams": [
+                {
+                    "project_type": s.project_type,
+                    "validation_status": getattr(s, "validation_status", "draft"),
+                    "criteria": [
+                        {"key": c.key, "label": getattr(c, "label", c.key),
+                         "value": c.value, "health": getattr(c, "health", None)}
+                        for c in s.criteria
+                    ],
+                }
+                for s in p.streams
+            ],
+        }
+    else:
+        ctx["scope"] = None
+
+    # Pricing snapshot (best-effort — uses pricing_store if any saved config)
+    try:
+        pricing_cfg = pricing_store.load(lead_id) if pricing_store else None
+        if pricing_cfg and p is not None:
+            from pricing import compute_quote, QuoteInputs
+            quote = compute_quote(QuoteInputs(
+                project_types=[s.project_type for s in p.streams],
+                months=int(pricing_cfg.get("months", 12)),
+                discount_pct_first_half=float(pricing_cfg.get("discount_first_half_pct", 0.15) or 0),
+                discount_pct_second_half=float(pricing_cfg.get("discount_second_half_pct", 0.0) or 0),
+                role_overrides=pricing_cfg.get("role_overrides") or {},
+                effort_multipliers=scope_module.role_drivers_for_project(p),
+                currency=(pricing_cfg.get("currency") or "USD").upper(),
+                rate_card=pricing_cfg.get("rate_card") or "MR Default",
+                project_ops_pct=float(pricing_cfg.get("project_ops_pct") or 0),
+                contingency_pct=float(pricing_cfg.get("contingency_pct") or 0),
+                role_staffing=pricing_cfg.get("role_staffing") or {},
+            ))
+            totals = quote.get("totals") or {}
+            ctx["pricing"] = {
+                "currency": pricing_cfg.get("currency") or "USD",
+                "rate_card": pricing_cfg.get("rate_card") or "MR Default",
+                "months": pricing_cfg.get("months", 12),
+                "totals": {
+                    "gross": totals.get("gross_usd") or totals.get("gross"),
+                    "net":   totals.get("net_usd")   or totals.get("net"),
+                    "discount": totals.get("discount_usd") or totals.get("discount"),
+                },
+                "phase_breakdown": quote.get("phase_breakdown") or [],
+                "team_breakdown": quote.get("team_breakdown") or [],
+            }
+        else:
+            ctx["pricing"] = None
+    except Exception as e:
+        log.warning("Pricing render for project preview failed: %s", e)
+        ctx["pricing"] = None
+
+    # Roadmap
+    try:
+        rm = roadmap_module.load(lead_id) if roadmap_module else None
+        if rm is not None:
+            d = roadmap_module.to_dict(rm)
+            ctx["roadmap"] = {
+                "start_date": d.get("start_date"),
+                "end_date":   d.get("end_date"),
+                "milestones": d.get("milestones") or [],
+                "extended_items": d.get("extended_items") or [],
+            }
+        else:
+            ctx["roadmap"] = None
+    except Exception as e:
+        log.warning("Roadmap render for project preview failed: %s", e)
+        ctx["roadmap"] = None
+
+    return ctx
+
+
+@app.route("/api/project/<lead_id>/preview.html", methods=["GET"])
+def api_project_preview_html(lead_id: str):
+    """Full project briefing as printable HTML — scope + BANT + pricing
+    + roadmap + AI summary, all in one document. Drives the in-platform
+    Preview modal (same one SOWs use)."""
+    try:
+        snapshot = _gather_project_preview_snapshot(lead_id)
+        html = project_preview.render_html(snapshot)
+        audit.log_event("project_preview_rendered",
+                        actor=_actor(), lead_id=lead_id)
+        return Response(html, mimetype="text/html; charset=utf-8")
+    except Exception as e:
+        log.exception("Project preview render failed: %s", e)
+        return Response(f"<h1>Preview failed</h1><pre>{e}</pre>",
+                        status=500, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/api/slack/digest", methods=["GET", "POST"])
