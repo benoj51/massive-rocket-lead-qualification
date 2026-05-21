@@ -248,6 +248,61 @@ def api_contacts_list(lead_id: str):
     })
 
 
+@app.route("/api/contacts/<lead_id>/search", methods=["POST"])
+def api_contacts_apollo_search(lead_id: str):
+    """Pull fresh contacts from Apollo for an existing lead.
+
+    v0.10.0s: lets the AE re-run people-search from the drawer's
+    Contacts panel without having to re-qualify. Uses the lead's
+    URL/domain (passed in body) — works even if Apollo's apollo_id
+    isn't cached.
+
+    Returns the candidate contacts (NOT auto-saved). The UI shows them
+    in a list with checkboxes; the AE picks which ones to commit via
+    the existing POST /api/contacts/<lead_id> bulk path.
+
+    Already-saved contacts are flagged via `already_saved: true` so the
+    UI can either skip them or show "(saved)" next to the name.
+    """
+    body = request.get_json(silent=True) or {}
+    domain_or_url = (body.get("domain") or body.get("url") or "").strip()
+    apollo_id = (body.get("apollo_id") or "").strip() or None
+    limit = int(body.get("limit") or 15)
+    if not domain_or_url and not apollo_id:
+        return jsonify({"error": "domain or apollo_id required"}), 400
+    try:
+        candidates = apollo.search_people(
+            org_id=apollo_id,
+            org_domain=domain_or_url,
+            limit=limit,
+        )
+    except apollo.ApolloError as e:
+        log.warning("Contact search failed for %s: %s", lead_id, e)
+        return jsonify({"error": f"Apollo error: {e}", "candidates": []}), 502
+    except Exception as e:
+        log.warning("Contact search crashed for %s: %s", lead_id, e)
+        return jsonify({"error": str(e), "candidates": []}), 500
+
+    # Flag candidates that we've already saved so the UI can dedupe.
+    existing = contacts_store.list_contacts(lead_id)
+    existing_emails = {(c.get("email") or "").lower()
+                       for c in existing if c.get("email")}
+    existing_linkedin = {(c.get("linkedin_url") or "").lower()
+                         for c in existing if c.get("linkedin_url")}
+    existing_apollo_ids = {(c.get("id") or "") for c in existing}
+    out = []
+    for p in candidates:
+        already = bool(
+            (p.get("email") and p["email"].lower() in existing_emails)
+            or (p.get("linkedin_url") and p["linkedin_url"].lower() in existing_linkedin)
+            or (p.get("apollo_id") and p["apollo_id"] in existing_apollo_ids)
+        )
+        out.append({**p, "already_saved": already})
+    audit.log_event("contacts_searched", actor=_actor(), lead_id=lead_id,
+                    domain=domain_or_url, count=len(out))
+    return jsonify({"candidates": out, "count": len(out)})
+
+
 @app.route("/api/contacts/<lead_id>", methods=["POST"])
 def api_contacts_save(lead_id: str):
     """Add or update one contact, or bulk save under {contacts: [...]} body."""

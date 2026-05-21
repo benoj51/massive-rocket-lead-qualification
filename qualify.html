@@ -1218,6 +1218,14 @@
         <span><span data-section-label>Contacts</span> <span class="section-count" id="ld-contacts-count"></span></span>
       </summary>
       <div class="section-body">
+        <!-- v0.10.0s: prominent Apollo search action at the top of the
+             Contacts section. Pulls fresh stakeholder candidates using
+             the lead's URL/domain; AE picks which to save in bulk. -->
+        <div class="btn-row" style="margin-bottom:10px;">
+          <button id="ld-contacts-search" class="btn" type="button" style="padding:7px 14px;font-size:12px;">🔍 Search Apollo for contacts</button>
+          <span id="ld-contacts-search-status" class="muted" style="font-size:11px;"></span>
+        </div>
+        <div id="ld-contacts-search-results" style="display:none;margin-bottom:12px;"></div>
         <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
         <details style="margin-top: 10px;">
           <summary style="cursor:pointer;color:var(--accent);font-size:12px;">+ Add contact manually</summary>
@@ -1231,7 +1239,7 @@
               <div class="field"><label>LinkedIn URL</label><input type="url" id="ld-new-contact-linkedin" placeholder="linkedin.com/in/..." /></div>
             </div>
             <div class="btn-row">
-              <button id="ld-add-contact" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">Add contact</button>
+              <button id="ld-add-contact" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add contact</button>
             </div>
           </div>
         </details>
@@ -2236,6 +2244,8 @@
     const name = $('#ld-new-contact-name').value.trim();
     const email = $('#ld-new-contact-email').value.trim();
     if (!name && !email) { toast('Name or email required', 'error'); return; }
+    const btn = $('#ld-add-contact');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…'; }
     const body = {
       name,
       title: $('#ld-new-contact-title').value.trim(),
@@ -2244,7 +2254,7 @@
       source: 'manual',
     };
     try {
-      await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+      const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -2253,9 +2263,148 @@
       $('#ld-new-contact-title').value = '';
       $('#ld-new-contact-email').value = '';
       $('#ld-new-contact-linkedin').value = '';
+      // Close the manual-add form for a clean reset.
+      const det = $('#ld-add-contact')?.closest('details');
+      if (det) det.open = false;
       await loadLeadContacts(leadId);
-      toast('Contact added', 'success');
-    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      toast(`Contact added — ${data?.contact?.name || name || email}`, 'success');
+    } catch (e) {
+      console.error('[addContactManual]', e);
+      toast(`Add contact failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = 'Add contact'; }
+    }
+  }
+
+  // v0.10.0s: Apollo people-search from the Contacts panel.
+  // Server runs apollo.search_people against the lead's domain + flags
+  // already-saved candidates. UI lets the AE tick which ones to commit
+  // in bulk via the existing POST /api/contacts/<id> array shape.
+  async function searchApolloContacts(leadId) {
+    const btn = $('#ld-contacts-search');
+    const status = $('#ld-contacts-search-status');
+    const resultsEl = $('#ld-contacts-search-results');
+    const original = drawerState.original || {};
+    const domain = (original.url || original.domain || '').trim();
+    if (!domain) {
+      toast('No URL on this lead — add one in Identity to search Apollo', 'error');
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Searching…';
+    status.textContent = '';
+    try {
+      const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, apollo_id: original.apollo_id || null, limit: 15 }),
+      });
+      const candidates = data.candidates || [];
+      if (!candidates.length) {
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = `<div class="muted" style="font-size:12px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No Apollo candidates returned for ${escapeHtml(domain)}. Try the manual add below.</div>`;
+        status.textContent = 'No matches';
+        return;
+      }
+      renderContactSearchResults(leadId, candidates);
+      status.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`;
+    } catch (e) {
+      console.error('[searchApolloContacts]', e);
+      toast(`Apollo search failed: ${e.body?.error || e.message}`, 'error');
+      status.textContent = 'Failed';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '🔍 Search Apollo for contacts';
+    }
+  }
+
+  function renderContactSearchResults(leadId, candidates) {
+    const el = $('#ld-contacts-search-results');
+    el.style.display = 'block';
+    const rows = candidates.map((c, i) => `
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid ${c.already_saved ? 'rgba(255,255,255,.08)' : 'var(--border)'};border-radius:6px;margin-bottom:6px;cursor:${c.already_saved ? 'default' : 'pointer'};opacity:${c.already_saved ? '.55' : '1'};">
+        <input type="checkbox" data-search-idx="${i}" ${c.already_saved ? 'disabled' : 'checked'} style="margin-top:3px;" />
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:var(--text);font-weight:500;">
+            ${escapeHtml(c.name || '—')}
+            ${c.already_saved ? '<span style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">SAVED</span>' : ''}
+          </div>
+          <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
+          ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+        </div>
+      </label>
+    `).join('');
+    el.innerHTML = `
+      <div style="background:rgba(96,165,250,.04);border:1px solid rgba(96,165,250,.25);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">Apollo candidates</div>
+          <div class="btn-row">
+            <button class="btn ghost" type="button" id="ld-contacts-search-toggle-all" style="padding:4px 10px;font-size:11px;">Toggle all</button>
+            <button class="btn ghost" type="button" id="ld-contacts-search-close" style="padding:4px 10px;font-size:11px;">× Close</button>
+          </div>
+        </div>
+        ${rows}
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn" type="button" id="ld-contacts-search-save" style="padding:6px 14px;font-size:12px;">Save selected →</button>
+          <span class="muted" id="ld-contacts-search-save-status" style="font-size:11px;"></span>
+        </div>
+      </div>
+    `;
+    $('#ld-contacts-search-toggle-all').addEventListener('click', () => {
+      const boxes = el.querySelectorAll('input[type=checkbox]:not(:disabled)');
+      const allChecked = Array.from(boxes).every(b => b.checked);
+      boxes.forEach(b => { b.checked = !allChecked; });
+    });
+    $('#ld-contacts-search-close').addEventListener('click', () => {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      $('#ld-contacts-search-status').textContent = '';
+    });
+    $('#ld-contacts-search-save').addEventListener('click', () =>
+      saveSelectedApolloContacts(leadId, candidates));
+  }
+
+  async function saveSelectedApolloContacts(leadId, candidates) {
+    const el = $('#ld-contacts-search-results');
+    const checked = Array.from(el.querySelectorAll('input[type=checkbox]:checked:not(:disabled)'));
+    if (!checked.length) { toast('Tick at least one to save', 'error'); return; }
+    const selected = checked.map(b => candidates[parseInt(b.dataset.searchIdx, 10)])
+      .filter(Boolean)
+      .map(c => ({
+        id: c.apollo_id || undefined,
+        name: c.name,
+        title: c.title,
+        email: c.email,
+        email_status: c.email_status,
+        linkedin_url: c.linkedin_url,
+        city: c.city,
+        country: c.country,
+        source: 'apollo',
+      }));
+    const saveBtn = $('#ld-contacts-search-save');
+    const statusEl = $('#ld-contacts-search-save-status');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contacts: selected }),
+      });
+      const n = (data?.saved || []).length;
+      statusEl.textContent = `Saved ${n}`;
+      toast(`Saved ${n} contact${n === 1 ? '' : 's'} to lead`, 'success');
+      el.style.display = 'none';
+      el.innerHTML = '';
+      $('#ld-contacts-search-status').textContent = '';
+      await loadLeadContacts(leadId);
+    } catch (e) {
+      console.error('[saveSelectedApolloContacts]', e);
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = 'Save selected →';
+    }
   }
 
   async function loadLeadCalls(leadId) {
@@ -4489,6 +4638,9 @@
     window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
     $('#ld-add-contact').addEventListener('click', () => {
       if (drawerState.id) addContactManual(drawerState.id);
+    });
+    $('#ld-contacts-search').addEventListener('click', () => {
+      if (drawerState.id) searchApolloContacts(drawerState.id);
     });
     $('#ld-add-call').addEventListener('click', () => {
       if (drawerState.id) addCall(drawerState.id);

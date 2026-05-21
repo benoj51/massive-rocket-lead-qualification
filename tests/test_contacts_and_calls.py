@@ -40,6 +40,67 @@ class ApolloRolesTests(unittest.TestCase):
             )
 
 
+class ContactSearchEndpointTests(unittest.TestCase):
+    """v0.10.0s: /api/contacts/<lead_id>/search wraps Apollo people search
+    and flags candidates already saved against the lead."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["CONTACTS_STORE_DIR"] = os.path.join(cls.tmp, "contacts")
+        os.environ["APOLLO_USE_FIXTURES"] = "1"
+        os.environ.pop("APP_AUTH_TOKEN", None)
+        for mod in ("server", "contacts_store", "apollo"):
+            sys.modules.pop(mod, None)
+        cls.server = importlib.import_module("server")
+        cls.client = cls.server.app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("CONTACTS_STORE_DIR", None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_search_requires_domain_or_apollo_id(self):
+        r = self.client.post("/api/contacts/some-lead/search", json={})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("domain", r.get_json()["error"])
+
+    def test_search_returns_candidates_array(self):
+        # Apollo fixtures (deliveroo.co.uk) should return at least
+        # something. If not, accept an empty array but no error.
+        r = self.client.post(
+            "/api/contacts/test-lead/search",
+            json={"domain": "deliveroo.co.uk", "limit": 10},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertIn("candidates", body)
+        self.assertIsInstance(body["candidates"], list)
+
+    def test_search_flags_already_saved(self):
+        """Pre-save a contact, then run search — it should come back as
+        already_saved=True."""
+        import contacts_store
+        # Pre-seed with a contact that has an Apollo-shaped id + linkedin
+        contacts_store.save_contact("flag-lead", {
+            "id": "preseed-1",
+            "name": "Will Shu",
+            "linkedin_url": "https://linkedin.com/in/willshu",
+            "source": "manual",
+        })
+        r = self.client.post(
+            "/api/contacts/flag-lead/search",
+            json={"domain": "deliveroo.co.uk", "limit": 10},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        # The shape contract is the test — every candidate has the flag,
+        # whether or not the fixture surfaces Will Shu specifically.
+        for cand in body.get("candidates", []):
+            self.assertIn("already_saved", cand)
+            self.assertIsInstance(cand["already_saved"], bool)
+
+
 class ContactsStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

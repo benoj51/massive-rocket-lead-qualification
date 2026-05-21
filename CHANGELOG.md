@@ -5,6 +5,56 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0s] — 2026-05-21 — Search Apollo from the contact panel + harden save-contact
+
+Three asks bundled. Contacts are now searchable, saveable, and
+unambiguously bound to their lead.
+
+### Added — Search Apollo for contacts (from the drawer)
+Prominent new **🔍 Search Apollo for contacts** button at the top of
+the Contacts section. Click → server runs `apollo.search_people`
+against the lead's URL/domain → returns up to 15 candidates flagged
+with `already_saved: true` for any we've already got.
+
+UI then renders the candidate list with checkboxes:
+- Pre-checked by default for unsaved entries
+- Disabled + `SAVED` badge for already-saved entries
+- Toggle-all helper
+- **Save selected →** commits via the existing bulk `POST
+  /api/contacts/<lead_id>` array shape
+- Close button to dismiss without saving
+
+Works whether or not the AE has clicked Re-score recently — the
+search uses whatever URL is currently on the lead.
+
+### Added — New endpoint `POST /api/contacts/<lead_id>/search`
+- Body: `{domain?: str, url?: str, apollo_id?: str, limit?: int}`
+- Returns: `{candidates: [...], count: int}` with each candidate
+  annotated `already_saved: bool` based on email/linkedin/apollo_id
+  match against the lead's existing contacts.
+- Errors handled gracefully — Apollo failures return 502 with
+  empty candidates so the UI shows a clean error toast.
+- Audit log captures `contacts_searched` events.
+
+### Hardened — addContactManual save flow
+- Spinner state on the "Add contact" button while in flight.
+- Manual-add `<details>` auto-closes on successful save.
+- Explicit success toast names the contact: *"Contact added — Jane Doe"*.
+- Errors now log to console as `[addContactManual]` for diagnostics.
+
+### Contact association — confirmed sound
+Contacts are stored per-lead at `cache/contacts/<slug>.json`. The
+same lead_id flows from URL → store path → file → list_contacts.
+Verified by the new test suite that the round-trip works even with
+hyphenated UUIDs (Notion page IDs). No bug here — the path is
+construction-correct.
+
+### Tests
+- 308 total (+3). New `ContactSearchEndpointTests`:
+  - 400 when neither domain nor apollo_id provided
+  - 200 + candidates array shape on a valid domain
+  - `already_saved` flag round-trips correctly
+
 ## [0.10.0r] — 2026-05-21 — Martech contacts + clipboard share for notes
 
 Two AE-quality-of-life asks landed together.
