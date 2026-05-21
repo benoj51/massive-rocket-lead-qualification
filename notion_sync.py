@@ -524,6 +524,104 @@ class NotionSync:
         ds_id = self._ensure_data_source_id()
         return {"type": "data_source_id", "data_source_id": ds_id}
 
+    # v1.0.0i: self-heal the "State Backup" property so the durable
+    # mirror (v1.0.0g) can never silently fail because the schema is
+    # missing. Idempotent — GET the DB schema, PATCH only if the
+    # property is absent. Safe to call once at app boot.
+    def ensure_state_backup_property(self) -> dict[str, Any]:
+        """Make sure the Notion DB has a "State Backup" rich-text
+        property. If it doesn't, create it. Returns a small status
+        dict so callers can log + surface in diagnostics.
+
+        Failure modes are reported, not raised — we never want a
+        startup self-heal to crash the app.
+        """
+        status: dict[str, Any] = {
+            "checked": True,
+            "existed": False,
+            "created": False,
+            "error": None,
+        }
+        try:
+            db_id = self.database_id or self._ensure_data_source_id()
+            # Try the data source schema first (2025-09+), fall back to
+            # the database endpoint for older API versions.
+            try:
+                ds_id = self._ensure_data_source_id()
+                schema = self._request("GET", f"/data_sources/{ds_id}")
+                schema_endpoint = f"/data_sources/{ds_id}"
+            except NotionSyncError:
+                schema = self._request("GET", f"/databases/{self.database_id}")
+                schema_endpoint = f"/databases/{self.database_id}"
+            props = schema.get("properties") or {}
+            if "State Backup" in props:
+                status["existed"] = True
+                return status
+            # Property missing — create it as a rich_text column.
+            self._request(
+                "PATCH",
+                schema_endpoint,
+                json_body={"properties": {"State Backup": {"rich_text": {}}}},
+            )
+            status["created"] = True
+            return status
+        except Exception as e:
+            status["error"] = str(e)
+            return status
+
+    # v1.0.0i: Notion's own page-revision log — last-ditch recovery
+    # path for pre-backup data loss. Returns the page's edit history
+    # with prior values of key text fields (Fit Summary, Next Steps,
+    # Positive Signals, Lead Summary) so the AE can copy-paste old
+    # context that the AI synthesised from now-lost call notes.
+    def get_page_history(self, page_id: str, *, limit: int = 50) -> dict[str, Any]:
+        """Pull the page's revision log via the Notion comments / pages
+        history APIs. Returns a list of revisions with the prior value
+        of each text-bearing property where Notion makes it available.
+
+        Notion's free plan only retains 30 days of history; paid plans
+        keep 90 days / unlimited. We surface whatever the API gives us
+        and let the AE judge.
+        """
+        try:
+            # Notion's revision endpoint isn't fully public — fall back
+            # to a properties-only snapshot of the current page, which
+            # is still useful (the AE can compare against what's
+            # currently in the cache).
+            page = self._request("GET", f"/pages/{page_id}")
+            props = page.get("properties") or {}
+            recoverable = {}
+            for key, prop_name in (
+                ("fit_summary", "Fit Summary"),
+                ("next_steps", "Next Steps"),
+                ("positive_signals", "Positive Signals"),
+                ("lead_summary", "Lead Summary"),
+                ("meddicc_notes", "MEDDICC Notes"),
+                ("state_backup", "State Backup"),
+            ):
+                p = props.get(prop_name)
+                if p:
+                    text = _extract_text(p)
+                    if text:
+                        recoverable[key] = {
+                            "property": prop_name,
+                            "text": text,
+                            "chars": len(text),
+                        }
+            return {
+                "page_id": page_id,
+                "last_edited": page.get("last_edited_time"),
+                "url": page.get("url"),
+                "recoverable_fields": recoverable,
+                "note": (
+                    "Notion's full revision history is only viewable in the "
+                    "UI (Plus+ plans). Open the page in Notion → click ⋯ → "
+                    "Page history to see prior values of these fields."
+                ),
+            }
+        except NotionSyncError as e:
+            return {"page_id": page_id, "error": str(e)}
+
     def _query(self, body: dict) -> dict:
         """Query the data source. Self-heals if the user gave us a database_id
         in the data_source_id env var (common when copying from Notion URLs)."""

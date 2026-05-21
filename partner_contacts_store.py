@@ -52,7 +52,11 @@ _LOCK = threading.Lock()
 
 # Enumerations the UI offers as dropdowns / chip multi-selects. Edit here
 # to change the available choices; the UI mirrors them.
-TERRITORIES = ["Strategic Enterprise", "Enterprise", "Mid-Market", "SMB"]
+# v1.0.0h: Braze's hierarchy uses "Emerging Enterprise" + "Scale" as
+# distinct segments. Added to the enum so the seed data lands cleanly
+# without distortion.
+TERRITORIES = ["Strategic Enterprise", "Enterprise", "Emerging Enterprise",
+                "Mid-Market", "Scale", "SMB"]
 REGIONS = ["UK", "West Coast", "East Coast", "Central",
            "EMEA", "APAC", "LATAM", "ANZ", "Global"]
 INDUSTRIES = ["QSR", "C-Store / Gas", "Retail", "Financial Services",

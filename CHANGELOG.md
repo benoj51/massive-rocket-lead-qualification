@@ -5,6 +5,195 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0i] — 2026-05-21 — Bulletproof the backup mirror + cache-wipe banner
+
+Ben reported notes are still missing after v1.0.0g. Triage showed:
+- The Railway persistent volume isn't mounted yet (the permanent fix).
+- The missing notes were added BEFORE v1.0.0g shipped — no Notion
+  backup ever existed for them.
+
+So this release does two things: (1) make sure post-v1.0.0g writes
+CAN'T silently fail to mirror, and (2) surface the situation loudly so
+we don't end up in this position again.
+
+### Backup mirror — zero silent failures
+
+The v1.0.0g mirror depends on a "State Backup" rich-text property
+existing on the Notion database. If it doesn't (e.g. database swap,
+fresh workspace), every mirror call 400s and we just log a warning.
+
+- **`notion_sync.ensure_state_backup_property()`** — idempotent
+  self-heal. GETs the data source / database schema; if "State Backup"
+  isn't present, PATCHes it in as a rich_text property.
+- **Boot hook in `server.py`** — calls the ensure on app import (gated
+  on `NOTION_API_KEY` being set + a `SKIP_NOTION_BOOT` escape hatch
+  for tests). Status of the check (existed / created / error) is
+  captured into `_BACKUP_PROPERTY_READY` so diagnostics can read it.
+- **`_BACKUP_HEALTH` ring buffer** — last 20 mirror attempts tracked
+  in-memory with success/failure + error string + byte count. Surfaced
+  via the new diagnostics endpoint.
+
+### `/api/diagnostics/health` — see what's actually happening
+
+New read-only endpoint. Returns:
+- Cache directory existence, file count, lead-with-calls count
+- Whether a cache wipe is suspected (heuristic: empty cache + no
+  successful mirrors yet)
+- Whether the Railway volume is mounted on /app/cache (via `st_dev`
+  comparison vs the container root)
+- Whether the "State Backup" Notion property exists / was just created
+  / errored on boot
+- Last 5 mirror attempts with full detail, plus success/failure tally
+
+This is the single source of truth when "did my backups actually
+work?" comes up.
+
+### UI — cache-wipe banner
+
+Init-time fetch of `/api/diagnostics/health` from `qualify.html`.
+- If cache wipe suspected + volume not mounted → loud red persistent
+  banner across the top of the app driving Ben to mount the volume,
+  with a direct link to `RAILWAY_VOLUME_MOUNT.md`.
+- If a recent mirror attempt failed → softer warning with the actual
+  error string + link to the diagnostics endpoint.
+- Banner is dismissible per session (sessionStorage flag).
+
+No more "everything looks fine, then on next deploy data is gone".
+
+### `/api/lead/<id>/notion-history` — last-ditch recovery surface
+
+For pre-v1.0.0g data loss where no backup exists, the only remaining
+trace is whatever the AI synthesised into Notion-side fields (Fit
+Summary, Next Steps, Positive Signals, Lead Summary, MEDDICC Notes).
+Those properties live in Notion and survive cache wipes.
+
+New endpoint pulls the lead's current Notion property text + points
+the AE at Notion's built-in **Page history** (⋯ → Page history in the
+Notion UI) where prior revisions are visible on Plus+ plans. Won't
+bring back the original call note text, but may recover important
+AI-distilled context.
+
+### Tests
+- 439 still passing. New endpoints exercised via the test client:
+  `/api/diagnostics/health` returns the expected schema even with no
+  Notion creds (boot self-heal gated behind `NOTION_API_KEY`).
+
+### Files touched
+- `notion_sync.py` — `ensure_state_backup_property` + `get_page_history`.
+- `server.py` — boot self-heal, `_BACKUP_HEALTH` ring buffer, two new
+  diagnostic endpoints, `_is_path_on_volume` helper, mirror call now
+  tracks attempts.
+- `qualify.html` — `_checkCacheHealth` + `_showCacheWipeBanner` wired
+  into init.
+
+### What Ben needs to do (5 minutes)
+1. Open Railway → web-production-b7cb5 service → Volumes / Storage tab.
+2. Click + New Volume. Mount path: `/app/cache`. Size: 1 GB.
+3. Save. Railway restarts the service. Done — no more cache wipes.
+
+After the volume is mounted, the diagnostics banner stops appearing
+and the auto-mirror becomes a belt-and-braces safety net rather than
+a sole line of defence.
+
+## [1.0.0h] — 2026-05-21 — Status-chip live refresh + full Braze/Hightouch roster
+
+Two threads in this release: a small but high-friction UI bug fix Ben
+hit on Shell UK, plus the comprehensive Command Centre partner seed.
+
+### Bug fix: Shell UK status chip stuck on "DISQUALIFIED" after save
+
+Ben flipped Shell UK's Status dropdown to "Qualified", clicked Save, but
+the header chip kept showing "DISQUALIFIED" (rendered uppercase via CSS).
+Root cause: `#ld-status-chip` was set once from the load-time
+`lead.status` value and never refreshed — neither when the user changed
+the dropdown nor when the PATCH came back with the new server-confirmed
+value.
+
+Fix:
+- New `refreshHeaderStatusChip(status)` helper in qualify.html — single
+  source of truth for the chip text.
+- `loadLead` calls it with the server value.
+- `saveLead` calls it with `data.lead.status` from the PATCH response
+  after every successful save.
+- The `change` listener on `[data-ld="status"]` calls it live as the
+  user picks a new status — chip flips before save, so the AE gets
+  immediate visual confirmation that their pick registered.
+
+### Comprehensive Braze + Hightouch seed (Command Centre roster)
+
+Expanded `seed_command_centre_partners.py` from the 2-contact priority
+stub (Glenn Bonforte + Marina Klusas only) to the full 181-contact
+Command Centre roster Ben provided:
+
+- **Braze AMER** — Eric Sanders' tree (Jason Swetnam, Scott Gibson,
+  Stephanie Chang Retail, Emmanouela Androulaki GenBiz, Tim Taggart
+  Commercial, all their SDs + AEs), FINS pod (Josh Marder, Nader
+  Taghavi, etc.), Lindsey Swanson / Ava Lillian Strategic team.
+- **Braze EMEA** — Marc Suchland → Marlon Hills → Zarpana Kabir +
+  George Goodger, all London-based scale + enterprise AEs, plus Katie
+  Cornwell (Shell EMEA contact) and the legacy "confirm against new
+  org" folks (Imi de Daranyi, Rod Aimes, Abigail Tucker, Jase Buckley)
+  tagged `confirm_org`.
+- **Braze Partner org** — Glenn Bonforte + James Dobson, Sam Oresanya,
+  Haatim Ahmed, Renata Minami, Harry Fellows, Wenzel Hilpert.
+- **Braze GSA / CSM bench** — Nish Patel, Heather (TBD), Georgia
+  Harrison, Ashley Wilkinson, Orlando Beakbane.
+- **Hightouch NA Sales** — Vinod Venkatasubramaniam (Enterprise West),
+  John Knudsen (Mid-Market North), Joseph Spath / Jessica Doyle /
+  Trevor Sutley / Alex Matthews / Kyla Gundersen / Blake Ballardo /
+  Aidan Lynch managers + all their AEs.
+
+Engineering choices:
+- **Stable contact IDs** (`braze-eric-sanders`, `ht-joseph-spath`) so
+  re-runs upsert by id, never duplicate.
+- **`reports_to_id`** preserved for every line the source material made
+  explicit. 11 root contacts (Eric Sanders at the top of AMER, Glenn
+  for partner-org, the 5 confirm-org legacy folks, the 3-person CSM
+  bench, the 2-person GSA bench); zero dangling references.
+- **Email handling**: every Braze contact gets `firstname.lastname@
+  braze.com` by default, with verbatim overrides for the 9 exceptions
+  Ben flagged (`e.androulaki@braze.com`, `nader@braze.com`,
+  `kiley@braze.com`, `eleanor.carman@braze.com`, `aileen.cole@braze.com`,
+  `julia.shaffer@braze.com`, `hannah.slowey@braze.com`,
+  `elizabeth.dicarlo@braze.com`, `Marina.Klusas@braze.com`). All
+  Hightouch contacts get inferred Hightouch emails (no overrides
+  supplied). **Inferred emails are tagged `email_inferred`** so they're
+  auditable later — 67 of 181 contacts are flagged this way.
+- **MR-priority cadence**: 8 contacts on Ben's top-of-mind list (Marina,
+  Bill Thomas, Eric Sanders, Stephanie Chang, Eleanor Wolf, Marlon
+  Hills, Katie Cornwell, Glenn Bonforte) get `mr_priority` tag +
+  `cadence_days=14` so they surface first in the overdue queue.
+  SVPs/VPs/AVPs get 21d; everyone else 30d.
+- **Industry tagging** propagates down org branches (Retail under
+  Stephanie Chang, FINS under Scott Gibson direct, QSR under William
+  Thomas, etc.) so the UI's industry filter actually scopes correctly.
+
+### `partner_contacts_store.py` — territory enum
+
+`TERRITORIES` extended with **"Emerging Enterprise"** and **"Scale"** —
+distinct segments in Braze's hierarchy that don't squeeze into
+Strategic/Enterprise/Mid-Market/SMB. The seed lands without distortion.
+
+### Tests
+- 439 total (+1). `tests/test_contact_extraction.py::SeedScriptTests`
+  rewrites to match the comprehensive seed:
+  - Spot-checks the original 2 priority contacts still present + a
+    sampling of the newly-added leadership.
+  - Asserts every contact carries `command_centre_seed`.
+  - Asserts MR-priority contacts have `mr_priority` + cadence=14.
+  - Asserts email overrides are applied verbatim (Emmanouela, Marina).
+  - Asserts the full Hightouch roster lands + every Hightouch email
+    is flagged `email_inferred`.
+  - **New**: `test_seed_hierarchy_intact` — every `reports_to_id`
+    resolves to a real contact in the same partner. Catches typos
+    before they ship.
+
+### Files touched
+- `qualify.html` — `refreshHeaderStatusChip` helper + 3 call sites.
+- `seed_command_centre_partners.py` — comprehensive rewrite (~500 lines).
+- `partner_contacts_store.py` — `TERRITORIES` enum extension.
+- `tests/test_contact_extraction.py` — seed assertions rewritten + 1 new test.
+
 ## [1.0.0g] — 2026-05-21 — Durable state backup + ⟲ Restore (cache-loss defence)
 
 Critical fix for Ben's report that notes + project builds disappeared.

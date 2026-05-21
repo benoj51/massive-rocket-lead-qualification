@@ -2270,19 +2270,49 @@ def api_partner_contact_assigned_leads(partner_id: str, contact_id: str):
 # defence is to mirror every critical write to a "State Backup" rich-text
 # property on the lead's Notion page. Recoverable via /restore.
 
+# v1.0.0i: ring buffer of recent mirror attempts. Surfaced via
+# /api/diagnostics/health so silent failures stop being silent.
+# Bounded so it can't grow forever.
+import collections as _collections
+_BACKUP_HEALTH: _collections.deque = _collections.deque(maxlen=20)
+_BACKUP_PROPERTY_READY: dict = {"checked": False, "existed": False,
+                                 "created": False, "error": None}
+
+
 def _mirror_state_to_notion(lead_id: str) -> bool:
     """Pull the lead's full local state and write the chunked backup blob
     to its Notion page. Best-effort — failure is logged, not raised, so
     a Notion outage never blocks the user-visible save.
+
+    v1.0.0i: records the attempt in _BACKUP_HEALTH so the diagnostic
+    surface can show recent successes/failures. A streak of failures
+    here usually means the "State Backup" property is missing — the
+    boot-time self-heal should have created it, but if Notion creds
+    changed or DB swapped, we need visibility.
     """
+    from datetime import datetime, timezone
+    attempt = {
+        "lead_id": lead_id,
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "ok": False,
+        "error": None,
+        "bytes": 0,
+        "chunks": 0,
+    }
     try:
         payload = state_backup.gather(lead_id)
         blob = state_backup.encode(payload)
         chunks = state_backup.chunk_for_notion(blob)
+        attempt["bytes"] = len(blob)
+        attempt["chunks"] = len(chunks)
         sync = NotionSync()
         sync.update_page(lead_id, {"state_backup_chunks": chunks})
+        attempt["ok"] = True
+        _BACKUP_HEALTH.append(attempt)
         return True
     except Exception as e:
+        attempt["error"] = str(e)[:300]
+        _BACKUP_HEALTH.append(attempt)
         log.warning("State backup mirror failed for %s: %s", lead_id, e)
         return False
 
@@ -2336,6 +2366,143 @@ def api_lead_restore(page_id: str):
     except Exception as e:
         log.exception("Restore crashed for %s", page_id)
         return jsonify({"error": str(e)}), 500
+
+
+# v1.0.0i: diagnostics + boot-time self-heal of the Notion backup property.
+
+@app.route("/api/diagnostics/health", methods=["GET"])
+def api_diagnostics_health():
+    """Surface the state-of-the-state-backup system. The UI polls this to
+    decide whether to show the "cache wipe likely" banner."""
+    from datetime import datetime, timezone
+    import calls_store
+
+    cache_dir = os.path.join(HERE, "cache")
+    cache_exists = os.path.isdir(cache_dir)
+    cache_file_count = 0
+    leads_with_calls = 0
+    if cache_exists:
+        try:
+            for root, _, files in os.walk(cache_dir):
+                cache_file_count += len(files)
+        except OSError:
+            pass
+        try:
+            calls_root = os.path.join(cache_dir, "calls")
+            if os.path.isdir(calls_root):
+                leads_with_calls = sum(
+                    1 for f in os.listdir(calls_root) if f.endswith(".json")
+                )
+        except OSError:
+            pass
+
+    # Mirror health — last 20 attempts.
+    recent = list(_BACKUP_HEALTH)
+    n_attempts = len(recent)
+    n_ok = sum(1 for a in recent if a.get("ok"))
+    n_fail = n_attempts - n_ok
+    last_error = next(
+        (a.get("error") for a in reversed(recent) if not a.get("ok")), None
+    )
+
+    # Heuristic: a fresh container with empty cache + no successful
+    # mirrors yet is a likely cache-wipe scenario.
+    cache_wipe_suspected = (
+        leads_with_calls == 0 and n_ok == 0
+        # ...unless this is a fresh install with nothing to mirror yet
+        and cache_file_count <= 2  # may have a few seed files
+    )
+
+    return jsonify({
+        "version": "1.0.0i",
+        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "cache": {
+            "dir_exists": cache_exists,
+            "dir_path": cache_dir,
+            "file_count": cache_file_count,
+            "leads_with_calls": leads_with_calls,
+            "wipe_suspected": cache_wipe_suspected,
+        },
+        "notion_backup_property": _BACKUP_PROPERTY_READY,
+        "mirror_health": {
+            "attempts_tracked": n_attempts,
+            "successes": n_ok,
+            "failures": n_fail,
+            "last_error": last_error,
+            "recent": recent[-5:],  # last 5 attempts with full detail
+        },
+        "volume_mount_status": {
+            "mount_path": "/app/cache",
+            "is_mounted": _is_path_on_volume(cache_dir),
+            "note": (
+                "Mount a persistent Railway volume on /app/cache to make "
+                "this permanent. See RAILWAY_VOLUME_MOUNT.md."
+            ),
+        },
+    })
+
+
+def _is_path_on_volume(path: str) -> bool:
+    """Heuristic: on Railway, the volume mount shows up as a separate
+    device (different st_dev) from the container root. False if we
+    can't determine for any reason (treat as safe-default 'not mounted')."""
+    try:
+        root_dev = os.stat("/").st_dev
+        path_dev = os.stat(path).st_dev
+        return root_dev != path_dev
+    except OSError:
+        return False
+
+
+@app.route("/api/lead/<page_id>/notion-history", methods=["GET"])
+def api_lead_notion_history(page_id: str):
+    """v1.0.0i: best-effort recovery surface for PRE-backup data loss.
+
+    Returns the page's current Notion-side text-bearing properties
+    (Fit Summary, Next Steps, Positive Signals, Lead Summary, MEDDICC
+    Notes). Pairs with a UI hint to open the Notion page directly and
+    use Notion's built-in page history (⋯ → Page history) to scroll
+    back through revisions of those fields — which may contain
+    AI-synthesised traces of notes that lived in cache/ before v1.0.0g.
+    """
+    try:
+        sync = NotionSync()
+        return jsonify(sync.get_page_history(page_id))
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Notion history fetch failed for %s: %s", page_id, e)
+        return jsonify({"error": str(e)}), 502
+
+
+def _boot_self_heal_backup_property():
+    """Best-effort: at app startup, ensure the Notion DB has a
+    'State Backup' property. If it doesn't, create it. Captures status
+    into the global so /api/diagnostics/health can surface it.
+
+    Never raises — a startup self-heal must never crash the app.
+    """
+    global _BACKUP_PROPERTY_READY
+    try:
+        sync = NotionSync()
+        result = sync.ensure_state_backup_property()
+        _BACKUP_PROPERTY_READY = result
+        if result.get("created"):
+            log.info("Created 'State Backup' Notion property on boot.")
+        elif result.get("existed"):
+            log.info("'State Backup' Notion property already exists.")
+        elif result.get("error"):
+            log.warning("Boot self-heal of 'State Backup' property failed: %s",
+                         result["error"])
+    except Exception as e:
+        _BACKUP_PROPERTY_READY = {"checked": True, "existed": False,
+                                    "created": False, "error": str(e)}
+        log.warning("Boot self-heal threw: %s", e)
+
+
+# Run the self-heal at import time so it executes whether we're
+# launched via `python server.py` or via gunicorn (Railway). Guarded so
+# tests + the CLI don't trigger Notion calls when creds are absent.
+if os.environ.get("NOTION_API_KEY") and not os.environ.get("SKIP_NOTION_BOOT"):
+    _boot_self_heal_backup_property()
 
 
 if __name__ == "__main__":

@@ -3695,6 +3695,23 @@
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  // v1.0.0h: header status chip — single source of truth. Called from
+  // loadLead (server value), saveLead (server-confirmed value after PATCH),
+  // and the Status dropdown's change handler (live preview before save so
+  // the AE sees their choice reflected immediately at the top of the drawer).
+  function refreshHeaderStatusChip(status) {
+    const statusEl = document.getElementById('ld-status-chip');
+    if (!statusEl) return;
+    const txt = (status == null ? '' : String(status)).trim();
+    if (txt) {
+      statusEl.style.display = 'inline-block';
+      statusEl.textContent = txt;
+    } else {
+      statusEl.style.display = 'none';
+      statusEl.textContent = '';
+    }
+  }
+
   async function loadLead(pageId) {
     try {
       const data = await jsonFetch(`/api/lead/${encodeURIComponent(pageId)}`);
@@ -3709,16 +3726,12 @@
       $('#ld-meta').textContent = lead.last_edited
         ? `Last edited ${new Date(lead.last_edited).toLocaleString()}`
         : '';
-      // v0.10.0g: status chip in the header subtitle row
-      const statusEl = $('#ld-status-chip');
-      if (statusEl) {
-        if (lead.status) {
-          statusEl.style.display = 'inline-block';
-          statusEl.textContent = lead.status;
-        } else {
-          statusEl.style.display = 'none';
-        }
-      }
+      // v0.10.0g: status chip in the header subtitle row.
+      // v1.0.0h: extracted to a helper so saveLead + live dropdown
+      // changes can re-render it. Without this, the chip stuck on its
+      // load-time value — AE flips Status to "Qualified", saves, but
+      // the header still screamed DISQUALIFIED (uppercase via CSS).
+      refreshHeaderStatusChip(lead.status);
       // Populate all fields by their data-ld key
       $$('#lead-drawer [data-ld]').forEach(el => {
         const key = el.dataset.ld;
@@ -4054,6 +4067,11 @@
         });
         drawerState.original = data.lead;
         drawerState.current = { ...data.lead };
+        // v1.0.0h: refresh the header status chip from the server's
+        // confirmed value. Fixes the bug where flipping Status to
+        // "Qualified" + saving left the header chip stuck on the old
+        // "DISQUALIFIED" text from load-time.
+        refreshHeaderStatusChip(data.lead?.status);
         summary.push(`${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`);
         // v0.10.0p: server re-scores when scoring-relevant fields change.
         // Reflect the new ICP in the drawer header pill + add a toast.
@@ -5833,8 +5851,68 @@
     }
   });
 
+  // v1.0.0i: cache-wipe detection banner. Polls /api/diagnostics/health
+  // on init; if the server reports a likely cache wipe (cache empty +
+  // no successful mirrors) AND the Railway volume isn't mounted, show
+  // a persistent red banner driving Ben to mount the volume. The banner
+  // is dismissible per-session (sessionStorage) so it doesn't re-nag if
+  // he's already acknowledged it this tab.
+  async function _checkCacheHealth() {
+    if (sessionStorage.getItem('mr-cache-banner-dismissed') === '1') return;
+    try {
+      const h = await jsonFetch('/api/diagnostics/health');
+      const wipeSuspected = h?.cache?.wipe_suspected;
+      const mounted = h?.volume_mount_status?.is_mounted;
+      const lastErr = h?.mirror_health?.last_error;
+      // Strong signal: cache wipe suspected + volume NOT mounted.
+      if (wipeSuspected && !mounted) {
+        _showCacheWipeBanner({
+          headline: '⚠ Cache wipe detected — your notes are at risk',
+          body: 'Railway redeployed and the persistent volume isn\'t mounted, so this container started with an empty cache. Mount /app/cache on the Railway dashboard (5-minute fix — see RAILWAY_VOLUME_MOUNT.md). Until then, every redeploy will wipe new data.',
+          action: 'Open mount guide',
+          actionHref: '/RAILWAY_VOLUME_MOUNT.md',
+        });
+      } else if (lastErr) {
+        // Less severe but still worth surfacing — a recent backup
+        // mirror failed. The user should know.
+        _showCacheWipeBanner({
+          headline: '⚠ Notion backup mirror failed on a recent save',
+          body: `Latest error: ${lastErr}. Open /api/diagnostics/health for the full picture, or restart the container after checking Notion creds + that the "State Backup" property exists on the database.`,
+          action: 'View diagnostics',
+          actionHref: '/api/diagnostics/health',
+        });
+      }
+    } catch (_) {
+      // Diagnostics endpoint not available — old deploy, ignore.
+    }
+  }
+
+  function _showCacheWipeBanner({ headline, body, action, actionHref }) {
+    const banner = document.createElement('div');
+    banner.id = 'mr-cache-wipe-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:12px 20px;z-index:9999;font-family:var(--mono);font-size:12px;line-height:1.5;display:flex;justify-content:space-between;align-items:start;gap:16px;box-shadow:0 4px 12px rgba(0,0,0,.3);';
+    banner.innerHTML = `
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">${escapeHtml(headline)}</div>
+        <div>${escapeHtml(body)}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <a href="${escapeAttr(actionHref)}" target="_blank" style="background:#fff;color:#dc2626;padding:6px 12px;border-radius:4px;font-weight:600;text-decoration:none;font-size:11px;">${escapeHtml(action)} →</a>
+        <button id="mr-cache-banner-dismiss" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5);padding:6px 12px;border-radius:4px;font-size:11px;cursor:pointer;">Dismiss</button>
+      </div>
+    `;
+    document.body.appendChild(banner);
+    banner.querySelector('#mr-cache-banner-dismiss').addEventListener('click', () => {
+      sessionStorage.setItem('mr-cache-banner-dismissed', '1');
+      banner.remove();
+    });
+  }
+
   async function _runInit() {
     await ensureAuth();
+    // v1.0.0i: fire-and-forget cache-health check. Banner appears
+    // post-init if anything looks off.
+    _checkCacheHealth();
     // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
     // here we sync its icon to the current theme + wire click to flip.
     const _themeBtn = $('#theme-toggle');
@@ -5965,7 +6043,16 @@
     });
     document.addEventListener('change', (e) => {
       if (!e.target.closest('#lead-drawer')) return;
-      if (e.target.matches('[data-ld]')) updateDirtyState();
+      if (e.target.matches('[data-ld]')) {
+        updateDirtyState();
+        // v1.0.0h: status dropdown drives the header chip live, so the
+        // AE sees the chip switch the moment they pick a new status —
+        // no "did my change register?" confusion while the Save button
+        // is glowing dirty.
+        if (e.target.dataset.ld === 'status') {
+          refreshHeaderStatusChip(e.target.value);
+        }
+      }
     });
     // Sourced-for chips also count as dirty.
     document.addEventListener('click', (e) => {

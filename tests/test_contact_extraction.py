@@ -166,42 +166,91 @@ class SeedScriptTests(unittest.TestCase):
         self.assertEqual(partner_names, {"Braze", "Hightouch"})
 
     def test_seed_creates_braze_contacts(self):
+        """v1.0.0h: seed expanded from the original 2-contact stub to the
+        full Braze AMER + EMEA + Partner-org roster. Spot-check that the
+        original priority names still land + the roster has the bulk
+        we'd expect."""
         import seed_command_centre_partners as seed
         import partner_contacts_store
         seed.seed()
         braze = partner_contacts_store.list_contacts("braze")
         names = {c["name"] for c in braze}
-        self.assertEqual(names, {"Glenn Bonforte", "Marina Klusas"})
+        # The original two priority contacts must still be present.
+        self.assertIn("Glenn Bonforte", names)
+        self.assertIn("Marina Klusas", names)
+        # And a sampling of the newly-added leadership + AEs.
+        for must_have in ("Eric Sanders", "Marlon Hills", "Stephanie Chang",
+                          "William Thomas", "Eleanor Wolf", "Katie Cornwell"):
+            self.assertIn(must_have, names, f"missing {must_have} from roster")
+        # Roster should be in the comprehensive range, not the old 2.
+        self.assertGreater(len(braze), 100,
+                            f"Roster looks too thin ({len(braze)} contacts) — "
+                            f"expected the full Command Centre seed")
 
     def test_seed_respects_tag_lists(self):
+        """Every contact carries command_centre_seed; MR-priority names
+        carry mr_priority + tighter cadence; inferred emails carry
+        email_inferred."""
         import seed_command_centre_partners as seed
         import partner_contacts_store
         seed.seed()
         braze = partner_contacts_store.list_contacts("braze")
-        glenn = next(c for c in braze if c["name"] == "Glenn Bonforte")
-        # Glenn covers multiple regions
-        self.assertEqual(set(glenn["territories"]),
-                          {"Strategic Enterprise", "Enterprise"})
-        self.assertEqual(set(glenn["regions"]),
-                          {"East Coast", "West Coast", "Central"})
+        for c in braze:
+            self.assertIn("command_centre_seed", c.get("tags", []),
+                          f"{c['name']} missing command_centre_seed tag")
+        # MR-priority spot-check: Marina is on Ben's priority list.
+        marina = next(c for c in braze if c["name"] == "Marina Klusas")
+        self.assertIn("mr_priority", marina["tags"])
+        self.assertEqual(marina["cadence_days"], 14)
+        self.assertEqual(marina["email"], "Marina.Klusas@braze.com")
+        # Email-override exception: Emmanouela uses the e.androulaki form.
+        em = next(c for c in braze if c["name"] == "Emmanouela Androulaki")
+        self.assertEqual(em["email"], "e.androulaki@braze.com")
+        self.assertNotIn("email_inferred", em["tags"])
 
     def test_seed_idempotent(self):
-        """Re-running shouldn't duplicate records."""
+        """Re-running upserts by stable id rather than duplicating rows."""
         import seed_command_centre_partners as seed
         import partner_contacts_store
         seed.seed()
+        first_count = len(partner_contacts_store.list_contacts("braze"))
         seed.seed()
-        braze = partner_contacts_store.list_contacts("braze")
-        self.assertEqual(len(braze), 2)  # not 4
+        second_count = len(partner_contacts_store.list_contacts("braze"))
+        self.assertEqual(first_count, second_count,
+                          "Re-running seed duplicated rows — id stability broke")
 
-    def test_seed_creates_hightouch_partner_without_contacts(self):
-        """We deliberately don't fabricate Hightouch contacts — the
-        partner is registered, contacts are left for the AE to add."""
+    def test_seed_creates_hightouch_partner_with_full_roster(self):
+        """v1.0.0h: Hightouch now has its full NA Sales roster seeded
+        too, with all emails inferred (no explicit emails supplied)."""
         import seed_command_centre_partners as seed
         import partner_contacts_store, partners_store
         seed.seed()
         self.assertIsNotNone(partners_store.get_partner("hightouch"))
-        self.assertEqual(partner_contacts_store.list_contacts("hightouch"), [])
+        ht = partner_contacts_store.list_contacts("hightouch")
+        names = {c["name"] for c in ht}
+        # Roots: Vinod + John must be present.
+        self.assertIn("Vinod Venkatasubramaniam", names)
+        self.assertIn("John Knudsen", names)
+        # All Hightouch emails should be inferred since no overrides given.
+        for c in ht:
+            self.assertIn("email_inferred", c.get("tags", []),
+                          f"{c['name']} should be flagged email_inferred")
+            self.assertTrue(c["email"].endswith("@hightouch.com"))
+
+    def test_seed_hierarchy_intact(self):
+        """Every reports_to_id should resolve to a real contact in the
+        same partner — no dangling links."""
+        import seed_command_centre_partners as seed
+        import partner_contacts_store
+        seed.seed()
+        for partner_id in ("braze", "hightouch"):
+            contacts = partner_contacts_store.list_contacts(partner_id)
+            ids = {c["id"] for c in contacts}
+            for c in contacts:
+                ref = c.get("reports_to_id")
+                if ref:
+                    self.assertIn(ref, ids,
+                                  f"{c['name']} → {ref} (no such contact in {partner_id})")
 
 
 if __name__ == "__main__":
