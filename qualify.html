@@ -1011,6 +1011,7 @@
       <div class="hero-head">
         <span class="hero-title" id="ld-summary-heading">Lead Summary</span>
         <div class="btn-row">
+          <button class="btn ghost" id="ld-summary-copy" type="button" style="padding:4px 10px;font-size:11px;" title="Copy summary for Slack / email / Notion">📋 Copy</button>
           <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
         </div>
       </div>
@@ -2312,6 +2313,7 @@
                 ${aiTag}${editedBadge}
               </div>
               <div class="btn-row" style="flex-shrink:0;">
+                <button class="btn ghost" type="button" data-call-copy="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;" title="Copy synthesised note">📋 Copy</button>
                 <button class="btn ghost" type="button" data-call-edit="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;">✎ Edit note</button>
                 <button class="btn ghost" type="button" data-call-del="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
               </div>
@@ -2328,6 +2330,17 @@
       });
       el.querySelectorAll('[data-call-edit]').forEach(b => {
         b.addEventListener('click', () => openCallEditor(leadId, b.dataset.callEdit));
+      });
+      // v0.10.0r: per-call copy button — copies the synthesised note text
+      // to the clipboard for sharing in Slack / email / Notion / etc.
+      el.querySelectorAll('[data-call-copy]').forEach(b => {
+        b.addEventListener('click', () => {
+          const call = (calls || []).find(x => x.id === b.dataset.callCopy);
+          if (!call) { toast('Call not found', 'error'); return; }
+          const text = formatNoteForCopy(call);
+          if (!text.trim()) { toast('Nothing to copy yet — no synthesised note', 'error'); return; }
+          copyToClipboard(text, b);
+        });
       });
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
@@ -2387,6 +2400,8 @@
 
   function renderAiLeadSummary(ai, calls) {
     const el = $('#ld-notes-summary');
+    // Cache so the header Copy button can read the structured data.
+    if (drawerState.id) _summaryCache[drawerState.id] = ai;
     const when = ai.generated_at ? new Date(ai.generated_at).toLocaleString() : '';
     const factsHtml = (ai.key_facts || []).map(f =>
       `<li style="margin:3px 0;">${escapeHtml(f)}</li>`).join('');
@@ -2509,6 +2524,9 @@
 
   // Tiny cache of the last calls list per lead so the editor can read source text.
   const _callsCache = {};
+  // v0.10.0r: stash the latest rendered Lead Summary per lead so the copy
+  // button can grab the structured data without re-fetching.
+  const _summaryCache = {};
   function pbCachedCalls(leadId) { return _callsCache[leadId]; }
 
   async function saveCallEdit(leadId, callId, note) {
@@ -3180,6 +3198,75 @@
   // ---- Helpers ----------------------------------------------------------
   function prettyKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // v0.10.0r: copy-to-clipboard helper. Tries the modern async API first
+  // (works on https / localhost), falls back to the legacy execCommand
+  // approach for older browsers + non-secure contexts.
+  async function copyToClipboard(text, sourceBtn) {
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch (e) { ok = false; console.warn('[copy]', e); }
+    if (sourceBtn) {
+      const original = sourceBtn.innerHTML;
+      sourceBtn.innerHTML = ok ? '✓ Copied' : '× Copy failed';
+      setTimeout(() => { sourceBtn.innerHTML = original; }, 1400);
+    }
+    toast(ok ? 'Copied to clipboard' : 'Copy failed — long-press the text to copy manually',
+          ok ? 'success' : 'error');
+    return ok;
+  }
+
+  // Format a synthesised call note for clipboard. The note is already
+  // markdown so we ship it as-is, optionally prefixing with metadata so
+  // pasting elsewhere carries context.
+  function formatNoteForCopy(call) {
+    const lines = [];
+    const when = call.created_at ? new Date(call.created_at).toLocaleString() : '';
+    const header = [call.type ? call.type.toUpperCase() : 'NOTE',
+                    call.title || '',
+                    when].filter(Boolean).join(' · ');
+    if (header) lines.push(header, '');
+    const synth = call.note || call.extracted?.synthesised_note || '';
+    if (synth) lines.push(synth);
+    return lines.join('\n');
+  }
+
+  // Format the AI Lead Summary for clipboard as a portable markdown block.
+  function formatLeadSummaryForCopy(ai, company) {
+    const lines = [];
+    if (company) lines.push(`# Lead Summary — ${company}`, '');
+    if (ai.state_of_play) lines.push(ai.state_of_play, '');
+    if ((ai.key_facts || []).length) {
+      lines.push('**Key facts**');
+      ai.key_facts.forEach(f => lines.push(`- ${f}`));
+      lines.push('');
+    }
+    if ((ai.open_questions || []).length) {
+      lines.push('**Open questions**');
+      ai.open_questions.forEach(q => lines.push(`- ${q}`));
+      lines.push('');
+    }
+    if (ai.next_action) lines.push(`**Next action:** ${ai.next_action}`, '');
+    if ((ai.risks || []).length) {
+      lines.push('**Risks**');
+      ai.risks.forEach(r => lines.push(`- ${r}`));
+      lines.push('');
+    }
+    if (ai.generated_at) lines.push(`_Generated ${ai.generated_at} by Claude_`);
+    return lines.join('\n').trim();
+  }
   function escapeAttr(s) { return escapeHtml(s); }
   const CURRENCY_SYMBOL = { USD: '$', GBP: '£', EUR: '€' };
   function fmtUSD(n) { return '$' + Math.round(n).toLocaleString(); }
@@ -4407,6 +4494,16 @@
       if (drawerState.id) addCall(drawerState.id);
     });
     $('#ld-summary-refresh').addEventListener('click', refreshLeadSummary);
+    // v0.10.0r: Lead Summary copy → markdown clipboard.
+    $('#ld-summary-copy').addEventListener('click', (e) => {
+      const ai = _summaryCache[drawerState.id];
+      if (!ai || !ai.state_of_play) {
+        toast('No AI summary yet — click ✨ Refresh to generate one', 'error');
+        return;
+      }
+      const company = drawerState.original?.company || '';
+      copyToClipboard(formatLeadSummaryForCopy(ai, company), e.currentTarget);
+    });
     // v0.10.0g: dirty-state tracking. Any edit anywhere in the drawer
     // bumps the Save button into "primary" mode + shows the count badge.
     document.addEventListener('input', (e) => {

@@ -241,17 +241,33 @@ DEFAULT_PEOPLE_TITLES = [
     "Head of Marketing", "Head of CRM", "Head of Lifecycle", "Head of Growth",
     "Chief Marketing Officer", "CMO",
     "Chief Customer Officer", "CCO",
+    # Martech + Marketing Operations (v0.10.0r — was the gap behind Ben's
+    # "only marketing contacts" feedback; Martech ops owns the CDP + ESP
+    # decision in the QSR / retail / travel buyers we sell into)
+    "VP Marketing Technology", "VP Martech",
+    "Director Marketing Technology", "Director Martech",
+    "Head of Marketing Technology", "Head of Martech",
+    "Marketing Technology Lead", "Martech Lead", "Martech Architect",
+    "Marketing Technologist",
+    "VP Marketing Operations", "Director Marketing Operations",
+    "Head of Marketing Operations", "Marketing Operations Manager",
+    "Senior Manager Marketing Operations",
+    "Director Marketing Technology & Analytics",
     # Digital leadership
     "Chief Digital Officer", "CDO",
     "Chief Digital Transformation Officer", "CDTO",
     "VP Digital", "Director Digital", "Head of Digital",
     "Head of Digital Marketing", "Director Digital Marketing",
+    "Director Digital Experience", "Head of Digital Experience",
+    "Director Digital Product", "Head of Digital Product",
     # Data leadership
     "Chief Data Officer", "Chief Data and Analytics Officer",
     "VP Data", "Director Data", "Head of Data",
     "Head of Data Engineering", "Director Data Engineering",
     "Head of Analytics", "VP Analytics", "Director Analytics",
     "Head of Customer Data", "Director Customer Data",
+    "Head of Data Platform", "Director Data Platform",
+    "Head of Data Science", "Director Data Science",
 ]
 
 

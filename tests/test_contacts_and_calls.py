@@ -25,6 +25,20 @@ class ApolloRolesTests(unittest.TestCase):
         import apollo
         self.assertIn("Chief Digital Transformation Officer", apollo.DEFAULT_PEOPLE_TITLES)
 
+    def test_includes_martech_and_marketing_ops(self):
+        """v0.10.0r: Martech / Marketing Ops titles must be in the default
+        list — they're often the real CDP/ESP decision-makers in QSR /
+        retail / travel buyers, not the CMO."""
+        import apollo
+        titles_lc = [t.lower() for t in apollo.DEFAULT_PEOPLE_TITLES]
+        required_substrings = ["martech", "marketing technology",
+                                "marketing operations"]
+        for needle in required_substrings:
+            self.assertTrue(
+                any(needle in t for t in titles_lc),
+                f"Expected '{needle}' in default Apollo title list",
+            )
+
 
 class ContactsStoreTests(unittest.TestCase):
     def setUp(self):

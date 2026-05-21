@@ -5,6 +5,66 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0r] — 2026-05-21 — Martech contacts + clipboard share for notes
+
+Two AE-quality-of-life asks landed together.
+
+### Added — Martech / Marketing Operations titles in Apollo search
+`DEFAULT_PEOPLE_TITLES` was missing the Marketing Technology /
+Marketing Operations roles that actually own the CDP + ESP decision
+in QSR / retail / travel buyers. Now includes:
+
+- VP / Director / Head of Marketing Technology
+- VP / Director / Head of Martech
+- Martech Lead, Martech Architect, Marketing Technologist
+- VP / Director / Head of Marketing Operations
+- Marketing Operations Manager, Senior Manager Marketing Operations
+- Director Marketing Technology & Analytics
+- Director / Head of Digital Experience
+- Director / Head of Digital Product
+- Head / Director of Data Platform
+- Head / Director of Data Science
+
+`qualify_service.qualify()` uses the default list (no consumer
+changes), so every new qualification picks them up. Existing
+qualified leads keep their saved stakeholders; re-run qualification
+on a lead if you want to refresh the contact pull with the broader
+title net.
+
+### Added — Copy buttons for synthesised notes
+Per Ben's feedback that the team needs to share notes externally.
+
+- **Per-call 📋 Copy button** on every call card (next to ✎ Edit
+  note). Copies the synthesised note as portable markdown, prefixed
+  with TYPE · TITLE · TIMESTAMP. Drops cleanly into Slack, email,
+  Notion.
+- **Lead Summary 📋 Copy button** in the drawer hero. Copies the
+  whole structured summary as markdown:
+  ```
+  # Lead Summary — <Company>
+  <state-of-play>
+  **Key facts**
+  - ...
+  **Open questions**
+  - ...
+  **Next action:** ...
+  **Risks**
+  - ...
+  _Generated <when> by Claude_
+  ```
+- New `copyToClipboard(text, sourceBtn)` helper. Uses modern
+  `navigator.clipboard` on https/localhost; falls back to
+  `execCommand('copy')` on non-secure / older browsers. Button
+  flashes "✓ Copied" or "× Copy failed" for 1.4s.
+- New `formatNoteForCopy(call)` + `formatLeadSummaryForCopy(ai,
+  company)` formatters keep clipboard output consistent.
+- Latest summary cached client-side per lead in `_summaryCache` so
+  the header copy can grab structured data without re-fetching.
+
+### Tests
+- 305 total (+1). `test_includes_martech_and_marketing_ops` pins
+  the new titles.
+
 ## [0.10.0q] — 2026-05-21 — Light theme + theme switcher
 
 Adds a light theme alongside the existing dark one. AE clicks the
