@@ -1259,6 +1259,10 @@
       </div>
     </div>
     <div class="btn-row" style="flex-shrink:0;">
+      <!-- v1.0.0g: Restore from Notion (visible when local cache looks empty) -->
+      <button id="ld-restore" class="btn ghost" type="button"
+              style="padding:7px 12px;font-size:12px;display:none;background:rgba(239,68,68,.10);color:var(--red);border-color:rgba(239,68,68,.4);"
+              title="Local cache is empty for this lead — restore notes/projects/contacts from Notion backup">⟲ Restore</button>
       <button id="ld-rescore" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;" title="Recompute ICP score from current Notion values">↻ Rescore</button>
       <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
@@ -2841,6 +2845,65 @@
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  // v1.0.0g: durable state restore (Railway cache wipe defence).
+  // After loadLead, we know whether this lead has any local data. If
+  // calls + contacts are both empty AND Notion has a state_backup
+  // property, surface the Restore button.
+  async function checkRestoreAvailability(leadId, lead) {
+    const btn = $('#ld-restore');
+    if (!btn) return;
+    btn.style.display = 'none';  // default: hidden
+    try {
+      // Check local emptiness by inspecting cached fetches.
+      const callsResp = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`);
+      const contactsResp = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`);
+      const localEmpty = (callsResp.calls || []).length === 0 &&
+                          (contactsResp.contacts || []).length === 0;
+      // Notion backup detection: the lead payload includes `state_backup`
+      // (the joined chunks). If it's non-empty, restore is available.
+      const hasBackup = !!(lead.state_backup || '').trim();
+      if (localEmpty && hasBackup) {
+        btn.style.display = 'inline-flex';
+        btn.title = 'Local cache is empty but a Notion backup exists — click to restore notes/contacts/project for this lead';
+      }
+    } catch (e) {
+      console.warn('[restore-check]', e);
+    }
+  }
+
+  async function restoreLeadFromBackup() {
+    if (!drawerState.id) return;
+    if (!window.confirm('Restore this lead\'s notes / contacts / project from its Notion backup? Any local data for this lead will be overwritten.')) return;
+    const btn = $('#ld-restore');
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Restoring…';
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/restore`, {
+        method: 'POST',
+      });
+      const s = data.summary || {};
+      const parts = [];
+      if (s.calls) parts.push(`${s.calls} call${s.calls === 1 ? '' : 's'}`);
+      if (s.contacts) parts.push(`${s.contacts} contact${s.contacts === 1 ? '' : 's'}`);
+      if (s.contact_notes) parts.push(`${s.contact_notes} note${s.contact_notes === 1 ? '' : 's'}`);
+      if (s.project_restored) parts.push('project');
+      if (s.pricing_restored) parts.push('pricing');
+      if (s.roadmap_restored) parts.push('roadmap');
+      if (s.summary_restored) parts.push('summary');
+      toast(`Restored ${parts.join(' + ') || 'state'}` + (data.captured_at ? ` (backup from ${new Date(data.captured_at).toLocaleString()})` : ''), 'success');
+      btn.style.display = 'none';
+      // Reload the drawer to pick up restored state.
+      await loadLead(drawerState.id);
+    } catch (e) {
+      console.error('[restore]', e);
+      toast(`Restore failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  }
+
   // v1.0.0f (Tier 3c): AI contact suggestions from notes.
   // Server returns `contact_suggestions: [{name, title, email, role}]`
   // on the call-add response — names the AI spotted in the transcript
@@ -3678,6 +3741,9 @@
       // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);
       loadLeadPartnerContacts(pageId);
+      // v1.0.0g: surface Restore button if local cache appears empty
+      // (no calls AND no contacts) AND a Notion backup exists.
+      checkRestoreAvailability(pageId, lead);
       loadLeadCalls(pageId);
       loadLeadProject(pageId, lead.company);
       // Reset dirty state — freshly loaded data is the new baseline.
@@ -5859,6 +5925,8 @@
     });
     // v0.10.0w: explicit Rescore action.
     $('#ld-rescore').addEventListener('click', rescoreCurrentLead);
+    // v1.0.0g: durable state restore.
+    $('#ld-restore').addEventListener('click', restoreLeadFromBackup);
     // Global error capture — log only, no UI noise.
     window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
     window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));

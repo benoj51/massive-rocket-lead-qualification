@@ -43,6 +43,7 @@ import partner_contacts_store
 import partner_notes_store
 import partners_store
 import project_preview
+import state_backup
 import contacts_store
 import criteria_store
 import hubspot_sync
@@ -714,6 +715,10 @@ def api_calls_add(lead_id: str):
         except Exception as e:
             log.warning("Contact suggestion dedupe failed for %s: %s", lead_id, e)
 
+    # v1.0.0g: mirror full state to Notion after every call save — the
+    # call is the highest-pain loss case if cache disappears. Best-effort.
+    _mirror_state_to_notion(lead_id)
+
     return jsonify({
         "call": record,
         "rolling": calls_store.aggregate_extractions(lead_id),
@@ -1150,6 +1155,8 @@ def api_scope_upsert(lead_id: str):
         audit.log_event("scope_saved", actor=_actor(), lead_id=lead_id,
                         company=company_name,
                         validation_status=project.validation_status)
+        # v1.0.0g: durable backup after project save.
+        _mirror_state_to_notion(lead_id)
         return jsonify({
             "project": scope_module.to_dict(project),
             "summary": scope_module.project_summary(project),
@@ -2256,6 +2263,79 @@ def api_partner_contact_assigned_leads(partner_id: str, contact_id: str):
     for r in rows:
         r["lead_name"] = name_by_slug.get(r.get("lead_id") or "", r.get("lead_id"))
     return jsonify({"leads": rows, "count": len(rows)})
+
+
+# v1.0.0g: durable state backup / restore -----------------------------------
+# Railway's filesystem is ephemeral — every deploy wipes cache/. The
+# defence is to mirror every critical write to a "State Backup" rich-text
+# property on the lead's Notion page. Recoverable via /restore.
+
+def _mirror_state_to_notion(lead_id: str) -> bool:
+    """Pull the lead's full local state and write the chunked backup blob
+    to its Notion page. Best-effort — failure is logged, not raised, so
+    a Notion outage never blocks the user-visible save.
+    """
+    try:
+        payload = state_backup.gather(lead_id)
+        blob = state_backup.encode(payload)
+        chunks = state_backup.chunk_for_notion(blob)
+        sync = NotionSync()
+        sync.update_page(lead_id, {"state_backup_chunks": chunks})
+        return True
+    except Exception as e:
+        log.warning("State backup mirror failed for %s: %s", lead_id, e)
+        return False
+
+
+@app.route("/api/lead/<page_id>/backup", methods=["GET"])
+def api_lead_backup(page_id: str):
+    """Return the lead's full state as a JSON download. Useful as a
+    pre-deploy safety net (Ben can save this locally before pushing)."""
+    try:
+        payload = state_backup.gather(page_id)
+        return jsonify({"payload": payload, "encoded": state_backup.encode(payload)})
+    except Exception as e:
+        log.exception("Backup gather failed for %s", page_id)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/lead/<page_id>/backup/mirror", methods=["POST"])
+def api_lead_backup_mirror(page_id: str):
+    """Explicit 'save backup to Notion now' button. Same logic as the
+    auto-mirror on writes, surfaced as a manual action for paranoia /
+    after-the-fact safety."""
+    ok = _mirror_state_to_notion(page_id)
+    if not ok:
+        return jsonify({"error": "mirror failed — see server log"}), 502
+    audit.log_event("state_backup_mirrored", actor=_actor(), page_id=page_id,
+                    trigger="manual")
+    return jsonify({"mirrored": True})
+
+
+@app.route("/api/lead/<page_id>/restore", methods=["POST"])
+def api_lead_restore(page_id: str):
+    """Restore from the Notion state-backup property. Triggered by the
+    AE when they notice local cache is empty (post-redeploy)."""
+    try:
+        sync = NotionSync()
+        page = sync.get_page(page_id)
+        blob = (page or {}).get("state_backup") or ""
+        if not blob:
+            return jsonify({"error": "no backup found on this lead's Notion page",
+                             "hint": "save the lead via the drawer first so an "
+                                      "auto-mirror runs, or POST /backup/mirror"}), 404
+        payload = state_backup.decode(blob)
+        summary = state_backup.apply_backup(page_id, payload)
+        audit.log_event("state_backup_restored", actor=_actor(),
+                        page_id=page_id, summary=summary)
+        return jsonify({"restored": True, "summary": summary,
+                         "captured_at": payload.get("captured_at")})
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Restore failed for %s: %s", page_id, e)
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        log.exception("Restore crashed for %s", page_id)
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

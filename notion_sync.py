@@ -402,6 +402,9 @@ def _page_to_detail(page: dict) -> dict:
         "qualified_date": _extract_text(props.get("Qualified Date")),
         "opportunity_source": _extract_text(props.get("Partner Source")),
         "sourced_for_partners": _extract_multi_select(props.get("Sourced For")),
+        # v1.0.0g: durable state backup (chunked rich_text). Joined here
+        # so the API consumer doesn't have to think about chunking.
+        "state_backup": _extract_text(props.get("State Backup")),
     }
 
 
@@ -634,6 +637,22 @@ class NotionSync:
             else:
                 mapped = mapping.get(value, value) if mapping else value
                 props[prop_name] = {"select": {"name": mapped}}
+        # v1.0.0g: chunked state-backup property — durable lifeline against
+        # Railway cache wipes. Accepts a list of pre-chunked rich-text
+        # entries (each <2000 chars). Skips silently if not provided.
+        if "state_backup_chunks" in edits:
+            chunks = edits["state_backup_chunks"] or []
+            if chunks:
+                props["State Backup"] = {
+                    "rich_text": [
+                        {"type": "text", "text": {"content": str(c)[:1990]}}
+                        for c in chunks
+                    ],
+                }
+            else:
+                # Explicit empty list = clear the property
+                props["State Backup"] = {"rich_text": []}
+
         # Rich text fields
         # NB: "Lead Summary" (v0.10.0f) requires the property to exist in
         # the Notion DB. If it doesn't, Notion returns 400; callers should

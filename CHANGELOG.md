@@ -5,6 +5,99 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0g] — 2026-05-21 — Durable state backup + ⟲ Restore (cache-loss defence)
+
+Critical fix for Ben's report that notes + project builds disappeared.
+Root cause: Railway's filesystem is ephemeral — every redeploy wipes
+`cache/`. We'd been warning about this; this release ships the defence.
+
+### What you do (once)
+Mount a 1 GB Railway volume on `/app/cache` — instructions in the new
+`RAILWAY_VOLUME_MOUNT.md`. 5 minutes via the Railway dashboard. After
+this, nothing wipes ever again.
+
+### What the platform does (every save, automatically)
+- Every call save, project save → server compresses the lead's full
+  local state (calls + contacts + contact-notes + project + pricing +
+  roadmap + AI summary) into gzip+base64 JSON, chunks it into
+  ~1900-char rich-text entries, writes them to a new **"State Backup"**
+  property on the lead's Notion page.
+- Best-effort: if Notion is down, the user-visible save still succeeds;
+  the mirror just logs a warning.
+
+### What you do (after a wipe)
+- Open any lead drawer. If the local cache is empty AND Notion has a
+  backup for this lead, a red **⟲ Restore** button appears in the
+  drawer header next to ↻ Rescore.
+- Click → confirms with the AE → server pulls the chunked blob from
+  Notion → decodes → writes back to every store (calls, contacts,
+  contact-notes, project, pricing, roadmap, summary).
+- Toast: *"Restored 7 calls + 3 contacts + project (backup from
+  21 May 22:30)"*.
+
+### New backend
+- **`state_backup.py`** module:
+  - `gather(lead_id)` → full state dict
+  - `encode(payload)` → JSON → gzip → base64 string
+  - `decode(blob)` → reverse, raises ValueError on malformed input
+  - `chunk_for_notion(blob, chunk_size=1900)` → list of safe rich-text
+    chunks (Notion's per-entry cap is 2000 chars)
+  - `apply_backup(lead_id, payload)` → idempotent restore
+  - `is_empty_cache_for(lead_id)` → True when calls + contacts +
+    project are all absent
+- **New writable Notion property**: `"State Backup"` (chunked
+  rich-text). `notion_sync.update_page` accepts
+  `{"state_backup_chunks": [...]}` and writes each chunk as a separate
+  rich_text entry under a single property.
+- **`_extract_text`** already concatenates all rich_text entries in
+  read order — no extra work to join chunks on the read side.
+- **`_page_to_detail`** now includes `state_backup` (the joined
+  chunks) so `GET /api/lead/<id>` exposes it.
+
+### New endpoints
+- `GET  /api/lead/<id>/backup` — full state as a JSON download
+  (payload + encoded blob). Use as a pre-deploy safety net.
+- `POST /api/lead/<id>/backup/mirror` — explicit "save backup to
+  Notion now". Same logic as the auto-mirror; useful for paranoia.
+- `POST /api/lead/<id>/restore` — pull from Notion and re-hydrate
+  the local cache. 404 with a hint if no backup exists.
+
+### UI
+- **⟲ Restore button** in the drawer header (between ↻ Rescore and
+  Save). Red tinted to signal recovery action. Only visible when
+  local cache for this lead is empty AND a Notion backup exists.
+- **Confirm dialog** before restoring (any local data gets
+  overwritten).
+- **Detailed success toast** lists what was restored + the
+  backup's capture timestamp.
+
+### Auto-mirror integrations
+- `POST /api/calls/<id>` — mirrors after every call save (most painful
+  loss case).
+- `POST /api/scope/<id>` — mirrors after every project save.
+- Other writes (contacts, pricing, roadmap) get mirrored via the next
+  call or project save; or via manual `POST /backup/mirror`.
+
+### Tests
+- 438 total (+13). New `test_state_backup.py`:
+  - Encode/chunk/decode round-trips (small + large payloads)
+  - Decode rejects malformed / empty input
+  - Gather assembles every store's slice correctly
+  - Restore re-hydrates from a backup after a simulated cache wipe
+  - Restore is idempotent (twice = same end state)
+  - `is_empty_cache_for` returns True iff calls + contacts + project
+    are all absent
+  - Endpoint: backup returns payload + encoded blob
+  - Endpoint: restore returns 404 + hint when no Notion backup
+  - Endpoint: restore from a mocked Notion State Backup property
+    actually re-hydrates the local stores
+
+### Docs
+- **`RAILWAY_VOLUME_MOUNT.md`** — step-by-step Railway dashboard
+  instructions + verification path. Mount the volume, redeploy,
+  verify with a test note. Also clarifies what's recoverable
+  (post-v1.0.0g) vs gone (pre-feature data).
+
 ## [1.0.0f] — 2026-05-21 — Tier 3c + Command Centre seed (Braze + Hightouch)
 
 Closes Tier 3 of the contact-management plan + seeds the Partners CRM
