@@ -5,6 +5,72 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0b] — 2026-05-21 — Tier 1d: engagement timeline per lead contact
+
+Per-contact notes finally land for the lead side, mirroring the
+partner-side notes shape. Every lead contact now has a chronological
+engagement timeline — calls, intros, emails, follow-ups, generic
+touches — all dated, all attributable, all queried in one place.
+
+### Added — backend
+- **`lead_contact_notes_store.py`** — per-(lead, contact) notes at
+  `cache/lead_contact_notes/<lead_slug>__<contact_id>.json`.
+  - Types: `call` / `email` / `intro` / `touch` / `follow_up` / `other`.
+    Unknown types fall back to `other`.
+  - Newest-first ordering with microsecond precision (multiple-per-
+    second adds don't collide).
+  - `delete_all_for_contact()` for cascade cleanup.
+- **`POST /api/contacts/<lead_id>/<contact_id>/notes`** auto-bumps
+  the contact's `last_touched_at` — a note IS a touch, no separate
+  ✓ click needed. Returns the new note + fresh notes list + the
+  bumped contact with annotated touch state.
+- **`GET /api/contacts/<lead_id>/<contact_id>/notes`** — list.
+- **`DELETE /api/contacts/<lead_id>/<contact_id>/notes/<note_id>`** —
+  single-note delete.
+- **Contact delete now cascades notes** so removing a contact never
+  leaks orphan notes.
+
+### Added — UI
+- **📝 button per lead contact row** (next to ✓ touch, ✎ edit, ★ key,
+  × delete). Opens an inline engagement-timeline panel ABOVE the
+  contact list.
+- **Timeline panel** mirrors the partner-side design:
+  - Type dropdown + textarea for adding a new entry
+  - **"Add note · log touch"** primary button (makes the implicit
+    touch-on-note behaviour explicit)
+  - Newest-first list below with type pill (accent-coloured) +
+    timestamp + author + × delete per entry
+- **Toast on add**: *"Note added · touch logged"*
+- **Auto-refresh**: contact list reloads after a note add so the
+  last-touch column updates inline (overdue chip disappears, cadence
+  clock resets).
+
+### Tests
+- 393 total (+11). New `test_lead_contact_notes.py`:
+  - Store: content required, newest-first listing, type fallback,
+    scoping per (lead, contact), cascade delete, single-note delete
+  - Endpoints: list empty, add-bumps-touch, delete, cascade on
+    contact delete, 400 on missing content
+
+### Contact-management plan — progress
+- ✅ Tier 1a · Partner cadence + overdue (v0.10.0z)
+- ✅ Tier 1b · Partner ↔ lead assignments (v0.11.0)
+- ✅ Tier 1c · Lead-side cadence + status parity (v1.0.0a)
+- ✅ **Tier 1d · Per-lead-contact engagement timeline (this release)**
+- Next: Tier 2 — cross-surface contact search + "My contacts" view.
+
+### Symmetry achieved
+Lead contacts and partner contacts now share:
+- `name / title / email / linkedin_url / phone`
+- `cadence_days / last_touched_at / status` (lifecycle)
+- Per-contact notes (engagement timeline)
+- Auto-touch on note add
+- Explicit ✓ touch endpoint
+- Cross-surface overdue roster endpoint
+
+The data models stay distinct (per the design decision) but the
+behaviour is now uniform — AE muscle memory carries across both.
+
 ## [1.0.0a] — 2026-05-21 — Tier 1c: touch cadence + status lifecycle on lead contacts
 
 Parity with partner contacts. Every lead-side contact now carries the

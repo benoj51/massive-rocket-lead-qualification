@@ -2682,6 +2682,7 @@
             </div>
             <div class="btn-row" style="flex-shrink:0;">
               <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">✓</button>
+              <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Engagement timeline">📝</button>
               <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit contact">✎</button>
               ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">★</button>`}
               <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
@@ -2702,6 +2703,12 @@
         b.addEventListener('click', () => {
           const c = contacts.find(x => x.id === b.dataset.contactEdit);
           if (c) openLeadContactEditForm(leadId, c);
+        });
+      });
+      el.querySelectorAll('[data-contact-notes]').forEach(b => {
+        b.addEventListener('click', () => {
+          const c = contacts.find(x => x.id === b.dataset.contactNotes);
+          if (c) openLeadContactNotes(leadId, c);
         });
       });
     } catch (e) {
@@ -2725,6 +2732,99 @@
       toast('Marked as touched', 'success');
       await loadLeadContacts(leadId);
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  // v1.0.0b (Tier 1d): per-lead-contact engagement timeline.
+  // Panel mirrors the partner-side notes panel — newest-first list,
+  // type pill per entry, add-note input above. Adding a note auto-bumps
+  // the contact's last_touched_at.
+  async function openLeadContactNotes(leadId, contact) {
+    const el = $('#ld-contacts-list');
+    let panel = $('#ld-contact-notes-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'ld-contact-notes-panel';
+      panel.style.cssText = 'margin-bottom:10px;';
+      el.insertBefore(panel, el.firstChild);
+    }
+    const NOTE_TYPES = ['call', 'email', 'intro', 'touch', 'follow_up', 'other'];
+    panel.innerHTML = `
+      <div style="background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">📝 Engagement timeline — ${escapeHtml(contact.name || '—')}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">${escapeHtml(contact.title || '')}${contact.email ? ' · ' + escapeHtml(contact.email) : ''}</div>
+          </div>
+          <button id="lcnt-close" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Close</button>
+        </div>
+        <div class="row" style="grid-template-columns:140px 1fr;gap:8px;margin-bottom:8px;">
+          <div class="field" style="margin:0;"><label>Type</label>
+            <select id="lcnt-type">${NOTE_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="margin:0;"><label>Note</label>
+            <textarea id="lcnt-content" rows="3" placeholder="What happened, what's next, key takeaway…"></textarea>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button id="lcnt-add" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add note · log touch</button>
+        </div>
+        <div id="lcnt-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    `;
+    $('#lcnt-close').addEventListener('click', () => panel.remove());
+
+    async function refreshNotes() {
+      try {
+        const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contact.id)}/notes`);
+        const notes = data.notes || [];
+        const listEl = $('#lcnt-list');
+        if (!notes.length) {
+          listEl.innerHTML = '<div class="muted" style="font-size:12px;font-style:italic;">No engagement yet — add the first entry above.</div>';
+          return;
+        }
+        listEl.innerHTML = notes.map(n => {
+          const ts = n.created_at ? new Date(n.created_at).toLocaleString() : '';
+          return `
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">
+                <span><span style="color:var(--accent-text);font-weight:600;">${escapeHtml(n.type)}</span> · ${escapeHtml(ts)}${n.author ? ' · ' + escapeHtml(n.author) : ''}</span>
+                <button class="btn ghost" type="button" data-lcnt-del="${escapeAttr(n.id)}" style="padding:2px 6px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              </div>
+              <div style="font-size:13px;color:var(--text);white-space:pre-wrap;">${escapeHtml(n.content)}</div>
+            </div>
+          `;
+        }).join('');
+        listEl.querySelectorAll('[data-lcnt-del]').forEach(b => {
+          b.addEventListener('click', async () => {
+            if (!window.confirm('Remove this note?')) return;
+            try {
+              await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contact.id)}/notes/${encodeURIComponent(b.dataset.lcntDel)}`,
+                              { method: 'DELETE' });
+              await refreshNotes();
+            } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+          });
+        });
+      } catch (e) {
+        $('#lcnt-list').innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+
+    $('#lcnt-add').addEventListener('click', async () => {
+      const content = $('#lcnt-content').value.trim();
+      if (!content) { toast('Note content required', 'error'); return; }
+      try {
+        await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contact.id)}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: $('#lcnt-type').value, content }),
+        });
+        $('#lcnt-content').value = '';
+        toast('Note added · touch logged', 'success');
+        await refreshNotes();
+        // Refresh contact list so last-touch column updates inline.
+        await loadLeadContacts(leadId);
+      } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+    });
+    await refreshNotes();
   }
 
   // Inline edit form — pre-populates from existing contact + lets the AE

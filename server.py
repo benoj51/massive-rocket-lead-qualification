@@ -37,6 +37,7 @@ import apollo
 import audit
 import bant_health
 import calls_store
+import lead_contact_notes_store
 import lead_partner_assignments
 import partner_contacts_store
 import partner_notes_store
@@ -347,6 +348,8 @@ def api_contacts_delete(lead_id: str, contact_id: str):
     ok = contacts_store.delete_contact(lead_id, contact_id)
     if not ok:
         return jsonify({"error": "not_found"}), 404
+    # v1.0.0b: cascade-delete the contact's notes so they don't leak as orphans.
+    lead_contact_notes_store.delete_all_for_contact(lead_id, contact_id)
     audit.log_event("contact_deleted", actor=_actor(), lead_id=lead_id,
                     contact_id=contact_id)
     return jsonify({"deleted": True,
@@ -364,6 +367,41 @@ def api_contacts_touch(lead_id: str, contact_id: str):
     audit.log_event("contact_touched", actor=_actor(),
                     lead_id=lead_id, contact_id=contact_id)
     return jsonify({"contact": contacts_store.annotate_touch_state(touched)})
+
+
+# v1.0.0b (Tier 1d): per-lead-contact engagement timeline.
+@app.route("/api/contacts/<lead_id>/<contact_id>/notes", methods=["GET"])
+def api_lead_contact_notes_list(lead_id: str, contact_id: str):
+    return jsonify({"notes": lead_contact_notes_store.list_notes(lead_id, contact_id)})
+
+
+@app.route("/api/contacts/<lead_id>/<contact_id>/notes", methods=["POST"])
+def api_lead_contact_notes_add(lead_id: str, contact_id: str):
+    """Add a note. Auto-bumps the contact's `last_touched_at` (same
+    pattern as the partner-side: a note IS a touch)."""
+    body = request.get_json(silent=True) or {}
+    body.setdefault("author", _actor())
+    try:
+        note = lead_contact_notes_store.add_note(lead_id, contact_id, body)
+    except lead_contact_notes_store.LeadContactNotesStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    touched = contacts_store.touch_contact(lead_id, contact_id)
+    audit.log_event("lead_contact_note_added", actor=_actor(),
+                    lead_id=lead_id, contact_id=contact_id,
+                    note_id=note["id"], touched=bool(touched))
+    return jsonify({
+        "note": note,
+        "notes": lead_contact_notes_store.list_notes(lead_id, contact_id),
+        "contact": contacts_store.annotate_touch_state(touched) if touched else None,
+    })
+
+
+@app.route("/api/contacts/<lead_id>/<contact_id>/notes/<note_id>", methods=["DELETE"])
+def api_lead_contact_notes_delete(lead_id: str, contact_id: str, note_id: str):
+    ok = lead_contact_notes_store.delete_note(lead_id, contact_id, note_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
 
 
 @app.route("/api/contacts/overdue", methods=["GET"])
