@@ -5,6 +5,37 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0l] — 2026-05-21 — Country + Region as separate columns
+
+Ben pointed out the partner contacts table jammed "Region · Country"
+into one column, even though they're separate fields in the data model
+(`regions: list[str]` multi-tag vs `country: str | None` free text).
+
+### Fixes
+- **Table view**: split "Region · Country" into two columns — "Region"
+  (multi-tag chips) and "Country" (single value).
+- **Org chart**: country was previously invisible on the node; now
+  rendered as its own blue-tinted pill alongside the region pills, so
+  the distinction is visually obvious.
+
+### Routing audit (all already correct, just verified)
+- `partner_contacts_store._normalise` stores `regions` (list) and
+  `country` (string) as independent fields
+- Form save handler collects them via independent inputs (`#ptn-c-regions`
+  chip group vs `#ptn-c-country` text input) and PATCHes them as
+  separate keys
+- Filters (`partnersState.filter.region` vs `.country`) match them
+  independently — region by exact-list-inclusion, country by
+  case-insensitive contains
+- CSV export already had separate columns
+- The only places they were combined were two read-only display
+  surfaces (the table column header and the org-chart node), both
+  fixed in this release
+
+### Files touched
+- `qualify.html` — table column split + country pill in org chart +
+  `.n-pill.country` CSS variant.
+
 ## [1.0.0k] — 2026-05-21 — Partner contact edit "broken" — actually invisible
 
 Ben reported "edit button isn't working" in the Partners view. It WAS
