@@ -34,7 +34,7 @@ import json
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -79,11 +79,28 @@ def _write_raw(lead_id: str, contacts: list[dict[str, Any]]) -> None:
         p.write_text(json.dumps(contacts, indent=2))
 
 
+STATUSES = ["active", "dormant", "left"]
+
+
 def _normalise(contact: dict[str, Any]) -> dict[str, Any]:
     name = (contact.get("name") or "").strip()
     email = (contact.get("email") or "").strip()
     if not name and not email:
         raise ContactsStoreError("Contact requires at least name or email")
+    # v1.0.0a (Tier 1c): touch cadence + status parity with partner contacts.
+    # Default cadence 30 days; clamp 1-365.
+    raw_cadence = contact.get("cadence_days")
+    if raw_cadence is None or raw_cadence == "":
+        cadence_days = 30
+    else:
+        try:
+            cadence_days = int(raw_cadence)
+        except (TypeError, ValueError):
+            cadence_days = 30
+    cadence_days = max(1, min(cadence_days, 365))
+    status = (contact.get("status") or "active").strip().lower() or "active"
+    if status not in STATUSES:
+        status = "active"
     return {
         "id": str(contact.get("id") or "").strip() or uuid.uuid4().hex[:12],
         "name": name,
@@ -95,16 +112,105 @@ def _normalise(contact: dict[str, Any]) -> dict[str, Any]:
         "city": (contact.get("city") or "").strip() or None,
         "country": (contact.get("country") or "").strip() or None,
         "is_primary": bool(contact.get("is_primary")),
+        "status": status,
+        "cadence_days": cadence_days,
+        "last_touched_at": contact.get("last_touched_at") or None,
         "added_at": contact.get("added_at") or _now(),
+        "updated_at": _now(),
         "source": (contact.get("source") or "manual").strip() or "manual",
     }
 
 
+def _parse_iso(s: str | None):
+    """Parse our ISO-Z timestamps back to a tz-aware datetime."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def annotate_touch_state(contact: dict[str, Any]) -> dict[str, Any]:
+    """Add derived touch fields (overdue, days_since_touch, etc.) in
+    place. Mirror of partner_contacts_store.annotate_touch_state."""
+    cadence = int(contact.get("cadence_days") or 30)
+    last = _parse_iso(contact.get("last_touched_at"))
+    baseline = last or _parse_iso(contact.get("added_at"))
+    if baseline is None:
+        contact["next_touch_due"] = None
+        contact["days_since_touch"] = None
+        contact["days_until_due"] = 0
+        contact["overdue"] = False
+        contact["is_due_soon"] = False
+        return contact
+    now = datetime.now(timezone.utc)
+    days_since = (now - baseline).days
+    due_at = baseline + timedelta(days=cadence)
+    days_until_due = (due_at - now).days
+    contact["next_touch_due"] = due_at.isoformat(timespec="seconds").replace("+00:00", "Z")
+    contact["days_since_touch"] = days_since if last else None
+    contact["days_until_due"] = days_until_due
+    contact["overdue"] = days_until_due < 0
+    contact["is_due_soon"] = 0 <= days_until_due <= 7
+    return contact
+
+
+def touch_contact(lead_id: str, contact_id: str, *,
+                   at: str | None = None) -> dict[str, Any] | None:
+    """Bump last_touched_at for an explicit "I just talked to them" action."""
+    rows = _load_raw(lead_id)
+    when = at or _now()
+    found = None
+    for r in rows:
+        if r.get("id") == contact_id:
+            r["last_touched_at"] = when
+            r["updated_at"] = _now()
+            found = r
+            break
+    if found is None:
+        return None
+    _write_raw(lead_id, rows)
+    return found
+
+
 def list_contacts(lead_id: str) -> list[dict[str, Any]]:
-    """Return all contacts for a lead, primary first then by recency."""
+    """Return all contacts for a lead, primary first then by recency.
+    v1.0.0a: each row is annotated with touch state (overdue,
+    days_until_due, etc.) for the UI."""
     rows = _load_raw(lead_id)
     rows.sort(key=lambda r: (not r.get("is_primary"), r.get("added_at") or ""), reverse=False)
+    for r in rows:
+        annotate_touch_state(r)
     return rows
+
+
+def overdue_contacts(lead_id: str | None = None) -> list[dict[str, Any]]:
+    """Active contacts past their cadence. Pass lead_id to scope to one
+    lead; omit for a cross-lead roster (Today/overview surface)."""
+    if lead_id:
+        contacts = list_contacts(lead_id)
+        return [c for c in contacts
+                if c.get("status") == "active" and c.get("overdue")]
+    # Cross-lead scan
+    out: list[dict[str, Any]] = []
+    d = _store_dir()
+    if not d.exists():
+        return out
+    for f in d.glob("*.json"):
+        lead_slug = f.stem
+        try:
+            rows = json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(rows, list):
+            continue
+        for r in rows:
+            annotate_touch_state(r)
+            if r.get("status") == "active" and r.get("overdue"):
+                r["lead_id"] = lead_slug
+                out.append(r)
+    return out
 
 
 def save_contact(lead_id: str, contact: dict[str, Any]) -> dict[str, Any]:

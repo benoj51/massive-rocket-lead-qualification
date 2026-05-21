@@ -1464,6 +1464,31 @@
               <div class="field"><label>Email</label><input type="email" id="ld-new-contact-email" placeholder="jane@..." /></div>
               <div class="field"><label>LinkedIn URL</label><input type="url" id="ld-new-contact-linkedin" placeholder="linkedin.com/in/..." /></div>
             </div>
+            <!-- v1.0.0a: cadence + status parity with partner contacts -->
+            <div class="row-2">
+              <div class="field">
+                <label>Touch cadence (days)</label>
+                <select id="ld-new-contact-cadence">
+                  <option value="7">7 days</option>
+                  <option value="14">14 days</option>
+                  <option value="21">21 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="45">45 days</option>
+                  <option value="60">60 days</option>
+                  <option value="90">90 days</option>
+                  <option value="120">120 days</option>
+                  <option value="180">180 days</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Status</label>
+                <select id="ld-new-contact-status">
+                  <option value="active" selected>active</option>
+                  <option value="dormant">dormant</option>
+                  <option value="left">left</option>
+                </select>
+              </div>
+            </div>
             <div class="btn-row">
               <button id="ld-add-contact" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add contact</button>
             </div>
@@ -2620,27 +2645,64 @@
         el.innerHTML = '<div class="muted" style="font-size:12px;">No contacts saved yet. Save discovered stakeholders from Qualify Lead, or add manually below.</div>';
         return;
       }
-      el.innerHTML = contacts.map(c => `
-        <div style="background:var(--surface-2);border:1px solid ${c.is_primary ? 'var(--accent)' : 'var(--border)'};padding:8px 10px;border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:13px;color:var(--text);font-weight:500;">
-              ${escapeHtml(c.name || '—')}
-              ${c.is_primary ? '<span style="background:var(--accent);color:#fff;font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:600;">KEY</span>' : ''}
+      // v1.0.0a: render touch state per contact — last touched, overdue.
+      const touchLabel = (c) => {
+        if (!c.last_touched_at) return `<span class="muted" style="font-size:10px;">never touched · cadence ${c.cadence_days || 30}d</span>`;
+        const ago = _fmtDaysAgo(c.days_since_touch);
+        if (c.overdue) {
+          return `<span style="color:var(--red);font-size:10px;font-weight:600;">Touched ${ago} · ${Math.abs(c.days_until_due)}d overdue</span>`;
+        }
+        if (c.is_due_soon) {
+          return `<span style="color:var(--yellow);font-size:10px;">Touched ${ago} · due in ${c.days_until_due}d</span>`;
+        }
+        return `<span class="muted" style="font-size:10px;">Touched ${ago} · cadence ${c.cadence_days}d</span>`;
+      };
+      const statusBadge = (c) => {
+        if (c.status === 'left') return '<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">LEFT</span>';
+        if (c.status === 'dormant') return '<span style="background:rgba(251,191,36,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">DORMANT</span>';
+        return '';
+      };
+      el.innerHTML = contacts.map(c => {
+        const borderColour = c.is_primary
+          ? 'var(--accent)'
+          : (c.overdue ? 'rgba(239,68,68,.45)' : 'var(--border)');
+        const bgTint = c.overdue ? 'background:var(--surface-2);background-image:linear-gradient(180deg, rgba(239,68,68,.03), transparent);' : 'background:var(--surface-2);';
+        const dimmed = c.status !== 'active' ? 'opacity:.65;' : '';
+        return `
+          <div style="${bgTint}${dimmed}border:1px solid ${borderColour};padding:8px 10px;border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--text);font-weight:500;">
+                ${escapeHtml(c.name || '—')}
+                ${c.is_primary ? '<span style="background:var(--accent);color:#fff;font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:600;">KEY</span>' : ''}
+                ${statusBadge(c)}
+              </div>
+              <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
+              ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+              <div style="margin-top:3px;">${touchLabel(c)}</div>
             </div>
-            <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
-            ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+            <div class="btn-row" style="flex-shrink:0;">
+              <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">✓</button>
+              <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit contact">✎</button>
+              ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">★</button>`}
+              <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+            </div>
           </div>
-          <div class="btn-row" style="flex-shrink:0;">
-            ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">★ Key</button>`}
-            <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
       el.querySelectorAll('[data-contact-primary]').forEach(b => {
         b.addEventListener('click', () => setContactPrimary(leadId, b.dataset.contactPrimary));
       });
       el.querySelectorAll('[data-contact-del]').forEach(b => {
         b.addEventListener('click', () => deleteContact(leadId, b.dataset.contactDel));
+      });
+      el.querySelectorAll('[data-contact-touch]').forEach(b => {
+        b.addEventListener('click', () => touchLeadContact(leadId, b.dataset.contactTouch));
+      });
+      el.querySelectorAll('[data-contact-edit]').forEach(b => {
+        b.addEventListener('click', () => {
+          const c = contacts.find(x => x.id === b.dataset.contactEdit);
+          if (c) openLeadContactEditForm(leadId, c);
+        });
       });
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed to load contacts: ${escapeHtml(e.body?.error || e.message)}</div>`;
@@ -2653,6 +2715,93 @@
       await loadLeadContacts(leadId);
       toast('Marked as key contact', 'success');
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  // v1.0.0a: explicit touch (Tier 1c parity with partner contacts).
+  async function touchLeadContact(leadId, contactId) {
+    try {
+      await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contactId)}/touch`,
+                      { method: 'POST' });
+      toast('Marked as touched', 'success');
+      await loadLeadContacts(leadId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  // Inline edit form — pre-populates from existing contact + lets the AE
+  // change cadence_days / status / any field. Appears in #ld-contacts-list.
+  function openLeadContactEditForm(leadId, contact) {
+    const el = $('#ld-contacts-list');
+    // Insert a panel at the top of the list (above all rows).
+    let panel = $('#ld-contact-edit-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'ld-contact-edit-panel';
+      panel.style.cssText = 'margin-bottom:10px;';
+      el.insertBefore(panel, el.firstChild);
+    }
+    const STATUSES = ['active', 'dormant', 'left'];
+    const CADENCES = [7, 14, 21, 30, 45, 60, 90, 120, 180];
+    panel.innerHTML = `
+      <div style="background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">✎ Edit contact</div>
+          <button id="lcef-cancel" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Close</button>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Name</label><input id="lcef-name" type="text" value="${escapeAttr(contact.name || '')}" /></div>
+          <div class="field"><label>Title</label><input id="lcef-title" type="text" value="${escapeAttr(contact.title || '')}" /></div>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Email</label><input id="lcef-email" type="email" value="${escapeAttr(contact.email || '')}" /></div>
+          <div class="field"><label>LinkedIn URL</label><input id="lcef-linkedin" type="url" value="${escapeAttr(contact.linkedin_url || '')}" /></div>
+        </div>
+        <div class="row row-2">
+          <div class="field">
+            <label>Status</label>
+            <select id="lcef-status">${STATUSES.map(s => `<option value="${s}"${s === (contact.status || 'active') ? ' selected' : ''}>${s}</option>`).join('')}</select>
+          </div>
+          <div class="field">
+            <label>Touch cadence (days)</label>
+            <select id="lcef-cadence">${CADENCES.map(d => `<option value="${d}"${d === (contact.cadence_days || 30) ? ' selected' : ''}>${d} days</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Last touched</label>
+          <div style="padding:8px 10px;font-size:12px;color:var(--text-dim);">
+            ${contact.last_touched_at ? `${escapeHtml(new Date(contact.last_touched_at).toLocaleString())} <span class="muted">(${escapeHtml(_fmtDaysAgo(contact.days_since_touch))})</span>` : '<span class="muted">Never — use ✓ Touch on the contact row to log one</span>'}
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="lcef-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save changes</button>
+        </div>
+      </div>
+    `;
+    $('#lcef-cancel').addEventListener('click', () => panel.remove());
+    $('#lcef-save').addEventListener('click', async () => {
+      const payload = {
+        id: contact.id,
+        name: $('#lcef-name').value.trim(),
+        title: $('#lcef-title').value.trim(),
+        email: $('#lcef-email').value.trim(),
+        linkedin_url: $('#lcef-linkedin').value.trim(),
+        status: $('#lcef-status').value,
+        cadence_days: parseInt($('#lcef-cadence').value, 10) || 30,
+        // Preserve fields the form doesn't touch:
+        is_primary: contact.is_primary,
+        last_touched_at: contact.last_touched_at,
+        source: contact.source,
+      };
+      try {
+        await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Contact updated', 'success');
+        panel.remove();
+        await loadLeadContacts(leadId);
+      } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+    });
   }
 
   async function deleteContact(leadId, contactId) {
@@ -2674,6 +2823,9 @@
       title: $('#ld-new-contact-title').value.trim(),
       email,
       linkedin_url: $('#ld-new-contact-linkedin').value.trim(),
+      // v1.0.0a: cadence + status optional fields, with sane defaults
+      cadence_days: parseInt($('#ld-new-contact-cadence')?.value || '30', 10) || 30,
+      status: $('#ld-new-contact-status')?.value || 'active',
       source: 'manual',
     };
     try {

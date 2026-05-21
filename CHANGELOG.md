@@ -5,6 +5,68 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0a] — 2026-05-21 — Tier 1c: touch cadence + status lifecycle on lead contacts
+
+Parity with partner contacts. Every lead-side contact now carries the
+same touch-cadence + status fields, the same overdue surfacing, and
+the same ✓ touch button — so the AE manages "who at the prospect have
+I gone cold on?" with the same muscle memory as the partner side.
+
+### Schema additions (`contacts_store`)
+- **`cadence_days`** — default 30, clamped 1–365.
+- **`last_touched_at`** — ISO timestamp, set by the touch endpoint.
+- **`status`** — `active` / `dormant` / `left` (default active;
+  unknown values fall back to active).
+- **`updated_at`** — bumped on every save.
+
+### New helpers
+- **`annotate_touch_state(contact)`** — same derived fields as the
+  partner side (`overdue`, `days_since_touch`, `days_until_due`,
+  `is_due_soon`, `next_touch_due`). Called inline by `list_contacts`.
+- **`touch_contact(lead_id, contact_id)`** — explicit "I just talked
+  to them" bump.
+- **`overdue_contacts(lead_id=None)`** — scoped or cross-lead roster.
+  Cross-lead variant annotates each row with `lead_id` for routing.
+
+### New endpoints
+- `POST /api/contacts/<lead_id>/<contact_id>/touch` — log an explicit
+  touch. Mirror of the partner-side equivalent.
+- `GET  /api/contacts/overdue` — cross-lead overdue roster, sorted
+  most-overdue first.
+
+### UI changes (lead drawer Contacts section)
+- **Last-touch line** under every contact row:
+  *"Touched 12d ago · cadence 30d"* / *"Touched 45d ago · 15d overdue"*
+  in red / *"Never touched · cadence 30d"* on never-touched.
+- **Overdue tint** on contact card backgrounds (red gradient).
+- **STATUS badge** (`DORMANT` / `LEFT`) next to the name when not
+  active. Dimmed rows for non-active.
+- **✓ Touch button** per row, paired with the existing ✎ edit, ★ key,
+  × delete actions.
+- **✎ Edit form** (new) — inline editable panel that opens above the
+  contact list, pre-populated with name / title / email / LinkedIn /
+  status / cadence. Save round-trips through the existing
+  `POST /api/contacts/<lead_id>` upsert.
+- **Manual-add form** extended with cadence + status pickers
+  (sensible defaults — 30 days / active).
+
+### Tests
+- 382 total (+11). New `test_lead_contact_cadence.py`:
+  - Default 30-day cadence + active status on save
+  - Cadence clamping to 1–365
+  - Unknown status falls back to active
+  - Annotate / overdue / touch behaviour
+  - Cross-lead overdue scan annotates `lead_id`
+  - Endpoints: 404 on missing, touch bumps, overdue cross-lead
+    surfacing
+
+### Contact-management plan — progress
+- ✅ Tier 1a · Partner touch cadence + overdue (v0.10.0z)
+- ✅ Tier 1b · Lead ↔ partner-contact assignments (v0.11.0)
+- ✅ **Tier 1c · Lead-side cadence + status parity (this release)**
+- Next: Tier 1d (engagement timeline per contact), then Tier 2
+  (cross-surface search + "My contacts" view).
+
 ## [0.11.0] — 2026-05-21 — Partner contacts ↔ leads (assignment + bidirectional view)
 
 When an AE opens a lead, they need to know *"who's the right Braze

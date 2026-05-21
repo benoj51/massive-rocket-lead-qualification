@@ -353,6 +353,28 @@ def api_contacts_delete(lead_id: str, contact_id: str):
                     "contacts": contacts_store.list_contacts(lead_id)})
 
 
+@app.route("/api/contacts/<lead_id>/<contact_id>/touch", methods=["POST"])
+def api_contacts_touch(lead_id: str, contact_id: str):
+    """v1.0.0a: explicit "I touched this contact" action — bumps
+    last_touched_at so the cadence clock resets. Mirror of the
+    partner-contacts touch endpoint."""
+    touched = contacts_store.touch_contact(lead_id, contact_id)
+    if not touched:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("contact_touched", actor=_actor(),
+                    lead_id=lead_id, contact_id=contact_id)
+    return jsonify({"contact": contacts_store.annotate_touch_state(touched)})
+
+
+@app.route("/api/contacts/overdue", methods=["GET"])
+def api_contacts_overdue():
+    """Cross-lead overdue contacts roster. Used by Today/overview surface."""
+    rows = contacts_store.overdue_contacts(lead_id=None)
+    # Sort most-overdue first.
+    rows.sort(key=lambda c: c.get("days_until_due") or 0)
+    return jsonify({"overdue": rows, "count": len(rows)})
+
+
 @app.route("/api/contacts/<lead_id>/<contact_id>/primary", methods=["POST"])
 def api_contacts_set_primary(lead_id: str, contact_id: str):
     primary = contacts_store.set_primary(lead_id, contact_id)
