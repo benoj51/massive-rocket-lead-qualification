@@ -399,8 +399,27 @@ Schema:
     "budget_confirmed":  {"value": "<budget signal: amount, range, sign-off, or null>", "health": "<red|amber|green or null>"}
   },
   "project_scope": "<one short paragraph summarising what MR would deliver, or null>",
+  "scope_criteria": {
+    "crm_strategy": {"engagement_length": "<months, or null>", "lifecycle_maturity": "<1-5, or null>", "stakeholder_count": "<count, or null>", "roadmap_horizon": "<months, or null>"},
+    "crm_build": {"migrating_campaigns": "<count, or null>", "new_campaigns": "<count, or null>", "templates_count": "<count, or null>", "html_templates_count": "<count, or null>", "channels": "<comma-separated, or null>", "execute_for_them": "<yes|no|null>", "crm_stakeholder": "<name + title, or null>", "economic_buyer": "<name + title, or null>"},
+    "crm_execute": {"monthly_campaign_volume": "<count/month, or null>", "channels_executed": "<comma-separated, or null>"},
+    "data_work": {"sources_to_connect": "<count, or null>", "cdp_target": "<vendor or null>", "warehouse_target": "<vendor or null>"},
+    "engineering": {"integrations_count": "<count, or null>", "apis_to_build": "<count, or null>", "sdk_platform": "<Braze|Iterable|mParticle|Segment|Firebase|... or null>", "sdk_websites_count": "<count, or null>", "sdk_ios_apps_count": "<count, or null>", "sdk_android_apps_count": "<count, or null>", "sdk_hybrid_apps_count": "<count, or null>", "sdk_complexity": "<1-5, or null>"}
+  },
   "synthesised_note": "<a structured call summary in the MR Call Note format — see below>"
 }
+
+SCOPE_CRITERIA rubric:
+- Only fill values that are EXPLICITLY supported by the notes. Numbers and counts
+  should appear verbatim ("30 campaigns to migrate" → migrating_campaigns: "30").
+- Omit project_types where the notes don't mention anything matching that stream
+  (e.g. don't return a "crm_execute" block if the call is about Engineering).
+- For sdk_platform, use the vendor name as it appears (Braze, Iterable, mParticle,
+  etc.). For channels / channels_executed, comma-separate (e.g. "email, push, sms").
+- Counts can be strings ("30") — the platform parses them back.
+- Set field to null (not omitted) when the topic was discussed but no concrete
+  number was given, to signal "discussed but unknown". Omit the WHOLE project_type
+  block when nothing relevant was discussed at all.
 
 HEALTH rubric (use sparingly — only set when the notes give you a real signal):
 - green = the criterion is clearly satisfied (e.g. CFO confirmed as buyer + budget approved)
@@ -543,8 +562,29 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
     else:
         synthesised_note = None
 
+    # v0.10.0x: scope_criteria — per-project-type field values extracted
+    # from the notes. Filtered to non-null strings only; consumer merges
+    # into project_store. Keys we don't know are ignored.
+    scope_criteria_out: dict[str, dict[str, str]] = {}
+    raw_sc = data.get("scope_criteria") or {}
+    if isinstance(raw_sc, dict):
+        for pt, fields in raw_sc.items():
+            if not isinstance(fields, dict):
+                continue
+            cleaned: dict[str, str] = {}
+            for k, v in fields.items():
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if not s or s.lower() == "null":
+                    continue
+                cleaned[str(k)] = s
+            if cleaned:
+                scope_criteria_out[str(pt)] = cleaned
+
     return {
         "meddpicc": meddpicc_out,
         "project_scope": project_scope,
         "synthesised_note": synthesised_note,
+        "scope_criteria": scope_criteria_out or None,
     }

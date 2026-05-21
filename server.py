@@ -143,8 +143,15 @@ def health():
 
 
 def _actor() -> str:
-    """Best-effort actor identification. Falls back to 'anon'."""
-    return (request.headers.get("X-Actor") or "anon").strip()[:64]
+    """Best-effort actor identification. Falls back to 'anon'.
+
+    Tolerates being called outside a Flask request context — needed for
+    tests that exercise server-internal helpers directly.
+    """
+    try:
+        return (request.headers.get("X-Actor") or "anon").strip()[:64]
+    except RuntimeError:
+        return "anon"
 
 
 @app.route("/api/qualify", methods=["POST"])
@@ -412,6 +419,21 @@ def api_calls_add(lead_id: str):
                     call_id=record["id"], type=record["type"],
                     extracted=bool(extracted))
 
+    # v0.10.0x: pre-fill project scope criteria from the notes.
+    # If extract_from_notes returned scope_criteria (per-project-type
+    # field values), merge them into the lead's project. Only fills
+    # criteria that are currently EMPTY — never overwrites AE-confirmed
+    # values. Tracks which fields came from AI so the UI can flag them
+    # for review.
+    scope_prefill_applied: list[dict] = []
+    if extracted and isinstance(extracted.get("scope_criteria"), dict):
+        try:
+            scope_prefill_applied = _apply_scope_prefill(
+                lead_id, extracted["scope_criteria"], record["id"]
+            )
+        except Exception as e:
+            log.warning("Scope prefill failed for %s: %s", lead_id, e)
+
     # v0.10.0p: auto-refresh the lead summary so the AE doesn't have to
     # re-read every previous note. Inline (synchronous) — adds ~2s latency
     # to the save but means the summary tile reflects this call by the
@@ -443,7 +465,75 @@ def api_calls_add(lead_id: str):
         # New: the freshly-synthesised summary if AI re-ran successfully.
         # UI renders this without an extra GET to /summary.
         "summary": fresh_summary,
+        # v0.10.0x: list of {project_type, key, value} the AI auto-filled
+        # in the project_store from this note. Empty list when nothing
+        # was auto-filled. UI uses this to show a "✨ AI pre-filled N
+        # criteria" toast + visual hint on the Project Build view.
+        "scope_prefill": scope_prefill_applied,
     })
+
+
+# v0.10.0x: helper to merge AI-extracted scope criteria into the lead's
+# project. Lives in server because it ties together extracted data
+# (from ai_summary) with the project_store mutation.
+def _apply_scope_prefill(lead_id: str, scope_criteria: dict, source_call_id: str) -> list[dict]:
+    """Merge AI-extracted scope criteria into the lead's project.
+
+    Rules:
+      1. Only writes to criteria that are currently empty. Never
+         overwrites AE-confirmed values.
+      2. Only writes to streams that EXIST on the project. If a project
+         type was extracted but no matching stream exists, we skip it
+         (don't auto-add streams — that's the AE's decision).
+      3. Adds `ai_suggested: true` + `ai_source_call_id` to the criterion
+         so the UI can show "✨ AI" badges and the AE can audit later.
+
+    Returns a list of {project_type, key, value} for each field actually
+    written. Empty list when nothing changed (no project, no matching
+    streams, all criteria already filled).
+    """
+    project = project_store.load(lead_id)
+    if project is None:
+        return []
+    applied: list[dict] = []
+    changed = False
+    for pt, fields in (scope_criteria or {}).items():
+        if not isinstance(fields, dict):
+            continue
+        # Find the matching stream on the project (skip if not present).
+        stream = next((s for s in project.streams if s.project_type == pt), None)
+        if stream is None:
+            continue
+        # Build a key→criterion lookup so we can match efficiently.
+        crit_by_key = {c.key: c for c in stream.criteria}
+        for k, v in fields.items():
+            crit = crit_by_key.get(k)
+            if crit is None:
+                continue  # AI suggested a key we don't have in the library
+            if (crit.value or "").strip():
+                continue  # AE has already filled this — never overwrite
+            # Write the value + audit metadata
+            crit.value = str(v).strip()
+            # Annotate on the dataclass — these dynamic attrs survive to_dict
+            # because project_store serialises whatever the dataclass holds.
+            try:
+                setattr(crit, "ai_suggested", True)
+                setattr(crit, "ai_source_call_id", source_call_id)
+            except Exception:
+                pass  # dataclass may be frozen on some versions; we accept the loss
+            applied.append({
+                "project_type": pt,
+                "key": k,
+                "value": str(v).strip(),
+            })
+            changed = True
+    if changed:
+        project_store.save(project)
+        audit.log_event("scope_prefilled_from_notes", actor=_actor(),
+                        lead_id=lead_id, source_call_id=source_call_id,
+                        count=len(applied),
+                        fields=[a["key"] for a in applied])
+    return applied
 
 
 @app.route("/api/calls/<lead_id>/<call_id>", methods=["PATCH"])

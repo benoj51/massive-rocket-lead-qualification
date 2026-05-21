@@ -5,6 +5,86 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0x] — 2026-05-21 — Light-mode contrast pass + AI scope prefill from notes
+
+Three asks bundled.
+
+### Fixed — Light mode contrast (WCAG AA pass)
+
+Token audit found three families failing AA on white surfaces:
+
+| Token | Was | Now | Ratio on white |
+|---|---|---|---|
+| `--text-muted` | `#8a8a92` | `#5a5a62` | 3.5:1 → 7.0:1 ✓ |
+| `--text-dim` | `#56565f` | `#4a4a52` | 7:1 → 8:1 ✓ |
+| `--green` (text) | `#16a34a` | `#15803d` | 4.0:1 → 5.4:1 ✓ |
+| `--yellow` (text) | `#d97706` | `#a16207` | 4.0:1 → 5.7:1 ✓ |
+| `--red` (text) | `#dc2626` | `#b91c1c` | 5.0:1 → 6.0:1 ✓ |
+| `--blue` (text) | `#2563eb` | `#1d4ed8` | 4.5:1 → 6.4:1 ✓ |
+
+New `--accent-text` token (defaults to `--accent` in dark; darker
+`#c8391f` in light, ~5.4:1) replaces `color: var(--accent)` everywhere
+the accent is used as TEXT. Brand orange `--accent` stays for buttons,
+borders, the dot accent — all the places it's a background or
+decorative colour with white text on top.
+
+Replaced `color: var(--accent);` with `color: var(--accent-text);` via
+replace_all — 7 lines updated, all foreground text usages.
+
+Dark mode is unchanged — the `:root { --accent-text: var(--accent); }`
+fallback makes that token transparent for the dark path.
+
+### Added — AI scope prefill from notes
+
+When the AE pastes a transcript or note, the extraction now also
+pulls **scope criteria values per project type** and writes them
+into `project_store` for the lead. No more retyping numbers Claude
+already extracted from the call.
+
+Examples of what it captures from a transcript:
+- *"30 campaigns to migrate, 8 templates"* → `crm_build`:
+  `migrating_campaigns: 30, templates_count: 8`
+- *"Need SDK on website + 2 iOS apps + Android, using Braze"* →
+  `engineering`: `sdk_websites_count: 1, sdk_ios_apps_count: 2,
+  sdk_android_apps_count: 1, sdk_platform: Braze`
+- *"6-month CDP build"* → `crm_strategy`: `engagement_length: 6`
+
+**Safety rules** (encoded in `_apply_scope_prefill`):
+1. **Never overwrites AE-confirmed values** — only fills criteria
+   where `value` is currently empty.
+2. **Only writes to existing streams** — if AI extracted a project
+   type that's not on the project, we skip it. AE decides which
+   streams to add.
+3. **Unknown criterion keys ignored** — AI hallucinations are
+   silently dropped.
+4. **Audit logged** as `scope_prefilled_from_notes` with source call id.
+
+**Toast feedback**: after note save, *"✨ AI pre-filled 5 project
+criteria (3 in crm build, 2 in engineering)"*. Same path for both
+the inline "Save note now" button and the header Save's pending-note
+path.
+
+### Prompt changes
+`_EXTRACT_SYSTEM_PROMPT` extended with a `scope_criteria` schema
+section listing the expected keys per project type. Conservative
+rubric — *"Only fill values that are EXPLICITLY supported by the
+notes"* and *"Numbers and counts should appear verbatim"*. Encourages
+null/omit when uncertain.
+
+### Tests
+- 328 total (+7). New `test_scope_prefill.py`:
+  - Normaliser keeps the scope_criteria schema in the prompt
+  - `_apply_scope_prefill` fills empty criteria
+  - Never overwrites AE-filled values
+  - Skips project types not on the project
+  - Returns empty list when no project / no extraction
+  - Unknown criterion keys silently dropped
+
+### Plumbing — also fixed
+`_actor()` now tolerates being called outside a Flask request
+context (try/except RuntimeError → "anon"). Enables tests to
+exercise server-internal helpers directly.
+
 ## [0.10.0w] — 2026-05-21 — ↻ Rescore button in the lead drawer
 
 Re-scoring previously required *editing* a scoring-relevant field

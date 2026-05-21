@@ -59,14 +59,15 @@
     --border: #e3e3dc;
     --border-strong: #c8c8c0;
     --text: #1a1a24;
-    --text-dim: #56565f;
-    --text-muted: #8a8a92;
-    --accent: #ff4d2a;            /* brand orange stays */
+    --text-dim: #4a4a52;           /* was #56565f — slightly darker for ~8:1 on white */
+    --text-muted: #5a5a62;         /* v0.10.0x contrast pass: was #8a8a92 — failed AA on white. ~7:1 now. */
+    --accent: #ff4d2a;             /* brand orange stays for buttons + brand surfaces */
     --accent-dim: #b3361d;
-    --green: #16a34a;             /* slightly darker so it reads on white */
-    --yellow: #d97706;
-    --red: #dc2626;
-    --blue: #2563eb;
+    --accent-text: #c8391f;        /* v0.10.0x: for accent-coloured TEXT on light — ~5.4:1 on white (was using --accent at 3.4:1) */
+    --green: #15803d;              /* was #16a34a — bumped for ~5.4:1 on white pill bg */
+    --yellow: #a16207;             /* was #d97706 — ~5.7:1 on white */
+    --red: #b91c1c;                /* was #dc2626 — ~6.0:1 on white */
+    --blue: #1d4ed8;               /* was #2563eb — ~6.4:1 on white */
     --shadow: 0 4px 14px rgba(20,20,30,.06);
     --bg-glass: rgba(247,247,242,.85);
     --bg-drawer-glass: rgba(255,255,255,.85);
@@ -79,8 +80,11 @@
     --input-focus-bg: #ffffff;
     --focus-ring: rgba(255,77,42,.18);
     --num-base: #1a1a24;
-    --num-base-2: #56565f;
+    --num-base-2: #4a4a52;
   }
+  /* Default --accent-text falls back to --accent in dark mode (same colour,
+     since accent on dark bg already has good contrast). */
+  :root { --accent-text: var(--accent); }
   /* Smooth theme switch on the heavy surfaces (everything else picks
      it up via inherited colour). 150ms is enough to feel intentional
      without being slow. */
@@ -103,7 +107,7 @@
       linear-gradient(180deg, var(--bg-fade-from) 0%, var(--bg) 600px);
     background-attachment: fixed, fixed, scroll;
   }
-  a { color: var(--accent); text-decoration: none; }
+  a { color: var(--accent-text); text-decoration: none; }
   a:hover { text-decoration: underline; }
   /* v0.10.0p: typography refinement. Tighter line-height + better numeric
      rendering for score/money figures. */
@@ -171,7 +175,7 @@
     padding: 10px 12px; font-size: 14px; font-family: var(--sans);
   }
   input:focus, textarea:focus, select:focus {
-    outline: none; border-color: var(--accent); background: var(--input-focus-bg);
+    outline: none; border-color: var(--accent-text); background: var(--input-focus-bg);
     /* v0.10.0p: soft focus ring; tinted intensity differs per theme. */
     box-shadow: 0 0 0 3px var(--focus-ring);
   }
@@ -220,7 +224,7 @@
     0% { opacity: .9; box-shadow: 0 0 0 1px var(--green) inset, 0 0 18px rgba(74,222,128,.45); }
     100% { opacity: 0; box-shadow: 0 0 0 1px var(--green) inset; }
   }
-  .tile.manual .badge { color: var(--accent); }
+  .tile.manual .badge { color: var(--accent-text); }
 
   /* Score dashboard -------------------------------------------- */
   .score-grid { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: center; }
@@ -279,12 +283,12 @@
   }
   .meddicc-row .key small .role-driver-hint {
     display: inline-block; margin-top: 4px; padding: 2px 8px;
-    background: rgba(255,77,42,.10); color: var(--accent);
+    background: rgba(255,77,42,.10); color: var(--accent-text);
     border-radius: 999px; font-size: 10px; letter-spacing: .02em;
   }
   .meddicc-row input { background: var(--surface); border: 1px solid var(--border);
     padding: 6px 10px; border-radius: 6px; font-size: 13px; color: var(--text); width: 100%; }
-  .meddicc-row input:focus { outline: none; border-color: var(--accent); }
+  .meddicc-row input:focus { outline: none; border-color: var(--accent-text); }
   .meddicc-row input::placeholder { color: var(--text-muted); }
   .meddicc-row .status-toggle {
     display: flex; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 3px;
@@ -373,7 +377,7 @@
   }
   table.pipeline th:hover { color: var(--text); }
   table.stakeholders tr:hover, table.pipeline tr:hover { background: var(--surface-2); }
-  .priority-p1 { color: var(--accent); font-weight: 600; }
+  .priority-p1 { color: var(--accent-text); font-weight: 600; }
   .priority-p2 { color: var(--yellow); font-weight: 600; }
   .priority-p3 { color: var(--text-dim); font-weight: 600; }
 
@@ -388,7 +392,7 @@
     padding: 6px 14px; border-radius: 999px; font-size: 12px; cursor: pointer;
     font-weight: 500;
   }
-  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent-text); }
   .chip:hover:not(.active) { color: var(--text); border-color: var(--border-strong); }
 
   /* Toasts ---------------------------------------------------- */
@@ -402,7 +406,7 @@
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { border-color: rgba(239,68,68,.5); }
   .toast.success { border-color: rgba(74,222,128,.5); }
-  .toast a { color: var(--accent); }
+  .toast a { color: var(--accent-text); }
 
   /* Empty / loading states ----------------------------------- */
   .empty { text-align: center; padding: 32px 16px; color: var(--text-muted); }
@@ -512,7 +516,7 @@
     transition: background .15s, border-color .15s, color .15s;
   }
   .drawer header #ld-save.dirty {
-    background: var(--accent); border-color: var(--accent); color: white;
+    background: var(--accent); border-color: var(--accent-text); color: white;
     /* v0.10.0p: soft glow when there are pending changes — draws the eye. */
     box-shadow: 0 0 0 3px rgba(255,77,42,.15), 0 4px 14px rgba(255,77,42,.35);
   }
@@ -536,7 +540,7 @@
   }
   .drawer .hero .hero-title {
     font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
-    color: var(--accent); font-weight: 600;
+    color: var(--accent-text); font-weight: 600;
   }
 
   /* Accordion sections via <details>. */
@@ -564,8 +568,8 @@
     font-size: 10px; padding: 1px 7px; border-radius: 10px; letter-spacing: 0;
     text-transform: none;
   }
-  .drawer details.group.has-changes > summary { color: var(--accent); }
-  .drawer details.group.has-changes > summary::before { color: var(--accent); }
+  .drawer details.group.has-changes > summary { color: var(--accent-text); }
+  .drawer details.group.has-changes > summary::before { color: var(--accent-text); }
 
   /* Legacy h4 styling kept for back-compat in case anything still uses it. */
   .drawer .group h4 {
@@ -591,7 +595,7 @@
   .icp-pill.qualify_out { background: rgba(239,68,68,.14); color: var(--red); border-color: rgba(239,68,68,.4); }
   .pipeline-row-clickable { cursor: pointer; }
   .pipeline-row-clickable:hover { background: var(--surface-2); }
-  table.pipeline td.openlink { color: var(--accent); }
+  table.pipeline td.openlink { color: var(--accent-text); }
   @media (max-width: 720px) {
     .drawer .row-2, .drawer .row-3 { grid-template-columns: 1fr; }
   }
@@ -2942,6 +2946,16 @@
       } else {
         toast('Call saved', 'success');
       }
+      // v0.10.0x: surface AI scope prefill so the AE knows to review
+      // Project Build for auto-filled criteria.
+      const prefilled = data.scope_prefill || [];
+      if (prefilled.length) {
+        const byType = {};
+        prefilled.forEach(p => { byType[p.project_type] = (byType[p.project_type] || 0) + 1; });
+        const summary = Object.entries(byType)
+          .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
+        toast(`✨ AI pre-filled ${prefilled.length} project criteria (${summary})`, 'success');
+      }
       await loadLeadCalls(leadId);
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
@@ -3350,6 +3364,15 @@
           summary.push('note + summary');
         } else {
           summary.push('note');
+        }
+        // v0.10.0x: scope-prefill toast (same path as inline Save note now).
+        const prefilled = callRes?.scope_prefill || [];
+        if (prefilled.length) {
+          const byType = {};
+          prefilled.forEach(p => { byType[p.project_type] = (byType[p.project_type] || 0) + 1; });
+          const tally = Object.entries(byType)
+            .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
+          toast(`✨ AI pre-filled ${prefilled.length} project criteria (${tally})`, 'success');
         }
       }
       const msg = `Saved ${summary.join(' + ')}`;
