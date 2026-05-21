@@ -6612,8 +6612,14 @@
     `;
     wrap.querySelectorAll('[data-org-contact]').forEach(node => {
       node.addEventListener('click', () => {
-        const c = (partner.contacts || []).find(x => x.id === node.dataset.orgContact);
-        if (c) openContactForm(partner, c);
+        const id = node.dataset.orgContact;
+        const c = (partner.contacts || []).find(x => x.id === id);
+        if (c) {
+          openContactForm(partner, c);
+        } else {
+          console.error('[org-contact] not found', id, partner.contacts);
+          toast(`Couldn't find contact ${id} in this partner's roster`, 'error');
+        }
       });
     });
   }
@@ -6694,8 +6700,16 @@
     });
     wrap.querySelectorAll('[data-contact-edit]').forEach(b => {
       b.addEventListener('click', () => {
-        const c = (partner.contacts || []).find(x => x.id === b.dataset.contactEdit);
-        if (c) openContactForm(partner, c);
+        const id = b.dataset.contactEdit;
+        const c = (partner.contacts || []).find(x => x.id === id);
+        if (c) {
+          openContactForm(partner, c);
+        } else {
+          // v1.0.0k: stop swallowing the failure. If the lookup misses,
+          // tell the user instead of looking like the button is dead.
+          console.error('[contact-edit] not found', id, partner.contacts);
+          toast(`Couldn't find contact ${id} in this partner's roster`, 'error');
+        }
       });
     });
     wrap.querySelectorAll('[data-contact-notes]').forEach(b => {
@@ -6716,6 +6730,16 @@
     const detailEl = $('#ptn-contact-detail');
     const enums = partnersState.enums || {};
     const c = existing || {};
+    // v1.0.0k: with 137+ contacts in the Braze/Hightouch table, the
+    // edit form was rendering far below the fold and the user couldn't
+    // see anything happen. Scroll it into view + flash an accent border
+    // so it's obvious the form just opened.
+    setTimeout(() => {
+      detailEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      detailEl.style.boxShadow = '0 0 0 3px rgba(255,77,42,.4)';
+      detailEl.style.transition = 'box-shadow .4s ease-out';
+      setTimeout(() => { detailEl.style.boxShadow = ''; }, 1000);
+    }, 30);
     const checked = (list, val) => (list || []).includes(val) ? 'checked' : '';
     const opt = (list, sel) => `<option value="">—</option>` +
       (list || []).map(v => `<option value="${escapeAttr(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
@@ -6836,8 +6860,20 @@
   async function openContactNotes(partner, contactId) {
     const detailEl = $('#ptn-contact-detail');
     const c = (partner.contacts || []).find(x => x.id === contactId);
-    if (!c) return;
+    if (!c) {
+      console.error('[contact-notes] not found', contactId, partner.contacts);
+      toast(`Couldn't find contact ${contactId} in this partner's roster`, 'error');
+      return;
+    }
     const enums = partnersState.enums || {};
+    // v1.0.0k: same scroll-into-view fix as openContactForm — 137-row
+    // tables push the notes panel off-screen.
+    setTimeout(() => {
+      detailEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      detailEl.style.boxShadow = '0 0 0 3px rgba(59,130,246,.4)';
+      detailEl.style.transition = 'box-shadow .4s ease-out';
+      setTimeout(() => { detailEl.style.boxShadow = ''; }, 1000);
+    }, 30);
     detailEl.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
         <h4 style="margin:0 0 6px;">📝 Notes — ${escapeHtml(c.name)}</h4>

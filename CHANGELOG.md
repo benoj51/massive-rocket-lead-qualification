@@ -5,6 +5,28 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0k] — 2026-05-21 — Partner contact edit "broken" — actually invisible
+
+Ben reported "edit button isn't working" in the Partners view. It WAS
+working — but with 137 Braze contacts in the table, the edit form
+rendered hundreds of pixels below the fold and looked like nothing
+happened. Compounding it: the click handler silently no-op'd if the
+contact lookup ever failed, so any real failure was indistinguishable
+from "the form is off-screen".
+
+### Fixes
+- **Scroll-into-view + flash highlight** in `openContactForm` and
+  `openContactNotes`. The form pulses an accent border and scrolls
+  itself into view smoothly when it opens, so it's obvious the click
+  registered.
+- **Stop swallowing failures** in the click handlers for `[data-contact-edit]`,
+  `[data-org-contact]` (org chart click), and `openContactNotes`.
+  When the contact lookup misses, log to console + toast to the user
+  with the offending id, instead of silently doing nothing.
+
+### Files touched
+- `qualify.html` — three click handlers + `openContactForm` + `openContactNotes`.
+
 ## [1.0.0j] — 2026-05-21 — Auto-seed Command Centre on boot
 
 Ben reported Braze + Hightouch weren't visible on the deployed app
