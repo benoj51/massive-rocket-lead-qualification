@@ -5,6 +5,58 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0u] — 2026-05-21 — Inline document preview modal
+
+SOWs used to open in a new browser tab (a Blob URL with no
+filename, no toolbar context). Reviewing meant context-switching
+out of the platform. Now SOWs preview **inline** in a full-page
+modal with Print / Download / Open-in-new-tab options.
+
+### Added
+- **Document preview modal** (`#doc-preview-overlay`) — full-page
+  overlay with backdrop blur, dark sticky header with title +
+  subtitle, white document body via `<iframe>` srcdoc (keeps the
+  SOW's CSS isolated from the app shell).
+- **Header actions**: 🖨 Print · ⇣ Download HTML · ↗ Open in new tab ·
+  ✕ Close.
+- **Esc to close** — modal Esc takes priority over the lead drawer's
+  Esc handler so it closes the right thing.
+- **Backdrop click closes** — clicking outside the modal body
+  dismisses, modal body click does nothing.
+- **Body scroll-lock** while open so the underlying page doesn't
+  scroll behind it.
+- **Tablet/mobile**: modal becomes full-bleed with tightened header
+  buttons under 720px width.
+
+### Changed
+- **SOW versions table**: each row now has a primary **👁 Preview**
+  button + the existing **↗** (new tab) as a quieter ghost.
+  Preview is the new default action.
+- **Drafting a new SOW** now opens the preview modal immediately
+  instead of spawning a new tab. Print / Download / Open-in-new-tab
+  are all one click away from there.
+
+### Why this matters
+- AEs review SOWs without losing their place in Project Build.
+- Print path is reliable — the iframe handles its own print dialog
+  with the document CSS intact.
+- Download as HTML gives an artifact for email attachment.
+- Open-in-new-tab is still there for AEs who want a permanent tab.
+
+### Plumbing
+- `_docPreviewState` holds the html / leadId / version / filename
+  for the active preview so Print/Download/New-tab can act on it
+  without re-fetching.
+- `previewSow(leadId, version)` fetches the rendered HTML (same
+  endpoint the new-tab path uses), populates the iframe via
+  `srcdoc`, sets title + subtitle, opens the overlay.
+- Reusable: the same modal will handle Proposal previews, future
+  PDF rendering, etc. — `previewSow` is the first consumer.
+
+### Tests
+- 312 total. UI-only change; existing SOW endpoint tests cover the
+  render path that feeds the modal.
+
 ## [0.10.0t] — 2026-05-21 — Country dropdown for Apollo people search
 
 Without a country filter, Apollo's people search returns the whole

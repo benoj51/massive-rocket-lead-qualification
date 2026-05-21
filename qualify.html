@@ -429,6 +429,50 @@
     transition: opacity .18s ease-out;
   }
   .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+  /* Document preview modal — v0.10.0u ----------------------- */
+  .doc-preview-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    z-index: 110; opacity: 0; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity .18s ease-out;
+    padding: 24px;
+  }
+  .doc-preview-overlay.open { opacity: 1; pointer-events: auto; }
+  .doc-preview-modal {
+    width: min(1100px, 100%); height: min(90vh, 900px);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: 0 24px 60px rgba(0,0,0,.6);
+    display: flex; flex-direction: column;
+    transform: translateY(20px); transition: transform .2s ease-out;
+    overflow: hidden;
+  }
+  .doc-preview-overlay.open .doc-preview-modal { transform: translateY(0); }
+  .doc-preview-header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    background: rgba(19,19,26,.95);
+  }
+  .doc-preview-title {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .doc-preview-subtitle {
+    font-size: 11px; color: var(--text-muted); margin-top: 2px;
+  }
+  .doc-preview-body {
+    flex: 1; overflow: hidden; background: #fff;
+  }
+  .doc-preview-body iframe {
+    width: 100%; height: 100%; border: 0; background: #fff;
+  }
+  @media (max-width: 720px) {
+    .doc-preview-overlay { padding: 0; }
+    .doc-preview-modal { height: 100vh; width: 100vw; border-radius: 0; }
+    .doc-preview-header .btn-row { gap: 4px; }
+    .doc-preview-header .btn { padding: 5px 8px; font-size: 11px; }
+  }
   .drawer {
     position: fixed; top: 0; right: 0; bottom: 0;
     width: min(560px, 100vw); background: var(--surface);
@@ -1045,6 +1089,30 @@
   </section>
 
 </main>
+
+<!-- DOCUMENT PREVIEW MODAL ==================================
+     v0.10.0u: full-page modal for previewing SOW + other docs
+     inline without opening a new tab. Iframe srcdoc isolates
+     document CSS from app CSS. -->
+<div id="doc-preview-overlay" class="doc-preview-overlay" aria-hidden="true">
+  <div class="doc-preview-modal" role="dialog" aria-modal="true" aria-labelledby="doc-preview-title">
+    <header class="doc-preview-header">
+      <div style="min-width:0;flex:1;">
+        <div class="doc-preview-title" id="doc-preview-title">Document preview</div>
+        <div class="doc-preview-subtitle" id="doc-preview-subtitle"></div>
+      </div>
+      <div class="btn-row" style="flex-shrink:0;">
+        <button id="doc-preview-print" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">🖨 Print</button>
+        <button id="doc-preview-download" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">⇣ Download HTML</button>
+        <button id="doc-preview-newtab" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↗ Open in new tab</button>
+        <button id="doc-preview-close" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">✕ Close</button>
+      </div>
+    </header>
+    <div class="doc-preview-body">
+      <iframe id="doc-preview-iframe" title="Document preview" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+    </div>
+  </div>
+</div>
 
 <!-- LEAD DETAIL DRAWER ======================================= -->
 <div id="drawer-overlay" class="drawer-overlay"></div>
@@ -4604,8 +4672,10 @@
       toast(`SOW v${data.version} drafted`, 'success');
       $('#pb-sow-status').textContent = `Latest: v${data.version}`;
       await refreshSowVersions();
-      // Open the new version immediately
-      openSowInNewTab(pbState.currentLeadId, data.version);
+      // v0.10.0u: preview the new version inline (was: opens a new tab).
+      // Modal has Print / Download / Open-in-new-tab buttons if AE wants
+      // those options.
+      previewSow(pbState.currentLeadId, data.version);
     } catch (e) {
       toast(`Draft SOW failed: ${e.body?.error || e.message}`, 'error');
     } finally {
@@ -4634,13 +4704,17 @@
                 <td>${v.net_usd != null ? '$' + Math.round(v.net_usd).toLocaleString() : '—'}</td>
                 <td>${escapeHtml(v.validation_status_at_generation || '—')}</td>
                 <td style="text-align:right;">
-                  <button class="btn ghost" type="button" data-sow-open="${v.version}" style="padding:4px 10px;font-size:11px;">Open ↗</button>
+                  <button class="btn" type="button" data-sow-preview="${v.version}" style="padding:4px 10px;font-size:11px;">👁 Preview</button>
+                  <button class="btn ghost" type="button" data-sow-open="${v.version}" style="padding:4px 10px;font-size:11px;" title="Open in new tab">↗</button>
                 </td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       `;
+      list.querySelectorAll('[data-sow-preview]').forEach(b => {
+        b.addEventListener('click', () => previewSow(pbState.currentLeadId, parseInt(b.dataset.sowPreview, 10)));
+      });
       list.querySelectorAll('[data-sow-open]').forEach(b => {
         b.addEventListener('click', () => openSowInNewTab(pbState.currentLeadId, parseInt(b.dataset.sowOpen, 10)));
       });
@@ -4660,6 +4734,89 @@
       // Revoke after a long delay so the new tab finishes loading before we yank the URL.
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) { toast(`Open SOW failed: ${e.message}`, 'error'); }
+  }
+
+  // v0.10.0u: in-page SOW preview modal. Loads the same rendered HTML
+  // as openSowInNewTab but mounts it via iframe.srcdoc so the
+  // document's CSS stays isolated from the app shell. AE can read,
+  // print, or download without leaving the platform.
+  const _docPreviewState = { html: null, leadId: null, version: null, filename: null };
+
+  async function previewSow(leadId, version) {
+    try {
+      const resp = await fetch(`/api/sow/${encodeURIComponent(leadId)}/v${version}.html`, {
+        headers: authHeaders(),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const html = await resp.text();
+      const companySlug = (pbState.current?.lead_id || leadId).replace(/[^a-z0-9_-]+/gi, '_');
+      _docPreviewState.html = html;
+      _docPreviewState.leadId = leadId;
+      _docPreviewState.version = version;
+      _docPreviewState.filename = `sow_${companySlug}_v${version}.html`;
+      $('#doc-preview-title').textContent = `Statement of Work — v${version}`;
+      $('#doc-preview-subtitle').textContent = `Lead: ${leadId} · ${new Date().toLocaleString()}`;
+      const iframe = $('#doc-preview-iframe');
+      iframe.srcdoc = html;
+      openDocPreview();
+    } catch (e) {
+      toast(`Preview failed: ${e.message}`, 'error');
+    }
+  }
+
+  function openDocPreview() {
+    const ov = $('#doc-preview-overlay');
+    if (!ov) return;
+    ov.classList.add('open');
+    ov.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeDocPreview() {
+    const ov = $('#doc-preview-overlay');
+    if (!ov) return;
+    ov.classList.remove('open');
+    ov.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    // Free the iframe srcdoc to release the document memory.
+    const iframe = $('#doc-preview-iframe');
+    if (iframe) iframe.srcdoc = '';
+  }
+
+  function downloadDocPreview() {
+    const html = _docPreviewState.html;
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = _docPreviewState.filename || 'document.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Downloaded', 'success');
+  }
+
+  function printDocPreview() {
+    const iframe = $('#doc-preview-iframe');
+    if (!iframe || !iframe.contentWindow) {
+      toast('Preview not ready yet', 'error');
+      return;
+    }
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (e) {
+      toast(`Print failed: ${e.message}`, 'error');
+    }
+  }
+
+  function openDocPreviewInNewTab() {
+    const html = _docPreviewState.html;
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   async function pbTransition(action) {
@@ -4837,8 +4994,24 @@
     });
     $('#ld-parent-clear').addEventListener('click', clearParent);
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && drawerState.id) closeLeadDrawer();
+      if (e.key !== 'Escape') return;
+      // v0.10.0u: doc preview modal takes priority — close it first if open.
+      const docOv = $('#doc-preview-overlay');
+      if (docOv && docOv.classList.contains('open')) {
+        closeDocPreview();
+        return;
+      }
+      if (drawerState.id) closeLeadDrawer();
     });
+    // v0.10.0u: doc preview modal wiring.
+    $('#doc-preview-close').addEventListener('click', closeDocPreview);
+    $('#doc-preview-overlay').addEventListener('click', (e) => {
+      // Click backdrop (not the modal body) to close.
+      if (e.target.id === 'doc-preview-overlay') closeDocPreview();
+    });
+    $('#doc-preview-print').addEventListener('click', printDocPreview);
+    $('#doc-preview-download').addEventListener('click', downloadDocPreview);
+    $('#doc-preview-newtab').addEventListener('click', openDocPreviewInNewTab);
     $('#btn-refresh-pipeline').addEventListener('click', refreshPipeline);
     $('#pipe-filter-source').addEventListener('change', (e) => {
       state.pipeline.sourceFilter = e.target.value;
