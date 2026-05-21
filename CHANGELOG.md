@@ -5,6 +5,75 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0c] — 2026-05-21 — Tier 2a + 2b: cross-surface contact search + "My contacts"
+
+Single global search that finds any contact across both surfaces
+(leads + partners) with the same filter vocabulary you'd use inside
+either tab. Opens via 🔍 button or ⌘K from any view.
+
+### Added — backend
+- **`GET /api/contacts/search`** unifies both contact stores. Query
+  params (all optional):
+  - `q` — free-text matched against name + email + title + country,
+    case-insensitive
+  - `surface` — `lead` / `partner` / omit for both
+  - `status` — active / dormant / left
+  - `territory`, `region`, `industry` — partner-only fields; when
+    set, lead-side scan is skipped (lead contacts don't have these
+    fields, so they'd all fail the filter)
+  - `owner` — case-insensitive `contains` match on `mr_owner`. Powers
+    the "My contacts" workflow.
+  - `limit` — int, default 50, clamped 1–200 per surface
+- Returns `{lead: [...], partner: [...], total: int}` with each
+  result tagged with `surface` + `parent_id` + `parent_name`
+  (display name resolved from Notion pipeline for leads, partner
+  registry for partners).
+- Touch state annotated on lead-side results so overdue chips
+  surface in the picker.
+- Sort: overdue-first within each surface, then alpha by name.
+
+### Added — UI
+- **🔍 Global search button** in the top nav header (between
+  Partners and the theme toggle). Shows ⌘K hint.
+- **⌘K / Ctrl+K** shortcut from anywhere — opens the search modal,
+  or closes it if already open. Esc to close. Priority: search →
+  doc preview → drawer (most recently opened wins).
+- **Search modal** (same overlay CSS as doc preview, 720px tall):
+  - Large search input at top
+  - Filter row: Surface · Status · Territory · Region · Industry ·
+    Owner text · **My contacts** quick-button · Clear filters
+  - **My contacts** button drops the AE's name into the Owner filter
+    in one click (currently hard-coded to "Ben" — easy to make
+    configurable)
+  - Debounced search (180ms) — types feel instant, no API thrash
+  - Results in two sections (Lead contacts · Partner contacts) with
+    coloured count badges
+  - Each row is a clickable card showing name + surface tag + parent
+    + title/territory/region/country + industries + email + overdue/
+    status badges
+  - Click a row → closes search and opens the right drawer (lead
+    drawer for lead contacts, partner detail for partner contacts)
+
+### Tests
+- 405 total (+12). New `test_contacts_search.py`:
+  - Empty query returns both surfaces with surface-tag enrichment
+  - Free-text matching on name / email / country
+  - Surface filter scopes results correctly
+  - Territory / region / industry filters skip lead-side as designed
+  - Owner filter ("My contacts") matches mr_owner contains
+  - Combined filters compose correctly
+  - No matches returns empty lists with total=0
+
+### Contact-management plan — progress
+- ✅ Tier 1a · Partner cadence + overdue (v0.10.0z)
+- ✅ Tier 1b · Partner ↔ lead assignments (v0.11.0)
+- ✅ Tier 1c · Lead-side cadence + status parity (v1.0.0a)
+- ✅ Tier 1d · Engagement timeline per contact (v1.0.0b)
+- ✅ **Tier 2a · Cross-surface search (this release)**
+- ✅ **Tier 2b · "My contacts" view via owner filter (this release)**
+- Next: Tier 3 — org chart visualisation, multi-tag, AI-extract
+  contacts from transcripts.
+
 ## [1.0.0b] — 2026-05-21 — Tier 1d: engagement timeline per lead contact
 
 Per-contact notes finally land for the lead side, mirroring the

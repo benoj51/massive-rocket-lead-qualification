@@ -404,6 +404,153 @@ def api_lead_contact_notes_delete(lead_id: str, contact_id: str, note_id: str):
     return jsonify({"deleted": True})
 
 
+# v1.0.0c (Tier 2a + 2b): cross-surface contact search + "My contacts".
+# Single endpoint that scans BOTH the lead-side contacts and the
+# partner-side contacts. Returns a unified result list with `surface`
+# tag and `parent_*` enrichment so the UI can render and click-through.
+
+@app.route("/api/contacts/search", methods=["GET"])
+def api_contacts_search():
+    """Search every contact (lead-side + partner-side) by free-text +
+    filters. Designed to power a global ⌘K-style picker.
+
+    Query params (all optional):
+      q          — free text matched against name, email, title (case-insensitive)
+      surface    — "lead" | "partner" | omit for both
+      status     — active | dormant | left (default: any)
+      territory  — partner-side only field; matches partner contacts only
+      region     — partner-side only field
+      industry   — partner-side only field (matches contacts with the
+                   industry in their `industries` array)
+      owner      — matches `mr_owner` (case-insensitive contains). Enables
+                   the "My contacts" workflow when the AE passes their name.
+      limit      — int, max results per surface (default 50)
+    """
+    q = (request.args.get("q") or "").strip().lower()
+    surface_filter = (request.args.get("surface") or "").strip().lower() or None
+    status_filter = (request.args.get("status") or "").strip().lower() or None
+    territory_filter = (request.args.get("territory") or "").strip() or None
+    region_filter = (request.args.get("region") or "").strip() or None
+    industry_filter = (request.args.get("industry") or "").strip() or None
+    owner_filter = (request.args.get("owner") or "").strip().lower() or None
+    try:
+        limit = max(1, min(int(request.args.get("limit") or 50), 200))
+    except ValueError:
+        limit = 50
+
+    def _matches_q(c: dict) -> bool:
+        if not q:
+            return True
+        for field in ("name", "email", "title", "country"):
+            if q in str(c.get(field) or "").lower():
+                return True
+        return False
+
+    def _matches_owner(c: dict) -> bool:
+        if not owner_filter:
+            return True
+        return owner_filter in str(c.get("mr_owner") or "").lower()
+
+    def _matches_status(c: dict) -> bool:
+        if not status_filter:
+            return True
+        return (c.get("status") or "active").lower() == status_filter
+
+    lead_hits: list[dict] = []
+    partner_hits: list[dict] = []
+
+    # --- Lead-side scan ---
+    # Owner filter currently isn't a field on lead contacts (only partner
+    # contacts have mr_owner). If owner_filter is set, skip the lead-side
+    # scan entirely — they'd all fail the filter anyway.
+    # Territory/region/industry are partner-only fields; same skip.
+    skip_leads = bool(owner_filter or territory_filter or region_filter or industry_filter)
+    if not skip_leads and surface_filter != "partner":
+        try:
+            lead_dir = contacts_store._store_dir()
+            if lead_dir.exists():
+                for f in lead_dir.glob("*.json"):
+                    lead_slug = f.stem
+                    try:
+                        import json as _json
+                        rows = _json.loads(f.read_text())
+                    except (OSError, ValueError):
+                        continue
+                    if not isinstance(rows, list):
+                        continue
+                    for r in rows:
+                        if not _matches_q(r) or not _matches_status(r):
+                            continue
+                        contacts_store.annotate_touch_state(r)
+                        lead_hits.append({
+                            **r,
+                            "surface": "lead",
+                            "parent_id": lead_slug,
+                            "parent_name": lead_slug,  # UI may swap for display name
+                        })
+                        if len(lead_hits) >= limit:
+                            break
+                    if len(lead_hits) >= limit:
+                        break
+        except Exception as e:
+            log.warning("Lead search scan failed: %s", e)
+
+    # Enrich lead-side parent_name with the pipeline display name where we can.
+    if lead_hits:
+        try:
+            sync = NotionSync()
+            name_by_slug = {project_store.slugify(row.get("id") or row.get("company") or ""):
+                             row.get("company") for row in sync.list_pipeline(limit=500)}
+            for r in lead_hits:
+                disp = name_by_slug.get(r["parent_id"])
+                if disp:
+                    r["parent_name"] = disp
+        except Exception:
+            pass
+
+    # --- Partner-side scan ---
+    if surface_filter != "lead":
+        try:
+            partners_by_id = {p["id"]: p for p in partners_store.list_partners()}
+            for partner_id in partners_by_id:
+                contacts = partner_contacts_store.list_contacts(partner_id)
+                for c in contacts:
+                    if not _matches_q(c) or not _matches_status(c):
+                        continue
+                    if not _matches_owner(c):
+                        continue
+                    if territory_filter and c.get("territory") != territory_filter:
+                        continue
+                    if region_filter and c.get("region") != region_filter:
+                        continue
+                    if industry_filter and industry_filter not in (c.get("industries") or []):
+                        continue
+                    partner_hits.append({
+                        **c,
+                        "surface": "partner",
+                        "parent_id": partner_id,
+                        "parent_name": partners_by_id[partner_id].get("name") or partner_id,
+                    })
+                    if len(partner_hits) >= limit:
+                        break
+                if len(partner_hits) >= limit:
+                    break
+        except Exception as e:
+            log.warning("Partner search scan failed: %s", e)
+
+    # Sort: overdue first within each surface (highest signal),
+    # then alpha by name. Caller can sort differently if they want.
+    def _sort_key(c: dict):
+        return (not c.get("overdue"), (c.get("name") or "").lower())
+    lead_hits.sort(key=_sort_key)
+    partner_hits.sort(key=_sort_key)
+    return jsonify({
+        "lead": lead_hits,
+        "partner": partner_hits,
+        "total": len(lead_hits) + len(partner_hits),
+    })
+
+
 @app.route("/api/contacts/overdue", methods=["GET"])
 def api_contacts_overdue():
     """Cross-lead overdue contacts roster. Used by Today/overview surface."""

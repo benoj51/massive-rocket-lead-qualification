@@ -623,6 +623,11 @@
     <button id="nav-build" type="button">Project Build</button>
     <button id="nav-partners" type="button">Partners</button>
   </nav>
+  <button id="global-search-open" type="button" title="Search all contacts (⌘K)"
+          aria-label="Search contacts"
+          style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;gap:6px;">
+    🔍 <span style="font-family:var(--mono);font-size:10px;color:var(--text-muted);">⌘K</span>
+  </button>
   <button id="theme-toggle" type="button" title="Toggle light / dark theme"
           aria-label="Toggle light / dark theme"
           style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;">🌙</button>
@@ -1140,6 +1145,57 @@
     </header>
     <div class="doc-preview-body">
       <iframe id="doc-preview-iframe" title="Document preview" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- GLOBAL SEARCH MODAL ===================================== -->
+<!-- v1.0.0c (Tier 2a/2b): cross-surface contact picker. Opens via
+     🔍 button or ⌘K. Filters by territory/region/industry/owner
+     and searches across both lead + partner contacts. -->
+<div id="global-search-overlay" class="doc-preview-overlay" aria-hidden="true">
+  <div class="doc-preview-modal" role="dialog" aria-modal="true"
+       style="height:min(80vh, 720px);">
+    <header class="doc-preview-header">
+      <div style="min-width:0;flex:1;">
+        <div class="doc-preview-title">🔍 Search contacts</div>
+        <div class="doc-preview-subtitle">Across leads + partners · ⌘K to reopen · Esc to close</div>
+      </div>
+      <div class="btn-row" style="flex-shrink:0;">
+        <button id="global-search-close" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">✕ Close</button>
+      </div>
+    </header>
+    <div style="padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);">
+      <input id="global-search-input" type="text" autocomplete="off"
+             placeholder="Name, email, title, country…"
+             style="width:100%;font-size:14px;padding:10px 12px;" />
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;">
+        <select id="global-search-surface" style="padding:5px 10px;font-size:12px;">
+          <option value="">Both surfaces</option>
+          <option value="lead">Lead contacts only</option>
+          <option value="partner">Partner contacts only</option>
+        </select>
+        <select id="global-search-status" style="padding:5px 10px;font-size:12px;">
+          <option value="">Any status</option>
+          <option value="active">active</option>
+          <option value="dormant">dormant</option>
+          <option value="left">left</option>
+        </select>
+        <select id="global-search-territory" style="padding:5px 10px;font-size:12px;"></select>
+        <select id="global-search-region" style="padding:5px 10px;font-size:12px;"></select>
+        <select id="global-search-industry" style="padding:5px 10px;font-size:12px;"></select>
+        <input id="global-search-owner" type="text" placeholder="MR owner contains…"
+               style="padding:5px 10px;font-size:12px;width:160px;" />
+        <button id="global-search-my-contacts" class="btn ghost" type="button"
+                style="padding:5px 10px;font-size:11px;" title="Filter to mr_owner = 'Ben Ojuolape'">
+          My contacts
+        </button>
+        <button id="global-search-clear" class="btn ghost" type="button"
+                style="padding:5px 10px;font-size:11px;">Clear filters</button>
+      </div>
+    </div>
+    <div id="global-search-results" style="flex:1;overflow:auto;padding:14px 20px;background:var(--bg);">
+      <div class="muted" style="font-size:13px;text-align:center;padding:32px;">Start typing to search, or open with no query to browse all contacts.</div>
     </div>
   </div>
 </div>
@@ -5380,6 +5436,161 @@
     }
   }
 
+  // ====================================================================
+  // Global contact search (v1.0.0c, Tier 2a + 2b)
+  // ====================================================================
+  // Lightweight cross-surface picker. Lives in its own overlay (same
+  // CSS as the doc preview modal). Opens via 🔍 button or ⌘K.
+
+  let _searchDebounce = null;
+  let _searchEnumsLoaded = false;
+  const _searchState = { lastQuery: null };
+
+  function _searchOpen() {
+    const ov = $('#global-search-overlay');
+    if (!ov) return;
+    ov.classList.add('open');
+    ov.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    // Lazy-load enums (territory/region/industry dropdowns) once.
+    _searchLoadEnums();
+    // Focus the input
+    setTimeout(() => $('#global-search-input')?.focus(), 50);
+    // Run the search with whatever's currently in the input — gives
+    // the AE an instant browse view on first open.
+    _searchRun();
+  }
+
+  function _searchClose() {
+    const ov = $('#global-search-overlay');
+    if (!ov) return;
+    ov.classList.remove('open');
+    ov.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  async function _searchLoadEnums() {
+    if (_searchEnumsLoaded) return;
+    try {
+      const e = await jsonFetch('/api/partners/enums');
+      const fill = (id, label, list) => {
+        const sel = $(id); if (!sel) return;
+        sel.innerHTML = `<option value="">${label}</option>` +
+          (list || []).map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('');
+      };
+      fill('#global-search-territory', 'Any territory', e.territories);
+      fill('#global-search-region', 'Any region', e.regions);
+      fill('#global-search-industry', 'Any industry', e.industries);
+      _searchEnumsLoaded = true;
+    } catch (err) {
+      console.warn('[search] enums load failed', err);
+    }
+  }
+
+  function _searchParams() {
+    return {
+      q: $('#global-search-input').value.trim(),
+      surface: $('#global-search-surface').value,
+      status: $('#global-search-status').value,
+      territory: $('#global-search-territory').value,
+      region: $('#global-search-region').value,
+      industry: $('#global-search-industry').value,
+      owner: $('#global-search-owner').value.trim(),
+    };
+  }
+
+  async function _searchRun() {
+    const p = _searchParams();
+    // De-dupe identical re-runs (e.g. on initial open + immediate refocus).
+    const key = JSON.stringify(p);
+    if (key === _searchState.lastQuery) return;
+    _searchState.lastQuery = key;
+    const params = new URLSearchParams();
+    Object.entries(p).forEach(([k, v]) => { if (v) params.set(k, v); });
+    const el = $('#global-search-results');
+    el.innerHTML = '<div class="muted" style="font-size:12px;text-align:center;padding:20px;">Searching…</div>';
+    try {
+      const data = await jsonFetch(`/api/contacts/search?${params.toString()}`);
+      _searchRender(data);
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;text-align:center;padding:20px;">Search failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _searchRender(data) {
+    const el = $('#global-search-results');
+    const lead = data.lead || [];
+    const partner = data.partner || [];
+    if (!lead.length && !partner.length) {
+      el.innerHTML = '<div class="muted" style="font-size:13px;text-align:center;padding:32px;">No matches. Try clearing filters or a different query.</div>';
+      return;
+    }
+    const _row = (c) => {
+      const overdueBadge = c.overdue
+        ? `<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">${Math.abs(c.days_until_due || 0)}d overdue</span>` : '';
+      const statusBadge = c.status === 'dormant'
+        ? '<span style="background:rgba(251,191,36,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">DORMANT</span>'
+        : c.status === 'left'
+        ? '<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">LEFT</span>'
+        : '';
+      const meta = [
+        c.surface === 'lead' ? '<span style="color:var(--accent-text);font-weight:600;">Lead</span>' : '<span style="color:var(--blue);font-weight:600;">Partner</span>',
+        escapeHtml(c.parent_name || c.parent_id),
+        c.title ? escapeHtml(c.title) : '',
+        c.territory ? escapeHtml(c.territory) : '',
+        c.region ? escapeHtml(c.region) : '',
+        c.country ? escapeHtml(c.country) : '',
+      ].filter(Boolean).join(' · ');
+      const inds = (c.industries || []).slice(0, 3)
+        .map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('');
+      return `
+        <button type="button" data-search-open="${c.surface}|${escapeAttr(c.parent_id)}|${escapeAttr(c.id)}"
+                style="display:block;width:100%;text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;color:var(--text);font-family:inherit;">
+          <div style="font-size:13px;font-weight:500;">
+            ${escapeHtml(c.name || '—')}
+            ${overdueBadge}
+            ${statusBadge}
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:2px;">${meta}</div>
+          ${c.email ? `<div class="muted" style="font-size:11px;">${escapeHtml(c.email)}</div>` : ''}
+          ${inds ? `<div style="margin-top:4px;">${inds}</div>` : ''}
+        </button>`;
+    };
+    const sections = [];
+    if (lead.length) {
+      sections.push(`
+        <div style="margin-bottom:18px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">
+            Lead contacts <span style="background:rgba(255,77,42,.12);color:var(--accent-text);font-size:10px;padding:1px 8px;border-radius:10px;margin-left:4px;">${lead.length}</span>
+          </div>
+          ${lead.map(_row).join('')}
+        </div>`);
+    }
+    if (partner.length) {
+      sections.push(`
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">
+            Partner contacts <span style="background:rgba(96,165,250,.15);color:var(--blue);font-size:10px;padding:1px 8px;border-radius:10px;margin-left:4px;">${partner.length}</span>
+          </div>
+          ${partner.map(_row).join('')}
+        </div>`);
+    }
+    el.innerHTML = sections.join('');
+    el.querySelectorAll('[data-search-open]').forEach(b => {
+      b.addEventListener('click', () => {
+        const [surface, parentId] = b.dataset.searchOpen.split('|');
+        _searchClose();
+        if (surface === 'lead') {
+          openLeadDrawer(parentId);
+        } else if (surface === 'partner') {
+          switchView('partners');
+          // Give the view a tick to mount before opening the partner.
+          setTimeout(() => openPartnerDetail(parentId), 100);
+        }
+      });
+    });
+  }
+
   function openDocPreviewInNewTab() {
     const html = _docPreviewState.html;
     if (!html) return;
@@ -5575,7 +5786,13 @@
     $('#ld-parent-clear').addEventListener('click', clearParent);
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      // v0.10.0u: doc preview modal takes priority — close it first if open.
+      // v1.0.0c: search overlay first — most recently opened wins.
+      const searchOv = $('#global-search-overlay');
+      if (searchOv && searchOv.classList.contains('open')) {
+        _searchClose();
+        return;
+      }
+      // v0.10.0u: doc preview modal next.
       const docOv = $('#doc-preview-overlay');
       if (docOv && docOv.classList.contains('open')) {
         closeDocPreview();
@@ -5585,6 +5802,43 @@
     });
     // v0.10.0u: doc preview modal wiring.
     $('#doc-preview-close').addEventListener('click', closeDocPreview);
+    // v1.0.0c: global contact search.
+    $('#global-search-open').addEventListener('click', _searchOpen);
+    $('#global-search-close').addEventListener('click', _searchClose);
+    $('#global-search-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'global-search-overlay') _searchClose();
+    });
+    const _debouncedSearch = () => {
+      clearTimeout(_searchDebounce);
+      _searchDebounce = setTimeout(() => _searchRun(), 180);
+    };
+    $('#global-search-input').addEventListener('input', _debouncedSearch);
+    ['surface', 'status', 'territory', 'region', 'industry', 'owner']
+      .forEach(k => $(`#global-search-${k}`).addEventListener('change', _searchRun));
+    $('#global-search-owner').addEventListener('input', _debouncedSearch);
+    $('#global-search-my-contacts').addEventListener('click', () => {
+      // Drop "Ben Ojuolape" into owner filter — adjust default later.
+      $('#global-search-owner').value = 'Ben';
+      _searchRun();
+    });
+    $('#global-search-clear').addEventListener('click', () => {
+      ['surface', 'status', 'territory', 'region', 'industry'].forEach(k => {
+        $(`#global-search-${k}`).value = '';
+      });
+      $('#global-search-owner').value = '';
+      $('#global-search-input').value = '';
+      _searchState.lastQuery = null;
+      _searchRun();
+    });
+    // ⌘K / Ctrl+K to open search.
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const ov = $('#global-search-overlay');
+        if (ov && ov.classList.contains('open')) _searchClose();
+        else _searchOpen();
+      }
+    });
     $('#doc-preview-overlay').addEventListener('click', (e) => {
       // Click backdrop (not the modal body) to close.
       if (e.target.id === 'doc-preview-overlay') closeDocPreview();
