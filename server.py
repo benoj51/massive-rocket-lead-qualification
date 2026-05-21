@@ -268,12 +268,19 @@ def api_contacts_apollo_search(lead_id: str):
     domain_or_url = (body.get("domain") or body.get("url") or "").strip()
     apollo_id = (body.get("apollo_id") or "").strip() or None
     limit = int(body.get("limit") or 15)
+    # v0.10.0t: optional country/region filter — accepts either a list
+    # (`person_locations`) or a comma-separated string (`countries`).
+    raw_locs = body.get("person_locations") or body.get("countries") or []
+    if isinstance(raw_locs, str):
+        raw_locs = [s.strip() for s in raw_locs.split(",") if s.strip()]
+    locations = [str(l).strip() for l in raw_locs if str(l).strip()] or None
     if not domain_or_url and not apollo_id:
         return jsonify({"error": "domain or apollo_id required"}), 400
     try:
         candidates = apollo.search_people(
             org_id=apollo_id,
             org_domain=domain_or_url,
+            person_locations=locations,
             limit=limit,
         )
     except apollo.ApolloError as e:

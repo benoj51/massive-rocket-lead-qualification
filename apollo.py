@@ -275,10 +275,26 @@ def search_people(
     org_id: str | None = None,
     org_domain: str | None = None,
     titles: list[str] | None = None,
+    person_locations: list[str] | None = None,
     limit: int = 10,
     cfg: ApolloConfig | None = None,
 ) -> list[dict]:
-    """Find decision-makers for an org. Pass either apollo org_id or domain."""
+    """Find decision-makers for an org.
+
+    Args:
+        org_id: Apollo org id (preferred when known).
+        org_domain: company domain — used when org_id isn't cached.
+        titles: list of person titles to search for. Defaults to
+            DEFAULT_PEOPLE_TITLES (marketing/martech/digital/data leadership).
+        person_locations: v0.10.0t — restrict results to people in these
+            countries / regions. Apollo accepts strings like "United States",
+            "United Kingdom", "EMEA". Without this, large multi-region orgs
+            (KFC, IHG, Marriott) return contacts globally — usually
+            unhelpful. Pass `None` or `[]` to keep the global search.
+        limit: max candidates returned.
+
+    Returns: list of normalised person dicts.
+    """
     cfg = cfg or ApolloConfig.from_env()
     titles = titles or DEFAULT_PEOPLE_TITLES
 
@@ -287,7 +303,14 @@ def search_people(
         if domain_slug:
             fixture = _fixture_for(domain_slug)
             if fixture and isinstance(fixture.get("people"), list):
-                return [_normalise_person(p) for p in fixture["people"][:limit]]
+                people = fixture["people"]
+                # Honour the country filter even in fixtures so tests can
+                # exercise the path. Match on the person's `country` field.
+                if person_locations:
+                    locs_lc = {str(l).lower().strip() for l in person_locations}
+                    people = [p for p in people
+                              if str(p.get("country") or "").lower() in locs_lc]
+                return [_normalise_person(p) for p in people[:limit]]
         return []
 
     payload: dict[str, Any] = {
@@ -301,6 +324,12 @@ def search_people(
         payload["q_organization_domains_list"] = [_clean_domain(org_domain)]
     else:
         raise ValueError("search_people requires org_id or org_domain")
+    if person_locations:
+        # Apollo treats this as a free-text list — countries and regions
+        # both work ("United States", "EMEA", "DACH"). Strip empties.
+        cleaned = [str(l).strip() for l in person_locations if str(l).strip()]
+        if cleaned:
+            payload["person_locations"] = cleaned
 
     # /mixed_people/search was deprecated mid-2026; the current path is
     # /mixed_people/api_search. Payload shape is unchanged.

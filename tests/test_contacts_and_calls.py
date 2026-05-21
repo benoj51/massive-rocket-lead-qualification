@@ -100,6 +100,58 @@ class ContactSearchEndpointTests(unittest.TestCase):
             self.assertIn("already_saved", cand)
             self.assertIsInstance(cand["already_saved"], bool)
 
+    def test_search_accepts_person_locations(self):
+        """v0.10.0t: country/region filter must be honoured."""
+        r = self.client.post(
+            "/api/contacts/loc-test/search",
+            json={"domain": "deliveroo.co.uk", "person_locations": ["United Kingdom"]},
+        )
+        self.assertEqual(r.status_code, 200)
+        # We can't assert on contents (fixture-dependent) but the endpoint
+        # must accept the param without 400/500.
+        self.assertIn("candidates", r.get_json())
+
+    def test_search_accepts_comma_separated_countries(self):
+        """The `countries` shorthand string also parses cleanly."""
+        r = self.client.post(
+            "/api/contacts/loc-test/search",
+            json={"domain": "deliveroo.co.uk",
+                  "countries": "United Kingdom, United States, Ireland"},
+        )
+        self.assertEqual(r.status_code, 200)
+
+
+class ApolloLocationFilterTests(unittest.TestCase):
+    """v0.10.0t: search_people honours person_locations in fixture mode."""
+
+    def setUp(self):
+        os.environ["APOLLO_USE_FIXTURES"] = "1"
+        for mod in ("apollo",):
+            sys.modules.pop(mod, None)
+
+    def test_no_filter_returns_all_fixture_people(self):
+        import apollo
+        unfiltered = apollo.search_people(org_domain="deliveroo.co.uk", limit=20)
+        self.assertIsInstance(unfiltered, list)
+
+    def test_location_filter_narrows_results(self):
+        import apollo
+        unfiltered = apollo.search_people(org_domain="deliveroo.co.uk", limit=20)
+        filtered = apollo.search_people(
+            org_domain="deliveroo.co.uk",
+            person_locations=["United Kingdom"],
+            limit=20,
+        )
+        # filtered is a subset of unfiltered (possibly empty)
+        self.assertLessEqual(len(filtered), len(unfiltered))
+        # Every filtered hit has country matching the filter (case-insensitive)
+        for p in filtered:
+            self.assertEqual(
+                (p.get("country") or "").lower(),
+                "united kingdom",
+                f"Unexpected country in filtered result: {p.get('country')}",
+            )
+
 
 class ContactsStoreTests(unittest.TestCase):
     def setUp(self):

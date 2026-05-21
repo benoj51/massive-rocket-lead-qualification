@@ -596,6 +596,68 @@
           <input id="in-url" type="url" placeholder="e.g. deliveroo.co.uk" />
         </div>
       </div>
+      <!-- v0.10.0t: country filter scopes Apollo's people search.
+           Without it Apollo returns the whole global org (e.g. KFC = US +
+           UK + APAC + LATAM marketers). With it, we get the right region. -->
+      <div class="row row-2" style="margin-top: 12px;">
+        <div>
+          <label>Country (filters Apollo contact search) <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— leave as Any to search globally</span></label>
+          <select id="in-country">
+            <option value="">Any (global)</option>
+            <optgroup label="Core ICP regions">
+              <option value="United States">United States</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Canada">Canada</option>
+              <option value="Australia">Australia</option>
+            </optgroup>
+            <optgroup label="EMEA">
+              <option value="Ireland">Ireland</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Spain">Spain</option>
+              <option value="Italy">Italy</option>
+              <option value="Netherlands">Netherlands</option>
+              <option value="Belgium">Belgium</option>
+              <option value="Sweden">Sweden</option>
+              <option value="Norway">Norway</option>
+              <option value="Denmark">Denmark</option>
+              <option value="Finland">Finland</option>
+              <option value="Switzerland">Switzerland</option>
+              <option value="Austria">Austria</option>
+              <option value="Portugal">Portugal</option>
+              <option value="Poland">Poland</option>
+              <option value="United Arab Emirates">United Arab Emirates</option>
+              <option value="Saudi Arabia">Saudi Arabia</option>
+              <option value="Israel">Israel</option>
+              <option value="South Africa">South Africa</option>
+            </optgroup>
+            <optgroup label="APAC">
+              <option value="Singapore">Singapore</option>
+              <option value="Japan">Japan</option>
+              <option value="India">India</option>
+              <option value="Hong Kong">Hong Kong</option>
+              <option value="New Zealand">New Zealand</option>
+              <option value="Philippines">Philippines</option>
+              <option value="Thailand">Thailand</option>
+              <option value="Indonesia">Indonesia</option>
+              <option value="Malaysia">Malaysia</option>
+              <option value="South Korea">South Korea</option>
+              <option value="China">China</option>
+            </optgroup>
+            <optgroup label="LATAM">
+              <option value="Mexico">Mexico</option>
+              <option value="Brazil">Brazil</option>
+              <option value="Argentina">Argentina</option>
+              <option value="Chile">Chile</option>
+              <option value="Colombia">Colombia</option>
+            </optgroup>
+          </select>
+        </div>
+        <div>
+          <label>Multiple countries <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— optional, comma-separated; overrides the dropdown</span></label>
+          <input id="in-countries" type="text" placeholder="e.g. United States, United Kingdom" />
+        </div>
+      </div>
       <div class="btn-row" style="margin-top: 14px;">
         <button id="btn-qualify" class="btn" type="button">Research &amp; Qualify</button>
         <button class="btn ghost demo" type="button" data-name="Deliveroo" data-url="deliveroo.co.uk">Demo: Deliveroo</button>
@@ -1220,9 +1282,60 @@
       <div class="section-body">
         <!-- v0.10.0s: prominent Apollo search action at the top of the
              Contacts section. Pulls fresh stakeholder candidates using
-             the lead's URL/domain; AE picks which to save in bulk. -->
-        <div class="btn-row" style="margin-bottom:10px;">
+             the lead's URL/domain; AE picks which to save in bulk.
+             v0.10.0t: country picker scopes the search per-pull. -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
           <button id="ld-contacts-search" class="btn" type="button" style="padding:7px 14px;font-size:12px;">🔍 Search Apollo for contacts</button>
+          <select id="ld-contacts-search-country" style="padding:6px 10px;font-size:12px;min-width:180px;">
+            <option value="">Any country</option>
+            <optgroup label="Core ICP">
+              <option value="United States">United States</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Canada">Canada</option>
+              <option value="Australia">Australia</option>
+            </optgroup>
+            <optgroup label="EMEA">
+              <option value="Ireland">Ireland</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Spain">Spain</option>
+              <option value="Italy">Italy</option>
+              <option value="Netherlands">Netherlands</option>
+              <option value="Belgium">Belgium</option>
+              <option value="Sweden">Sweden</option>
+              <option value="Norway">Norway</option>
+              <option value="Denmark">Denmark</option>
+              <option value="Finland">Finland</option>
+              <option value="Switzerland">Switzerland</option>
+              <option value="Austria">Austria</option>
+              <option value="Portugal">Portugal</option>
+              <option value="Poland">Poland</option>
+              <option value="United Arab Emirates">United Arab Emirates</option>
+              <option value="Saudi Arabia">Saudi Arabia</option>
+              <option value="Israel">Israel</option>
+              <option value="South Africa">South Africa</option>
+            </optgroup>
+            <optgroup label="APAC">
+              <option value="Singapore">Singapore</option>
+              <option value="Japan">Japan</option>
+              <option value="India">India</option>
+              <option value="Hong Kong">Hong Kong</option>
+              <option value="New Zealand">New Zealand</option>
+              <option value="Philippines">Philippines</option>
+              <option value="Thailand">Thailand</option>
+              <option value="Indonesia">Indonesia</option>
+              <option value="Malaysia">Malaysia</option>
+              <option value="South Korea">South Korea</option>
+              <option value="China">China</option>
+            </optgroup>
+            <optgroup label="LATAM">
+              <option value="Mexico">Mexico</option>
+              <option value="Brazil">Brazil</option>
+              <option value="Argentina">Argentina</option>
+              <option value="Chile">Chile</option>
+              <option value="Colombia">Colombia</option>
+            </optgroup>
+          </select>
           <span id="ld-contacts-search-status" class="muted" style="font-size:11px;"></span>
         </div>
         <div id="ld-contacts-search-results" style="display:none;margin-bottom:12px;"></div>
@@ -1425,7 +1538,21 @@
     btn.disabled = true;
 
     try {
-      const overrides = forceOverrides ?? state.overrides;
+      const overrides = { ...(forceOverrides ?? state.overrides) };
+      // v0.10.0t: country filter for Apollo people search. The free-text
+      // "Multiple countries" field wins if provided; otherwise use the
+      // dropdown selection. Empty = global search (no filter).
+      const multi = ($('#in-countries')?.value || '').trim();
+      const single = ($('#in-country')?.value || '').trim();
+      let locs = [];
+      if (multi) {
+        locs = multi.split(',').map(s => s.trim()).filter(Boolean);
+      } else if (single) {
+        locs = [single];
+      }
+      if (locs.length) overrides.person_locations = locs;
+      // Remember the choice for Re-score so it doesn't blow away.
+      state.lastPersonLocations = locs;
       const result = await jsonFetch('/api/qualify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2294,10 +2421,19 @@
     btn.innerHTML = '<span class="spinner"></span> Searching…';
     status.textContent = '';
     try {
+      // v0.10.0t: pass the country filter from the drawer dropdown so
+      // Apollo doesn't dump the whole multinational org.
+      const country = ($('#ld-contacts-search-country')?.value || '').trim();
+      const reqBody = {
+        domain,
+        apollo_id: original.apollo_id || null,
+        limit: 15,
+      };
+      if (country) reqBody.person_locations = [country];
       const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain, apollo_id: original.apollo_id || null, limit: 15 }),
+        body: JSON.stringify(reqBody),
       });
       const candidates = data.candidates || [];
       if (!candidates.length) {
@@ -2780,6 +2916,17 @@
         el.value = value;
       });
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
+      // v0.10.0t: smart default for the drawer's Apollo-search country
+      // dropdown. The lead's region looks like "NAM (United States)" —
+      // we extract the country in parens, match against the dropdown
+      // options, and pre-select if found.
+      const countrySel = $('#ld-contacts-search-country');
+      if (countrySel && lead.region) {
+        const m = String(lead.region).match(/\(([^)]+)\)\s*$/);
+        const country = m ? m[1].trim() : lead.region.trim();
+        const opt = Array.from(countrySel.options).find(o => o.value === country);
+        if (opt) countrySel.value = country;
+      }
       renderDrawerGroup(pageId, data.group || { parent: null, children: [] });
       // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);

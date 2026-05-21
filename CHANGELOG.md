@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0t] — 2026-05-21 — Country dropdown for Apollo people search
+
+Without a country filter, Apollo's people search returns the whole
+global org. For a multinational like KFC / IHG / Marriott, that's a
+hundred unrelated marketers across 50 countries — useless for an AE
+selling into a specific region. This release scopes the search.
+
+### Added — Country dropdown on the qualify form
+Step 1 ("Input") now has two new fields:
+- **Country** — dropdown with 40+ ICP-relevant countries, grouped
+  into Core ICP / EMEA / APAC / LATAM, plus "Any (global)" default.
+- **Multiple countries** — free-text comma-separated input for
+  multi-region searches (e.g. *"United States, United Kingdom"*).
+  Overrides the dropdown when both are set.
+
+Selected countries are sent as `overrides.person_locations` on the
+`/api/qualify` POST.
+
+### Added — Country picker on the drawer's contact-search button
+The 🔍 Search Apollo button in the Contacts panel now sits next to
+the same country dropdown. AE can refine which region to pull each
+time they re-search — no need to re-qualify the lead. The dropdown
+**defaults to the lead's saved region** (extracted from strings like
+"NAM (United States)") so the smart pick is one click.
+
+### Plumbing
+- **`apollo.search_people` accepts `person_locations: list[str]`**.
+  Apollo's API uses this as a free-text list of countries/regions
+  ("United States", "EMEA", "DACH" all work). Cleaned and dropped
+  from payload when empty.
+- **Fixture mode honours the filter** — fixtures are filtered
+  client-side by the person's `country` field so tests can exercise
+  the path without hitting Apollo.
+- **`QualificationOverrides` gets `person_locations: list[str]`** so
+  the full qualify pipeline carries it through to the people search.
+- **`POST /api/contacts/<id>/search` accepts**
+  `{person_locations: [...]}` OR shorthand `{countries: "a,b,c"}`.
+
+### Tests
+- 312 total (+4). New tests cover endpoint acceptance of both
+  parameter shapes, Apollo location filter narrowing fixture
+  results, and country country-match correctness.
+
+### Why this matters operationally
+- **CDP/ESP buyers usually live in HQ.** Yum!/KFC headquartered in
+  Louisville means US filter pulls the actual decision-makers, not
+  KFC India marketers.
+- **Regional rollouts** (e.g. "Marriott EMEA" engagement) get a
+  tight contact list instead of a 100-person global dump.
+- **Faster discovery** — fewer to triage, more relevant to outreach.
+
 ## [0.10.0s] — 2026-05-21 — Search Apollo from the contact panel + harden save-contact
 
 Three asks bundled. Contacts are now searchable, saveable, and

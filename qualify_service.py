@@ -196,6 +196,11 @@ class QualificationOverrides:
     rfp_active: bool = False
     budget_allocated: bool = False
     extra_signals: list[str] = field(default_factory=list)
+    # v0.10.0t: Apollo people-search location filter. AE picks from the
+    # country dropdown on the qualify form (or types a comma-separated
+    # list). Without this, Apollo returns the whole global org's
+    # marketing team, which is rarely useful.
+    person_locations: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "QualificationOverrides":
@@ -258,6 +263,7 @@ def qualify(
         stakeholders_raw = apollo.search_people(
             org_id=org.get("apollo_id"),
             org_domain=org.get("domain") or url,
+            person_locations=(ov.person_locations or None),
             cfg=apollo_cfg,
         )
     except apollo.ApolloError as e:
