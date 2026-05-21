@@ -37,6 +37,9 @@ import apollo
 import audit
 import bant_health
 import calls_store
+import partner_contacts_store
+import partner_notes_store
+import partners_store
 import project_preview
 import contacts_store
 import criteria_store
@@ -1681,6 +1684,178 @@ def api_lead_children(lead_id: str):
         else:
             children.append({"id": s, "company": s, "_missing": True})
     return jsonify({"children": children})
+
+
+# --- Partners CRM (v0.10.0y) ----------------------------------------------
+# New top-level surface for the Partnerships team to manage partner orgs +
+# their contacts. Distinct from leads (orgs we sell TO). Partner contacts
+# carry territory / region / country / industries metadata for portfolio
+# views, plus a reports_to link the UI can use later for an org chart.
+
+@app.route("/api/partners/enums", methods=["GET"])
+def api_partners_enums():
+    """Static enum lists the UI uses to populate dropdowns. Returned in
+    one round-trip so the Partners view doesn't hard-code them in JS."""
+    return jsonify({
+        "partner_types": partners_store.PARTNER_TYPES,
+        "territories":   partner_contacts_store.TERRITORIES,
+        "regions":       partner_contacts_store.REGIONS,
+        "industries":    partner_contacts_store.INDUSTRIES,
+        "statuses":      partner_contacts_store.STATUSES,
+        "note_types":    partner_notes_store.NOTE_TYPES,
+    })
+
+
+@app.route("/api/partners", methods=["GET"])
+def api_partners_list():
+    rows = partners_store.list_partners()
+    # Enrich each partner with contact count so the index view can show it.
+    for r in rows:
+        try:
+            r["contacts_count"] = len(partner_contacts_store.list_contacts(r["id"]))
+        except Exception:
+            r["contacts_count"] = 0
+    return jsonify({"partners": rows, "count": len(rows)})
+
+
+@app.route("/api/partners", methods=["POST"])
+def api_partners_create():
+    body = request.get_json(silent=True) or {}
+    try:
+        saved = partners_store.save_partner(body)
+    except partners_store.PartnersStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("partner_saved", actor=_actor(),
+                    partner_id=saved["id"], name=saved["name"])
+    return jsonify({"partner": saved}), 201
+
+
+@app.route("/api/partners/<partner_id>", methods=["GET"])
+def api_partners_get(partner_id: str):
+    p = partners_store.get_partner(partner_id)
+    if not p:
+        return jsonify({"error": "not_found"}), 404
+    p["contacts"] = partner_contacts_store.list_contacts(p["id"])
+    return jsonify({"partner": p})
+
+
+@app.route("/api/partners/<partner_id>", methods=["PATCH"])
+def api_partners_update(partner_id: str):
+    body = request.get_json(silent=True) or {}
+    existing = partners_store.get_partner(partner_id)
+    if not existing:
+        return jsonify({"error": "not_found"}), 404
+    merged = {**existing, **body, "id": existing["id"]}
+    try:
+        saved = partners_store.save_partner(merged)
+    except partners_store.PartnersStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("partner_updated", actor=_actor(),
+                    partner_id=saved["id"],
+                    fields=sorted([k for k in body.keys() if k != "id"]))
+    return jsonify({"partner": saved})
+
+
+@app.route("/api/partners/<partner_id>", methods=["DELETE"])
+def api_partners_delete(partner_id: str):
+    contacts = partner_contacts_store.list_contacts(partner_id)
+    if contacts:
+        return jsonify({"error": f"Partner has {len(contacts)} contacts. "
+                                  "Delete or reassign them first."}), 409
+    ok = partners_store.delete_partner(partner_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("partner_deleted", actor=_actor(), partner_id=partner_id)
+    return jsonify({"deleted": True})
+
+
+# ----- partner contacts ----------------------------------------------------
+
+@app.route("/api/partners/<partner_id>/contacts", methods=["GET"])
+def api_partner_contacts_list(partner_id: str):
+    contacts = partner_contacts_store.list_contacts(partner_id)
+    return jsonify({"contacts": contacts, "count": len(contacts)})
+
+
+@app.route("/api/partners/<partner_id>/contacts", methods=["POST"])
+def api_partner_contacts_save(partner_id: str):
+    body = request.get_json(silent=True) or {}
+    # Bulk path: {contacts: [...]}
+    if "contacts" in body and isinstance(body["contacts"], list):
+        saved = []
+        for c in body["contacts"]:
+            try:
+                saved.append(partner_contacts_store.save_contact(partner_id, c))
+            except partner_contacts_store.PartnerContactsStoreError:
+                continue
+        audit.log_event("partner_contacts_saved", actor=_actor(),
+                        partner_id=partner_id, count=len(saved))
+        return jsonify({"saved": saved,
+                        "contacts": partner_contacts_store.list_contacts(partner_id)})
+    try:
+        saved_one = partner_contacts_store.save_contact(partner_id, body)
+    except partner_contacts_store.PartnerContactsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("partner_contact_saved", actor=_actor(),
+                    partner_id=partner_id, contact_id=saved_one["id"])
+    return jsonify({"contact": saved_one,
+                    "contacts": partner_contacts_store.list_contacts(partner_id)})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>", methods=["PATCH"])
+def api_partner_contacts_update(partner_id: str, contact_id: str):
+    existing = partner_contacts_store.get_contact(partner_id, contact_id)
+    if not existing:
+        return jsonify({"error": "not_found"}), 404
+    body = request.get_json(silent=True) or {}
+    merged = {**existing, **body, "id": contact_id, "partner_id": existing["partner_id"]}
+    try:
+        saved = partner_contacts_store.save_contact(partner_id, merged)
+    except partner_contacts_store.PartnerContactsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"contact": saved})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>", methods=["DELETE"])
+def api_partner_contacts_delete(partner_id: str, contact_id: str):
+    ok = partner_contacts_store.delete_contact(partner_id, contact_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    # Cascade-delete notes so they don't leak as orphans.
+    partner_notes_store.delete_all_for_contact(partner_id, contact_id)
+    audit.log_event("partner_contact_deleted", actor=_actor(),
+                    partner_id=partner_id, contact_id=contact_id)
+    return jsonify({"deleted": True})
+
+
+# ----- partner contact notes ----------------------------------------------
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/notes", methods=["GET"])
+def api_partner_notes_list(partner_id: str, contact_id: str):
+    return jsonify({"notes": partner_notes_store.list_notes(partner_id, contact_id)})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/notes", methods=["POST"])
+def api_partner_notes_add(partner_id: str, contact_id: str):
+    body = request.get_json(silent=True) or {}
+    body.setdefault("author", _actor())
+    try:
+        note = partner_notes_store.add_note(partner_id, contact_id, body)
+    except partner_notes_store.PartnerNotesStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("partner_note_added", actor=_actor(),
+                    partner_id=partner_id, contact_id=contact_id,
+                    note_id=note["id"])
+    return jsonify({"note": note,
+                    "notes": partner_notes_store.list_notes(partner_id, contact_id)})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/notes/<note_id>", methods=["DELETE"])
+def api_partner_notes_delete(partner_id: str, contact_id: str, note_id: str):
+    ok = partner_notes_store.delete_note(partner_id, contact_id, note_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
 
 
 if __name__ == "__main__":

@@ -621,6 +621,7 @@
     <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
     <button id="nav-build" type="button">Project Build</button>
+    <button id="nav-partners" type="button">Partners</button>
   </nav>
   <button id="theme-toggle" type="button" title="Toggle light / dark theme"
           aria-label="Toggle light / dark theme"
@@ -1094,6 +1095,23 @@
         <div id="pb-references" style="margin-top: 10px;"></div>
       </details>
     </div>
+  </section>
+
+  <!-- PARTNERS VIEW =========================================== -->
+  <section id="view-partners" class="view">
+    <div class="card">
+      <h2 style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <span>Partners</span>
+        <div class="btn-row">
+          <button id="ptn-add-partner" class="btn" type="button" style="padding:6px 14px;font-size:12px;">+ Add partner</button>
+        </div>
+      </h2>
+      <p class="muted" style="margin:0 0 14px;font-size:12px;">Partner orgs we work WITH (Braze, Snowflake, mParticle, etc.) — distinct from leads we sell to. Contacts carry territory / region / country / industries metadata.</p>
+      <div id="ptn-list" class="muted" style="font-size:12px;">Loading…</div>
+    </div>
+
+    <!-- Partner detail surfaces inline below the list when selected -->
+    <div id="ptn-detail" class="card" style="display:none;"></div>
   </section>
 
 </main>
@@ -1576,6 +1594,7 @@
     $(`#nav-${name}`).classList.add('active');
     if (name === 'pipeline') refreshPipeline();
     if (name === 'build')    initProjectBuild();
+    if (name === 'partners') initPartners();
   }
 
   // ---- Health -----------------------------------------------------------
@@ -5171,6 +5190,426 @@
       renderPipeline();
     }));
     refreshHealth();
+    // v0.10.0y: Partners view event wiring (idempotent).
+    $('#nav-partners').addEventListener('click', () => switchView('partners'));
+    $('#ptn-add-partner').addEventListener('click', openAddPartnerForm);
+  }
+
+  // =============================================================
+  //  Partners view (v0.10.0y)
+  // =============================================================
+  const partnersState = {
+    enums: null,         // {territories, regions, industries, partner_types, ...}
+    partners: [],        // [partner_dict]
+    selectedId: null,    // currently expanded partner
+    filter: { territory: '', region: '', country: '', industry: '', status: 'active' },
+  };
+
+  async function initPartners() {
+    if (!partnersState.enums) {
+      try {
+        partnersState.enums = await jsonFetch('/api/partners/enums');
+      } catch (e) {
+        toast(`Couldn't load enums: ${e.body?.error || e.message}`, 'error');
+        partnersState.enums = { territories: [], regions: [], industries: [],
+                                partner_types: [], statuses: [], note_types: [] };
+      }
+    }
+    await refreshPartners();
+  }
+
+  async function refreshPartners() {
+    const el = $('#ptn-list');
+    try {
+      const data = await jsonFetch('/api/partners');
+      partnersState.partners = data.partners || [];
+      if (!partnersState.partners.length) {
+        el.innerHTML = `
+          <div style="background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:20px;text-align:center;">
+            <div style="font-size:13px;color:var(--text);margin-bottom:6px;">No partners yet.</div>
+            <div class="muted" style="font-size:11px;">Click <strong>+ Add partner</strong> to create your first partner record (Braze, Snowflake, mParticle, etc.).</div>
+          </div>`;
+        return;
+      }
+      el.innerHTML = `
+        <table class="stakeholders" style="width:100%;">
+          <thead>
+            <tr>
+              <th>Partner</th>
+              <th>Type</th>
+              <th>Contacts</th>
+              <th>Status</th>
+              <th>Owner</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${partnersState.partners.map(p => `
+              <tr data-partner-row="${escapeAttr(p.id)}">
+                <td><strong>${escapeHtml(p.name)}</strong>${p.url ? `<br><a href="${escapeAttr(p.url.startsWith('http') ? p.url : 'https://'+p.url)}" target="_blank" rel="noopener" style="font-size:11px;">${escapeHtml(p.url)} ↗</a>` : ''}</td>
+                <td>${escapeHtml(p.type || '—')}</td>
+                <td><strong>${p.contacts_count || 0}</strong></td>
+                <td>${escapeHtml(p.status || 'active')}</td>
+                <td>${escapeHtml(p.owner || '—')}</td>
+                <td style="text-align:right;">
+                  <button class="btn" type="button" data-partner-open="${escapeAttr(p.id)}" style="padding:4px 10px;font-size:11px;">Open →</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+      el.querySelectorAll('[data-partner-open]').forEach(b => {
+        b.addEventListener('click', () => openPartnerDetail(b.dataset.partnerOpen));
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed to load partners: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function openAddPartnerForm() {
+    const el = $('#ptn-detail');
+    el.style.display = 'block';
+    partnersState.selectedId = null;
+    const types = partnersState.enums?.partner_types || ['Technology partner'];
+    el.innerHTML = `
+      <h3 style="margin-top:0;">+ New partner</h3>
+      <div class="row row-2">
+        <div class="field"><label>Name *</label><input id="ptn-new-name" type="text" placeholder="e.g. Braze" /></div>
+        <div class="field">
+          <label>Type</label>
+          <select id="ptn-new-type">
+            ${types.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="row row-2">
+        <div class="field"><label>URL</label><input id="ptn-new-url" type="text" placeholder="braze.com" /></div>
+        <div class="field"><label>MR owner</label><input id="ptn-new-owner" type="text" placeholder="Ben Ojuolape" /></div>
+      </div>
+      <div class="field"><label>Description</label><textarea id="ptn-new-desc" rows="2" placeholder="What we work with them on…"></textarea></div>
+      <div class="btn-row">
+        <button id="ptn-new-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Create partner</button>
+        <button id="ptn-new-cancel" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+      </div>
+    `;
+    $('#ptn-new-name').focus();
+    $('#ptn-new-save').addEventListener('click', async () => {
+      const name = $('#ptn-new-name').value.trim();
+      if (!name) { toast('Name required', 'error'); return; }
+      try {
+        const data = await jsonFetch('/api/partners', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            type: $('#ptn-new-type').value,
+            url: $('#ptn-new-url').value.trim(),
+            owner: $('#ptn-new-owner').value.trim(),
+            description: $('#ptn-new-desc').value.trim(),
+          }),
+        });
+        toast(`Partner created: ${data.partner.name}`, 'success');
+        await refreshPartners();
+        openPartnerDetail(data.partner.id);
+      } catch (e) {
+        toast(`Create failed: ${e.body?.error || e.message}`, 'error');
+      }
+    });
+    $('#ptn-new-cancel').addEventListener('click', () => {
+      el.style.display = 'none'; el.innerHTML = '';
+    });
+  }
+
+  async function openPartnerDetail(partnerId) {
+    partnersState.selectedId = partnerId;
+    const el = $('#ptn-detail');
+    el.style.display = 'block';
+    el.innerHTML = '<div class="muted" style="font-size:12px;">Loading…</div>';
+    try {
+      const data = await jsonFetch(`/api/partners/${encodeURIComponent(partnerId)}`);
+      const p = data.partner;
+      renderPartnerDetail(p);
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function renderPartnerDetail(p) {
+    const el = $('#ptn-detail');
+    const enums = partnersState.enums || {};
+    const f = partnersState.filter;
+    // Filter dropdowns
+    const optEmpty = (label) => `<option value="">${label}</option>`;
+    const optGen = (list, sel) => list.map(v => `<option value="${escapeAttr(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
+        <div style="min-width:0;flex:1;">
+          <h3 style="margin:0;">${escapeHtml(p.name)} <span class="muted" style="font-weight:400;font-size:11px;">— ${escapeHtml(p.type || 'Partner')}</span></h3>
+          ${p.url ? `<a href="${escapeAttr(p.url.startsWith('http') ? p.url : 'https://'+p.url)}" target="_blank" rel="noopener" style="font-size:11px;">${escapeHtml(p.url)} ↗</a>` : ''}
+          ${p.description ? `<p class="muted" style="font-size:12px;margin:6px 0 0;">${escapeHtml(p.description)}</p>` : ''}
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button class="btn ghost" id="ptn-close" type="button" style="padding:4px 10px;font-size:11px;">✕ Close</button>
+        </div>
+      </div>
+
+      <h4 style="margin:16px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Filter contacts</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+        <select id="ptn-filter-territory" style="padding:5px 10px;font-size:12px;">${optEmpty('Any territory')}${optGen(enums.territories || [], f.territory)}</select>
+        <select id="ptn-filter-region" style="padding:5px 10px;font-size:12px;">${optEmpty('Any region')}${optGen(enums.regions || [], f.region)}</select>
+        <input id="ptn-filter-country" type="text" placeholder="Country contains…" value="${escapeAttr(f.country)}" style="padding:5px 10px;font-size:12px;width:160px;" />
+        <select id="ptn-filter-industry" style="padding:5px 10px;font-size:12px;">${optEmpty('Any industry')}${optGen(enums.industries || [], f.industry)}</select>
+        <select id="ptn-filter-status" style="padding:5px 10px;font-size:12px;">${optEmpty('Any status')}${optGen(enums.statuses || [], f.status)}</select>
+        <button class="btn ghost" id="ptn-add-contact" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">+ Add contact</button>
+      </div>
+
+      <div id="ptn-contacts-table"></div>
+      <div id="ptn-contact-detail" style="margin-top:12px;"></div>
+    `;
+    $('#ptn-close').addEventListener('click', () => {
+      el.style.display = 'none'; el.innerHTML = '';
+      partnersState.selectedId = null;
+    });
+    ['territory','region','industry','status'].forEach(k => {
+      $('#ptn-filter-' + k).addEventListener('change', (e) => {
+        partnersState.filter[k] = e.target.value;
+        renderPartnerContacts(p);
+      });
+    });
+    $('#ptn-filter-country').addEventListener('input', (e) => {
+      partnersState.filter.country = e.target.value;
+      renderPartnerContacts(p);
+    });
+    $('#ptn-add-contact').addEventListener('click', () => openContactForm(p, null));
+    renderPartnerContacts(p);
+  }
+
+  function renderPartnerContacts(partner) {
+    const wrap = $('#ptn-contacts-table');
+    const all = partner.contacts || [];
+    const f = partnersState.filter;
+    const filtered = all.filter(c => {
+      if (f.territory && c.territory !== f.territory) return false;
+      if (f.region && c.region !== f.region) return false;
+      if (f.status && (c.status || '') !== f.status) return false;
+      if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
+      if (f.industry && !(c.industries || []).includes(f.industry)) return false;
+      return true;
+    });
+    if (!filtered.length) {
+      wrap.innerHTML = `<div class="muted" style="font-size:12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;">No contacts ${all.length ? 'match the filters' : 'yet — click + Add contact above to start'}.</div>`;
+      return;
+    }
+    wrap.innerHTML = `
+      <table class="stakeholders" style="width:100%;font-size:12px;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Title</th>
+            <th>Territory</th>
+            <th>Region · Country</th>
+            <th>Industries</th>
+            <th>MR owner</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map(c => `
+            <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : ''}>
+              <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}${c.linkedin_url ? `<br><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener" style="font-size:10px;">LinkedIn ↗</a>` : ''}</td>
+              <td>${escapeHtml(c.title || '—')}</td>
+              <td>${escapeHtml(c.territory || '—')}</td>
+              <td>${escapeHtml(c.region || '—')}${c.country ? ' · ' + escapeHtml(c.country) : ''}</td>
+              <td>${(c.industries || []).map(i => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(i)}</span>`).join('') || '—'}</td>
+              <td>${escapeHtml(c.mr_owner || '—')}</td>
+              <td style="text-align:right;white-space:nowrap;">
+                <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">✎</button>
+                <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">📝</button>
+                <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="muted" style="font-size:10px;margin-top:6px;">${filtered.length} of ${all.length} contact${all.length === 1 ? '' : 's'}</div>
+    `;
+    wrap.querySelectorAll('[data-contact-edit]').forEach(b => {
+      b.addEventListener('click', () => {
+        const c = (partner.contacts || []).find(x => x.id === b.dataset.contactEdit);
+        if (c) openContactForm(partner, c);
+      });
+    });
+    wrap.querySelectorAll('[data-contact-notes]').forEach(b => {
+      b.addEventListener('click', () => openContactNotes(partner, b.dataset.contactNotes));
+    });
+    wrap.querySelectorAll('[data-contact-del]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!window.confirm('Remove this contact?')) return;
+        try {
+          await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(b.dataset.contactDel)}`, { method: 'DELETE' });
+          await openPartnerDetail(partner.id);
+        } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      });
+    });
+  }
+
+  function openContactForm(partner, existing) {
+    const detailEl = $('#ptn-contact-detail');
+    const enums = partnersState.enums || {};
+    const c = existing || {};
+    const checked = (list, val) => (list || []).includes(val) ? 'checked' : '';
+    const opt = (list, sel) => `<option value="">—</option>` +
+      (list || []).map(v => `<option value="${escapeAttr(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+    detailEl.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <h4 style="margin:0 0 10px;">${existing ? '✎ Edit contact' : '+ New contact'}</h4>
+        <div class="row row-2">
+          <div class="field"><label>Name *</label><input id="ptn-c-name" type="text" value="${escapeAttr(c.name || '')}" /></div>
+          <div class="field"><label>Title</label><input id="ptn-c-title" type="text" value="${escapeAttr(c.title || '')}" /></div>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Email</label><input id="ptn-c-email" type="email" value="${escapeAttr(c.email || '')}" /></div>
+          <div class="field"><label>LinkedIn URL</label><input id="ptn-c-linkedin" type="url" value="${escapeAttr(c.linkedin_url || '')}" /></div>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Territory</label><select id="ptn-c-territory">${opt(enums.territories, c.territory)}</select></div>
+          <div class="field"><label>Region</label><select id="ptn-c-region">${opt(enums.regions, c.region)}</select></div>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Country</label><input id="ptn-c-country" type="text" value="${escapeAttr(c.country || '')}" placeholder="e.g. United States" /></div>
+          <div class="field"><label>MR owner</label><input id="ptn-c-mr-owner" type="text" value="${escapeAttr(c.mr_owner || '')}" /></div>
+        </div>
+        <div class="field">
+          <label>Industries (multi-select)</label>
+          <div id="ptn-c-industries" class="filters" style="margin-top:4px;">
+            ${(enums.industries || []).map(i => `<button type="button" class="chip ${(c.industries || []).includes(i) ? 'active' : ''}" data-industry="${escapeAttr(i)}">${escapeHtml(i)}</button>`).join('')}
+          </div>
+        </div>
+        <div class="row row-2">
+          <div class="field"><label>Status</label><select id="ptn-c-status">${(enums.statuses || ['active']).map(s => `<option value="${escapeAttr(s)}"${s === (c.status || 'active') ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></div>
+          <div class="field">
+            <label>Reports to (org chart)</label>
+            <select id="ptn-c-reports-to">
+              <option value="">—</option>
+              ${(partner.contacts || []).filter(x => x.id !== c.id).map(x => `<option value="${escapeAttr(x.id)}"${x.id === c.reports_to_id ? ' selected' : ''}>${escapeHtml(x.name)}${x.title ? ' (' + escapeHtml(x.title) + ')' : ''}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="ptn-c-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">${existing ? 'Save changes' : 'Create contact'}</button>
+          <button id="ptn-c-cancel" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+        </div>
+      </div>
+    `;
+    detailEl.querySelectorAll('#ptn-c-industries [data-industry]').forEach(b => {
+      b.addEventListener('click', () => b.classList.toggle('active'));
+    });
+    $('#ptn-c-save').addEventListener('click', async () => {
+      const name = $('#ptn-c-name').value.trim();
+      const email = $('#ptn-c-email').value.trim();
+      if (!name && !email) { toast('Name or email required', 'error'); return; }
+      const industries = Array.from(detailEl.querySelectorAll('#ptn-c-industries [data-industry].active'))
+                              .map(b => b.dataset.industry);
+      const payload = {
+        name,
+        title: $('#ptn-c-title').value.trim(),
+        email,
+        linkedin_url: $('#ptn-c-linkedin').value.trim(),
+        territory: $('#ptn-c-territory').value,
+        region: $('#ptn-c-region').value,
+        country: $('#ptn-c-country').value.trim(),
+        mr_owner: $('#ptn-c-mr-owner').value.trim(),
+        industries,
+        status: $('#ptn-c-status').value,
+        reports_to_id: $('#ptn-c-reports-to').value,
+      };
+      try {
+        const url = existing
+          ? `/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(existing.id)}`
+          : `/api/partners/${encodeURIComponent(partner.id)}/contacts`;
+        const method = existing ? 'PATCH' : 'POST';
+        await jsonFetch(url, { method, headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload) });
+        toast(existing ? 'Contact updated' : 'Contact saved', 'success');
+        detailEl.innerHTML = '';
+        await openPartnerDetail(partner.id);
+      } catch (e) {
+        toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+      }
+    });
+    $('#ptn-c-cancel').addEventListener('click', () => { detailEl.innerHTML = ''; });
+  }
+
+  async function openContactNotes(partner, contactId) {
+    const detailEl = $('#ptn-contact-detail');
+    const c = (partner.contacts || []).find(x => x.id === contactId);
+    if (!c) return;
+    const enums = partnersState.enums || {};
+    detailEl.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <h4 style="margin:0 0 6px;">📝 Notes — ${escapeHtml(c.name)}</h4>
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
+        <div class="row" style="grid-template-columns:140px 1fr;gap:8px;margin-bottom:8px;">
+          <div class="field" style="margin:0;"><label>Type</label>
+            <select id="ptn-n-type">${(enums.note_types || ['touch']).map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="margin:0;"><label>Note</label>
+            <textarea id="ptn-n-content" rows="3" placeholder="Touch-base, intro, key takeaway…"></textarea>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button id="ptn-n-add" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add note</button>
+          <button id="ptn-n-close" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Done</button>
+        </div>
+        <div id="ptn-n-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    `;
+    $('#ptn-n-close').addEventListener('click', () => { detailEl.innerHTML = ''; });
+    async function refreshNotes() {
+      try {
+        const data = await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes`);
+        const list = data.notes || [];
+        const listEl = $('#ptn-n-list');
+        if (!list.length) {
+          listEl.innerHTML = '<div class="muted" style="font-size:12px;">No notes yet — add the first one above.</div>';
+          return;
+        }
+        listEl.innerHTML = list.map(n => `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">
+              <span>${escapeHtml(n.type)} · ${escapeHtml(new Date(n.created_at).toLocaleString())}${n.author ? ' · ' + escapeHtml(n.author) : ''}</span>
+              <button class="btn ghost" type="button" data-note-del="${escapeAttr(n.id)}" style="padding:2px 6px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+            </div>
+            <div style="font-size:13px;color:var(--text);white-space:pre-wrap;">${escapeHtml(n.content)}</div>
+          </div>
+        `).join('');
+        listEl.querySelectorAll('[data-note-del]').forEach(b => {
+          b.addEventListener('click', async () => {
+            if (!window.confirm('Remove this note?')) return;
+            try {
+              await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes/${encodeURIComponent(b.dataset.noteDel)}`, { method: 'DELETE' });
+              await refreshNotes();
+            } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+          });
+        });
+      } catch (e) {
+        $('#ptn-n-list').innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+    $('#ptn-n-add').addEventListener('click', async () => {
+      const content = $('#ptn-n-content').value.trim();
+      if (!content) { toast('Note content required', 'error'); return; }
+      try {
+        await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: $('#ptn-n-type').value, content }),
+        });
+        $('#ptn-n-content').value = '';
+        toast('Note added', 'success');
+        await refreshNotes();
+      } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+    });
+    await refreshNotes();
   }
 })();
 </script>

@@ -5,6 +5,91 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0y] — 2026-05-21 — Partners CRM view (Phase 1)
+
+New top-level surface for the Partnerships team to manage partner orgs
++ their contacts. Distinct from leads (orgs we sell TO). Phase 1 ships
+the full data model + CRUD UI + notes; Phase 2 will add the org chart
+visualisation (`reports_to_id` field is already in the schema).
+
+### Added — backend
+- **`partners_store.py`** — single-file JSON registry of partner orgs
+  at `cache/partners/index.json`. Fields: name, type, url, owner,
+  description, status, timestamps. `PARTNER_TYPES` enum:
+  Technology partner / Sourcing partner / Reseller / Agency partner /
+  Other.
+- **`partner_contacts_store.py`** — JSON-per-partner contact list at
+  `cache/partner_contacts/<partner_slug>.json`. Per-contact fields:
+  name, title, email, linkedin_url, phone, **territory**, **region**,
+  **country**, **industries** (multi), mr_owner, **reports_to_id**
+  (for org chart Phase 2), status, tags. Tolerant input: industries
+  accept either a list or a comma-separated string.
+  - `TERRITORIES`: Strategic Enterprise / Enterprise / Mid-Market / SMB
+  - `REGIONS`: UK / West Coast / East Coast / Central / EMEA / APAC /
+    LATAM / ANZ / Global
+  - `INDUSTRIES`: QSR / C-Store · Gas / Retail / Financial Services /
+    Travel & Hospitality / Healthcare / Media / Telecom / SaaS / Other
+- **`partner_notes_store.py`** — per-(partner, contact) touch-point
+  notes at `cache/partner_notes/<partner_slug>__<contact_id>.json`.
+  Types: call / email / intro / touch / other. Cascade-deletes when
+  the parent contact is removed.
+
+### Added — server endpoints
+- `GET  /api/partners/enums` — all dropdown lists in one round-trip
+- `GET  /api/partners` — list (annotated with contacts_count)
+- `POST /api/partners` — create
+- `GET  /api/partners/<id>` — partner + nested contacts
+- `PATCH /api/partners/<id>` — update
+- `DELETE /api/partners/<id>` — refuses with 409 if contacts exist
+- `GET  /api/partners/<id>/contacts` — list
+- `POST /api/partners/<id>/contacts` — create / update (bulk via `{contacts:[...]}`)
+- `PATCH /api/partners/<id>/contacts/<contact_id>` — update single contact
+- `DELETE /api/partners/<id>/contacts/<contact_id>` — delete (cascades notes)
+- `GET  /api/partners/<id>/contacts/<contact_id>/notes` — list
+- `POST /api/partners/<id>/contacts/<contact_id>/notes` — add
+- `DELETE /api/partners/<id>/contacts/<contact_id>/notes/<note_id>` — delete
+
+### Added — UI
+New **Partners** nav entry (4th tab after Qualify Lead / Pipeline /
+Project Build).
+
+**Partners list**:
+- Table: name + URL · type · contacts count · status · MR owner
+- **+ Add partner** button: name (required), type dropdown, URL,
+  MR owner, description
+- Click **Open →** on any row → partner detail expands inline
+
+**Partner detail** (inline below the list):
+- Header: name, type, URL, description
+- **Filter contacts** row: Territory · Region · Country (contains
+  search) · Industry · Status · **+ Add contact** (right-aligned)
+- **Contacts table**: name + email + LinkedIn · title · territory ·
+  region+country · industries (signal-green chips) · MR owner ·
+  ✎ edit · 📝 notes · × delete
+- **Contact form** (inline panel): full metadata including
+  multi-select industries (chip toggles) + reports-to dropdown
+  populated from sibling contacts (sets up org chart for Phase 2)
+- **Notes panel** (📝 button per row): inline list of dated touch
+  points with type pill (call / email / intro / touch / other) +
+  per-note delete; new note input above the list
+
+### Tests
+- 348 total (+20). New `test_partners.py` covers:
+  - Stores: CRUD, name-required validation, alpha sort,
+    industries-as-string parsing, status sort active-first,
+    cross-partner isolation, cascade delete of notes
+  - Endpoints: enums shape, create → list → get partner flow,
+    contact save with full metadata, note add + list, 409 when
+    trying to delete a partner with contacts
+
+### Out of scope (Phase 2)
+- Org chart visualisation (`reports_to_id` field is ready; renderer
+  comes next)
+- Cross-partner contact search ("find every CMO across all partners")
+- Linking partner contacts back to lead `sourced_for_partners` /
+  `opportunity_source` (currently those are free-text tags)
+- Bulk CSV import for migration from existing partner spreadsheets
+
 ## [0.10.0x] — 2026-05-21 — Light-mode contrast pass + AI scope prefill from notes
 
 Three asks bundled.
