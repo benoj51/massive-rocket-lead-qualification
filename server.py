@@ -37,6 +37,7 @@ import apollo
 import audit
 import bant_health
 import calls_store
+import lead_partner_assignments
 import partner_contacts_store
 import partner_notes_store
 import partners_store
@@ -1895,6 +1896,111 @@ def api_partner_notes_delete(partner_id: str, contact_id: str, note_id: str):
     if not ok:
         return jsonify({"error": "not_found"}), 404
     return jsonify({"deleted": True})
+
+
+# --- Lead ↔ Partner-contact assignments (v0.11.0) -------------------------
+# Links a partner contact (Marina at Braze) to a lead (Yum Brands) so the
+# AE knows who the right partner-side person is for the account.
+
+@app.route("/api/lead/<lead_id>/partner-contacts", methods=["GET"])
+def api_lead_partner_contacts(lead_id: str):
+    """Return assigned partner contacts for a lead, enriched with the
+    full partner + contact records so the UI can render without a
+    bunch of follow-up fetches."""
+    raw = lead_partner_assignments.list_for_lead(lead_id)
+    if not raw:
+        return jsonify({"assignments": []})
+    # Cache partners by id to avoid repeat reads.
+    partners_by_id = {p["id"]: p for p in partners_store.list_partners()}
+    enriched: list[dict] = []
+    for r in raw:
+        pid = r.get("partner_id")
+        cid = r.get("contact_id")
+        partner = partners_by_id.get(pid) or {}
+        contact = partner_contacts_store.get_contact(pid, cid) if pid and cid else None
+        if contact:
+            partner_contacts_store.annotate_touch_state(contact)
+        enriched.append({
+            **r,
+            "partner_name": partner.get("name") or pid,
+            "partner_url": partner.get("url"),
+            "partner_type": partner.get("type"),
+            "contact": contact,  # may be None if the contact was deleted
+        })
+    return jsonify({"assignments": enriched, "count": len(enriched)})
+
+
+@app.route("/api/lead/<lead_id>/partner-contacts", methods=["POST"])
+def api_lead_assign_partner_contact(lead_id: str):
+    """Assign one or many partner contacts to a lead.
+
+    Body (single):
+      {partner_id, contact_id, note?}
+
+    Body (bulk):
+      {assignments: [{partner_id, contact_id, note?}, ...]}
+    """
+    body = request.get_json(silent=True) or {}
+    bulk = body.get("assignments")
+    by = _actor()
+    saved: list[dict] = []
+    try:
+        if isinstance(bulk, list):
+            for a in bulk:
+                pid = (a or {}).get("partner_id")
+                cid = (a or {}).get("contact_id")
+                if not pid or not cid:
+                    continue
+                saved.append(lead_partner_assignments.assign(
+                    lead_id, pid, cid,
+                    assigned_by=by, note=(a.get("note") or None),
+                ))
+        else:
+            pid = body.get("partner_id")
+            cid = body.get("contact_id")
+            if not pid or not cid:
+                return jsonify({"error": "partner_id and contact_id required"}), 400
+            saved.append(lead_partner_assignments.assign(
+                lead_id, pid, cid,
+                assigned_by=by, note=body.get("note"),
+            ))
+    except lead_partner_assignments.AssignmentsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("partner_contact_assigned", actor=by,
+                    lead_id=lead_id, count=len(saved))
+    return jsonify({"saved": saved, "count": len(saved)})
+
+
+@app.route("/api/lead/<lead_id>/partner-contacts/<partner_id>/<contact_id>",
+           methods=["DELETE"])
+def api_lead_unassign_partner_contact(lead_id: str, partner_id: str, contact_id: str):
+    ok = lead_partner_assignments.unassign(lead_id, partner_id, contact_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("partner_contact_unassigned", actor=_actor(),
+                    lead_id=lead_id, partner_id=partner_id,
+                    contact_id=contact_id)
+    return jsonify({"removed": True})
+
+
+# Reverse lookup: which leads is a partner-contact assigned to?
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/assigned-leads",
+           methods=["GET"])
+def api_partner_contact_assigned_leads(partner_id: str, contact_id: str):
+    rows = lead_partner_assignments.list_for_contact(partner_id, contact_id)
+    # Best-effort lead-name lookup from the pipeline.
+    name_by_slug: dict[str, str] = {}
+    try:
+        sync = NotionSync()
+        for row in sync.list_pipeline(limit=500):
+            slug = project_store.slugify(row.get("id") or row.get("company") or "")
+            if slug:
+                name_by_slug[slug] = row.get("company") or slug
+    except Exception:
+        pass
+    for r in rows:
+        r["lead_name"] = name_by_slug.get(r.get("lead_id") or "", r.get("lead_id"))
+    return jsonify({"leads": rows, "count": len(rows)})
 
 
 if __name__ == "__main__":

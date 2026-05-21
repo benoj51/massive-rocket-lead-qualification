@@ -1379,6 +1379,20 @@
         <span><span data-section-label>Contacts</span> <span class="section-count" id="ld-contacts-count"></span></span>
       </summary>
       <div class="section-body">
+        <!-- v0.11.0: partner contacts assigned to this lead. Shows up
+             ABOVE the lead-side contacts because in practice the AE
+             wants to know "who's the Braze AE here" first. -->
+        <div style="margin-bottom:14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">Partner contacts on this account</div>
+              <div class="muted" style="font-size:10px;margin-top:2px;">Who's the right Braze / Snowflake / mParticle / etc. person for this deal.</div>
+            </div>
+            <button id="ld-partner-assign" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">+ Assign partner contact</button>
+          </div>
+          <div id="ld-partner-contacts" class="muted" style="font-size:12px;">Loading…</div>
+        </div>
+
         <!-- v0.10.0s: prominent Apollo search action at the top of the
              Contacts section. Pulls fresh stakeholder candidates using
              the lead's URL/domain; AE picks which to save in bulk.
@@ -2411,6 +2425,188 @@
     }, 50);
   }
 
+  // v0.11.0: partner contacts assigned to this lead. Loads the
+  // /partner-contacts endpoint which returns enriched assignments
+  // (partner + contact data inlined so one fetch is enough).
+  async function loadLeadPartnerContacts(leadId) {
+    if (!leadId) return;
+    const el = $('#ld-partner-contacts');
+    if (!el) return;
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/partner-contacts`);
+      const rows = data.assignments || [];
+      if (!rows.length) {
+        el.innerHTML = '<div class="muted" style="font-size:12px;font-style:italic;">No partner contacts assigned yet — use <strong>+ Assign partner contact</strong> to link the right Braze / Snowflake / mParticle person.</div>';
+        return;
+      }
+      el.innerHTML = rows.map(r => {
+        const c = r.contact || {};
+        const territory = c.territory ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(c.territory)}</span>` : '';
+        const region = c.region ? `<span class="muted" style="font-size:10px;"> · ${escapeHtml(c.region)}</span>` : '';
+        const inds = (c.industries || []).slice(0, 3).map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('');
+        const overdue = c.overdue ? `<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">${Math.abs(c.days_until_due || 0)}d overdue</span>` : '';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;gap:8px;">
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:13px;color:var(--text);">
+                <strong>${escapeHtml(c.name || '—')}</strong>
+                <span class="muted" style="font-size:11px;">${c.title ? ' · ' + escapeHtml(c.title) : ''}</span>
+                ${overdue}
+              </div>
+              <div class="muted" style="font-size:11px;margin-top:2px;">
+                <strong style="color:var(--accent-text);">${escapeHtml(r.partner_name || '—')}</strong>${territory}${region}
+                ${c.email ? ` · ${escapeHtml(c.email)}` : ''}
+                ${c.linkedin_url ? ` · <a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a>` : ''}
+              </div>
+              ${inds ? `<div style="margin-top:4px;">${inds}</div>` : ''}
+              ${r.note ? `<div class="muted" style="font-size:10px;margin-top:4px;font-style:italic;">Note: ${escapeHtml(r.note)}</div>` : ''}
+            </div>
+            <div class="btn-row" style="flex-shrink:0;">
+              <button class="btn ghost" type="button" data-pa-remove="${escapeAttr(r.partner_id)}|${escapeAttr(r.contact_id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Remove from this lead">× Remove</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      el.querySelectorAll('[data-pa-remove]').forEach(b => {
+        b.addEventListener('click', async () => {
+          const [pid, cid] = b.dataset.paRemove.split('|');
+          if (!window.confirm('Remove this partner contact from this lead?')) return;
+          try {
+            await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/partner-contacts/${encodeURIComponent(pid)}/${encodeURIComponent(cid)}`,
+                            { method: 'DELETE' });
+            toast('Removed', 'success');
+            await loadLeadPartnerContacts(leadId);
+          } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+        });
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  // Assign-partner-contact picker. Two-stage selector:
+  //   1. Pick the partner (Braze / Snowflake / etc.)
+  //   2. Pick which contact(s) under that partner to assign
+  // Inline panel appended below the Partner Contacts section.
+  async function openAssignPartnerContactPicker(leadId) {
+    const el = $('#ld-partner-contacts');
+    if (!el) return;
+    // Fetch partner list first (already cached if Partners view was visited)
+    let partners = partnersState?.partners || [];
+    if (!partners.length) {
+      try {
+        const data = await jsonFetch('/api/partners');
+        partners = data.partners || [];
+        if (partnersState) partnersState.partners = partners;
+      } catch (e) {
+        toast(`Couldn't load partners: ${e.body?.error || e.message}`, 'error');
+        return;
+      }
+    }
+    if (!partners.length) {
+      toast('No partners yet — go to the Partners tab to create one first', 'error');
+      return;
+    }
+    // Render picker as an inline card UNDER the assigned-list.
+    let pickerWrap = $('#ld-partner-assign-picker');
+    if (!pickerWrap) {
+      pickerWrap = document.createElement('div');
+      pickerWrap.id = 'ld-partner-assign-picker';
+      pickerWrap.style.cssText = 'margin-top:8px;';
+      el.parentElement.appendChild(pickerWrap);
+    }
+    pickerWrap.innerHTML = `
+      <div style="background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">Assign partner contact</div>
+          <button id="ld-pa-cancel" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Close</button>
+        </div>
+        <div class="field" style="margin-bottom:8px;">
+          <label>Partner</label>
+          <select id="ld-pa-partner" style="width:100%;">
+            <option value="">— pick a partner —</option>
+            ${partners.map(p => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)}${p.type ? ' (' + escapeHtml(p.type) + ')' : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div id="ld-pa-contacts-pick" class="muted" style="font-size:12px;">Pick a partner above to see its contacts.</div>
+        <div class="btn-row" style="margin-top:10px;display:none;" id="ld-pa-actions">
+          <button id="ld-pa-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Assign selected →</button>
+          <span class="muted" id="ld-pa-save-status" style="font-size:11px;"></span>
+        </div>
+      </div>
+    `;
+    $('#ld-pa-cancel').addEventListener('click', () => { pickerWrap.remove(); });
+    $('#ld-pa-partner').addEventListener('change', async (e) => {
+      const partnerId = e.target.value;
+      const listEl = $('#ld-pa-contacts-pick');
+      const actions = $('#ld-pa-actions');
+      if (!partnerId) {
+        listEl.innerHTML = 'Pick a partner above to see its contacts.';
+        actions.style.display = 'none';
+        return;
+      }
+      listEl.innerHTML = '<div class="muted" style="font-size:12px;">Loading contacts…</div>';
+      try {
+        const data = await jsonFetch(`/api/partners/${encodeURIComponent(partnerId)}/contacts`);
+        const contacts = data.contacts || [];
+        if (!contacts.length) {
+          listEl.innerHTML = '<div class="muted" style="font-size:12px;">This partner has no contacts yet. Go to the Partners tab to add some.</div>';
+          actions.style.display = 'none';
+          return;
+        }
+        // Also fetch already-assigned to grey them out.
+        let assigned = new Set();
+        try {
+          const a = await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/partner-contacts`);
+          (a.assignments || []).forEach(x => {
+            if (x.partner_id === partnerId) assigned.add(x.contact_id);
+          });
+        } catch (_) { /* non-fatal */ }
+        listEl.innerHTML = contacts.map(c => {
+          const already = assigned.has(c.id);
+          return `
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:${already ? 'rgba(255,255,255,.04)' : 'var(--surface)'};border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:${already ? 'default' : 'pointer'};opacity:${already ? '.55' : '1'};">
+              <input type="checkbox" data-pa-cid="${escapeAttr(c.id)}" ${already ? 'disabled' : ''} style="margin-top:3px;" />
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;"><strong>${escapeHtml(c.name || '—')}</strong>
+                  ${already ? '<span style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">ALREADY ASSIGNED</span>' : ''}
+                </div>
+                <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '—')}${c.territory ? ' · ' + escapeHtml(c.territory) : ''}${c.region ? ' · ' + escapeHtml(c.region) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
+                ${(c.industries || []).length ? `<div style="margin-top:3px;">${c.industries.map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('')}</div>` : ''}
+              </div>
+            </label>
+          `;
+        }).join('');
+        actions.style.display = contacts.some(c => !assigned.has(c.id)) ? 'flex' : 'none';
+      } catch (err) {
+        listEl.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(err.body?.error || err.message)}</div>`;
+        actions.style.display = 'none';
+      }
+    });
+    $('#ld-pa-save').addEventListener('click', async () => {
+      const partnerId = $('#ld-pa-partner').value;
+      const checked = Array.from($('#ld-pa-contacts-pick').querySelectorAll('input[type=checkbox]:checked:not(:disabled)'));
+      if (!partnerId || !checked.length) {
+        toast('Pick at least one contact', 'error'); return;
+      }
+      const assignments = checked.map(b => ({
+        partner_id: partnerId,
+        contact_id: b.dataset.paCid,
+      }));
+      try {
+        const res = await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/partner-contacts`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignments }),
+        });
+        toast(`Assigned ${res.count} contact${res.count === 1 ? '' : 's'}`, 'success');
+        pickerWrap.remove();
+        await loadLeadPartnerContacts(leadId);
+      } catch (e) {
+        toast(`Assign failed: ${e.body?.error || e.message}`, 'error');
+      }
+    });
+  }
+
   async function loadLeadContacts(leadId) {
     if (!leadId) return;
     const el = $('#ld-contacts-list');
@@ -3040,6 +3236,7 @@
       renderDrawerGroup(pageId, data.group || { parent: null, children: [] });
       // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);
+      loadLeadPartnerContacts(pageId);
       loadLeadCalls(pageId);
       loadLeadProject(pageId, lead.company);
       // Reset dirty state — freshly loaded data is the new baseline.
@@ -5072,6 +5269,10 @@
     });
     $('#ld-contacts-search').addEventListener('click', () => {
       if (drawerState.id) searchApolloContacts(drawerState.id);
+    });
+    // v0.11.0: assign-partner-contact picker
+    $('#ld-partner-assign').addEventListener('click', () => {
+      if (drawerState.id) openAssignPartnerContactPicker(drawerState.id);
     });
     $('#ld-add-call').addEventListener('click', () => {
       if (drawerState.id) addCall(drawerState.id);

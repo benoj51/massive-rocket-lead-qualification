@@ -5,6 +5,81 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-05-21 — Partner contacts ↔ leads (assignment + bidirectional view)
+
+When an AE opens a lead, they need to know *"who's the right Braze
+person for this deal?"*. Now you can assign one or many partner
+contacts to a lead, and the assignment is visible from both
+directions.
+
+### Added — backend
+- **`lead_partner_assignments.py`** — many-to-many store at
+  `cache/lead_partner_assignments/<lead_slug>.json`. Rows:
+  `{partner_id, contact_id, assigned_at, assigned_by, note}`.
+  - `assign(lead, partner, contact)` — idempotent; re-assigning
+    updates `note` + `assigned_by`, preserves `assigned_at`
+  - `unassign(...)` — removes the link
+  - `list_for_lead(lead_id)` — all partner contacts on this lead
+  - `list_for_contact(partner_id, contact_id)` — reverse lookup:
+    every lead this partner contact is assigned to (across-lead scan)
+  - Validates raw inputs before slugify so empty strings can't
+    silently corrupt the store with the "unknown" fallback
+
+### Added — server endpoints
+- `GET  /api/lead/<id>/partner-contacts` — enriched assignments
+  (partner name + full contact record + touch state inlined)
+- `POST /api/lead/<id>/partner-contacts` — assign single
+  (`{partner_id, contact_id, note?}`) OR bulk
+  (`{assignments: [...]}`)
+- `DELETE /api/lead/<id>/partner-contacts/<partner_id>/<contact_id>`
+- `GET  /api/partners/<id>/contacts/<cid>/assigned-leads` — reverse
+  lookup with `lead_name` enrichment from the pipeline
+
+### Added — UI
+**Lead drawer → Contacts section** now has a **"Partner contacts on
+this account"** subsection ABOVE the lead-side contacts (which is
+the natural order: AE wants to know "who's the partner side rep
+here" first):
+- Compact cards showing partner name (accent-coloured) + contact
+  name + title + territory + region + email + LinkedIn + industry
+  chips + optional note
+- Overdue pill propagates from the partner contact's touch state
+- **× Remove** per card
+- **+ Assign partner contact** button opens an inline picker:
+  1. Pick partner from dropdown
+  2. Multi-select contacts under that partner (already-assigned
+     contacts greyed out with `ALREADY ASSIGNED` badge)
+  3. Save → bulk POST
+
+### Why this design
+- **Many-to-many naturally** — Marina Klusas at Braze covers Yum,
+  RBI, and IHG; Yum has assignments to Braze AE + Snowflake SE +
+  Hightouch lead simultaneously
+- **Two-stage picker** keeps the UI lean — no flat list of every
+  partner contact across every partner
+- **Already-assigned suppression** in the picker prevents
+  accidental duplicates
+- **Reverse lookup endpoint** lets the Partners tab show
+  *"assigned to N leads"* per contact (UI for this is on the
+  backlog but the data is there)
+
+### Tests
+- 371 total (+12). New `test_lead_partner_assignments.py`:
+  - Store: empty lead returns empty, assign creates row, idempotent
+    update preserves assigned_at, validation rejects empty ids,
+    unassign idempotent, list_for_contact finds cross-lead,
+    multiple partners per lead
+  - Endpoints: single + bulk assign, list with enrichment,
+    unassign, 400 on missing ids, reverse-lookup endpoint
+
+### Contact-management plan — updated
+- ✅ Tier 1a: Partner touch cadence + overdue (v0.10.0z)
+- ✅ **Tier 1b new**: Lead ↔ partner-contact assignments (this release)
+- Next priorities (unchanged):
+  - Status lifecycle + touch cadence on **lead** contacts (parity)
+  - Engagement timeline per contact
+  - Cross-surface contact search
+
 ## [0.10.0z] — 2026-05-21 — Partner contact touch cadence + overdue surfacing
 
 Phase 1 of the contact-management plan: every partner contact gets a
