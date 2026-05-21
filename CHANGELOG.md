@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0w] — 2026-05-21 — ↻ Rescore button in the lead drawer
+
+Re-scoring previously required *editing* a scoring-relevant field
+and clicking Save — the v0.10.0p side-effect rescore. Useful when
+you were already editing, less useful when you just wanted a fresh
+score (e.g. after tweaking values in Notion directly, or after a
+scoring-weight change). This adds an explicit Rescore action.
+
+### Added
+- **`POST /api/lead/<id>/rescore`** — recomputes ICP score from the
+  lead's current Notion state, writes the new `icp_normalised` +
+  `opportunity_type` back, returns the full score breakdown in the
+  response. No edit body required.
+- **`_rescore_lead_from_notion(sync, page_id)`** — new server helper
+  that consolidates the rescore logic (lead fetch → score → write
+  back → return). Used by the new endpoint; the existing PATCH
+  side-effect rescore keeps its inline copy for now to avoid
+  refactor risk on a working flow.
+- **`↻ Rescore` button in the drawer header**, next to Save. Shows
+  a spinner while in flight, flashes the new score in the toast
+  (*"Rescored → 7.3/10 (Qualified)"*), refreshes the ICP pill in
+  place, kicks a pipeline refresh so the row score behind the
+  drawer also updates.
+
+### Where it fits
+- **Account view from pipeline** = the lead drawer that opens on a
+  row click.
+- **↻ Rescore** sits in the sticky drawer header between the
+  primary Save button and ✕ Close.
+- Tooltip: *"Recompute ICP score from current Notion values"*.
+
+### Audit log
+- New `lead_rescored` event with `trigger: "manual"` to distinguish
+  from auto-rescore on edit (`trigger: omitted`).
+
+### Tests
+- 321 total (+2). New `test_rescore_endpoint.py`:
+  - returns 502 cleanly when Notion is unavailable
+  - mocked happy path calls `calculate_icp_score` and writes
+    `icp_normalised` back via update_page
+
+### Use cases
+- Lead's revenue/employees got updated in Notion directly (e.g.
+  after a public earnings announcement) — hit Rescore to refresh.
+- Scoring weights got tuned — bulk rescore key accounts one click
+  each.
+- ICP pill looks stale or out-of-sync with Notion — hit Rescore to
+  rebuild from scratch.
+
 ## [0.10.0v] — 2026-05-21 — Project briefing preview (the SOW-style preview, but for the project)
 
 The SOW is a versioned formal document. Ben asked for the same

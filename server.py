@@ -524,6 +524,72 @@ _SCORING_FIELDS = {
 }
 
 
+def _rescore_lead_from_notion(sync: "NotionSync", page_id: str) -> dict:
+    """Pull the lead's current Notion values, recompute ICP, write back.
+
+    Returns: {normalized_score, status, status_label, opportunity_type,
+              opportunity_label, lead}. Raises NotionSyncError on Notion failure
+              or Exception on scoring failure (caller decides how to surface).
+    """
+    from scoring import calculate_icp_score
+    lead = sync.get_page(page_id) or {}
+    company_data = {
+        "revenue":          lead.get("revenue"),
+        "employees":        lead.get("employees"),
+        "vertical":         lead.get("vertical"),
+        "tech_stack":       lead.get("tech_stack"),
+        "complexity":       lead.get("complexity"),
+        "region":           lead.get("region"),
+        "deal_size":        lead.get("deal_size"),
+        "stack_confidence": (lead.get("stack_confidence") or "confirmed").lower(),
+    }
+    new_score = calculate_icp_score(company_data)
+    sync.update_page(page_id, {
+        "icp_normalised": new_score.get("normalized_score"),
+        "icp_total": new_score.get("total_weighted"),
+        "opportunity_type_key": new_score.get("opportunity_type"),
+    })
+    # Patch the lead dict so callers can return a fresh snapshot.
+    lead["icp_normalised"] = new_score.get("normalized_score")
+    return {
+        "normalized_score":  new_score.get("normalized_score"),
+        "total_weighted":    new_score.get("total_weighted"),
+        "status":            new_score.get("status"),
+        "status_label":      new_score.get("status_label"),
+        "opportunity_type":  new_score.get("opportunity_type"),
+        "opportunity_label": new_score.get("opportunity_label"),
+        "lead":              lead,
+    }
+
+
+@app.route("/api/lead/<page_id>/rescore", methods=["POST"])
+def api_lead_rescore(page_id: str):
+    """v0.10.0w: explicit rescore endpoint — recomputes ICP from the
+    lead's current Notion state without any edits.
+
+    Use case: AE has touched up fields in Notion directly, or wants
+    to refresh the score after the scoring weights changed, without
+    needing to PATCH a field just to trigger the rescore side-effect.
+    """
+    try:
+        sync = NotionSync()
+        result = _rescore_lead_from_notion(sync, page_id)
+        audit.log_event("lead_rescored", actor=_actor(), page_id=page_id,
+                        trigger="manual",
+                        new_score=result.get("normalized_score"))
+        return jsonify({
+            "rescored": True,
+            "new_score": result,
+            "lead": result.get("lead"),
+        })
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Rescore failed for %s: %s", page_id, e)
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        log.exception("Rescore crashed for %s", page_id)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/lead/<page_id>", methods=["PATCH"])
 def api_lead_update(page_id: str):
     """Update editable fields on a lead. Body keys match the get_page shape.

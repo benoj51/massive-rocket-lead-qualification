@@ -1132,6 +1132,7 @@
       </div>
     </div>
     <div class="btn-row" style="flex-shrink:0;">
+      <button id="ld-rescore" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;" title="Recompute ICP score from current Notion values">↻ Rescore</button>
       <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
       </button>
@@ -4740,6 +4741,49 @@
     } catch (e) { toast(`Open SOW failed: ${e.message}`, 'error'); }
   }
 
+  // v0.10.0w: explicit rescore from the drawer header. Pulls the
+  // lead's current Notion state, re-runs ICP scoring server-side,
+  // writes the new score back, refreshes the ICP pill in-place.
+  async function rescoreCurrentLead() {
+    if (!drawerState.id) { toast('Open a lead first', 'error'); return; }
+    const btn = $('#ld-rescore');
+    if (!btn) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Rescoring…';
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(drawerState.id)}/rescore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const ns = data?.new_score;
+      if (ns && ns.normalized_score != null) {
+        const score = ns.normalized_score;
+        const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+        const icp = $('#ld-icp');
+        if (icp) {
+          icp.className = `icp-pill ${cls}`;
+          icp.textContent = `${score}/10`;
+        }
+        // Update the cached "original" so dirty-state tracking doesn't
+        // immediately flag the new score as a pending change.
+        if (data.lead) drawerState.original = data.lead;
+        toast(`Rescored → ${score}/10 (${ns.status_label || ns.status || ''})`, 'success');
+        // Refresh pipeline so the row score updates behind the drawer.
+        try { await refreshPipeline(); } catch (_) {}
+      } else {
+        toast('Rescore completed but no score returned', 'error');
+      }
+    } catch (e) {
+      console.error('[rescore]', e);
+      toast(`Rescore failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  }
+
   // v0.10.0u: in-page SOW preview modal. Loads the same rendered HTML
   // as openSowInNewTab but mounts it via iframe.srcdoc so the
   // document's CSS stays isolated from the app shell. AE can read,
@@ -4972,6 +5016,8 @@
         toast(`Save failed: ${err?.message || err}`, 'error');
       }
     });
+    // v0.10.0w: explicit Rescore action.
+    $('#ld-rescore').addEventListener('click', rescoreCurrentLead);
     // Global error capture — log only, no UI noise.
     window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
     window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
