@@ -6,7 +6,18 @@
 <title>Massive Rocket — Lead Qualification</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <style>
+  /* ============================================================
+     Theme tokens (v0.10.0q). Dark is the default; light theme
+     activates when `data-theme="light"` lives on <html>. Toggle
+     state persists in localStorage.
+
+     Strategy: every colour, shadow, and glass surface routes
+     through a CSS var so swapping themes is a single attribute
+     change. The few rgba() literals left in the file are
+     translucent accent overlays that work on both backdrops.
+  ============================================================ */
   :root {
+    /* Dark theme (default) */
     --bg: #0a0a0f;
     --surface: #13131a;
     --surface-2: #1a1a24;
@@ -26,6 +37,57 @@
     --pad: 20px;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    /* Theme-derived effects (separated so light can override) */
+    --bg-glass: rgba(10,10,15,.85);
+    --bg-drawer-glass: rgba(19,19,26,.85);
+    --bg-radial-1: rgba(255,77,42,.08);
+    --bg-radial-2: rgba(96,165,250,.04);
+    --bg-fade-from: #0e0e16;
+    --surface-tint: rgba(255,255,255,.025);
+    --tile-tint:    rgba(255,255,255,.018);
+    --input-bg: var(--surface-2);
+    --input-focus-bg: #1f1f2b;
+    --focus-ring: rgba(255,77,42,.12);
+    --num-base: var(--text);  /* gradient end-stop for the score number */
+    --num-base-2: var(--text-dim);
+  }
+
+  :root[data-theme="light"] {
+    --bg: #f7f7f2;
+    --surface: #ffffff;
+    --surface-2: #f1f1ec;
+    --border: #e3e3dc;
+    --border-strong: #c8c8c0;
+    --text: #1a1a24;
+    --text-dim: #56565f;
+    --text-muted: #8a8a92;
+    --accent: #ff4d2a;            /* brand orange stays */
+    --accent-dim: #b3361d;
+    --green: #16a34a;             /* slightly darker so it reads on white */
+    --yellow: #d97706;
+    --red: #dc2626;
+    --blue: #2563eb;
+    --shadow: 0 4px 14px rgba(20,20,30,.06);
+    --bg-glass: rgba(247,247,242,.85);
+    --bg-drawer-glass: rgba(255,255,255,.85);
+    --bg-radial-1: rgba(255,77,42,.05);
+    --bg-radial-2: rgba(37,99,235,.03);
+    --bg-fade-from: #efefe8;
+    --surface-tint: rgba(0,0,0,.018);
+    --tile-tint:    rgba(0,0,0,.014);
+    --input-bg: #ffffff;
+    --input-focus-bg: #ffffff;
+    --focus-ring: rgba(255,77,42,.18);
+    --num-base: #1a1a24;
+    --num-base-2: #56565f;
+  }
+  /* Smooth theme switch on the heavy surfaces (everything else picks
+     it up via inherited colour). 150ms is enough to feel intentional
+     without being slow. */
+  html, body, .card, .tile, .drawer, .drawer header, header.top,
+  .meddicc-row, .bant-tile, input, textarea, select {
+    transition: background-color .15s ease-out, color .15s ease-out,
+                border-color .15s ease-out;
   }
 
   * { box-sizing: border-box; }
@@ -36,9 +98,9 @@
        texture overlay. Adds depth without distraction; fades to flat by
        ~600px so most of the scroll area stays calm. */
     background-image:
-      radial-gradient(1200px 600px at 50% -200px, rgba(255,77,42,.08) 0%, transparent 60%),
-      radial-gradient(800px 400px at 100% 0%, rgba(96,165,250,.04) 0%, transparent 50%),
-      linear-gradient(180deg, #0e0e16 0%, var(--bg) 600px);
+      radial-gradient(1200px 600px at 50% -200px, var(--bg-radial-1) 0%, transparent 60%),
+      radial-gradient(800px 400px at 100% 0%, var(--bg-radial-2) 0%, transparent 50%),
+      linear-gradient(180deg, var(--bg-fade-from) 0%, var(--bg) 600px);
     background-attachment: fixed, fixed, scroll;
   }
   a { color: var(--accent); text-decoration: none; }
@@ -52,8 +114,9 @@
     position: sticky; top: 0; z-index: 30;
     display: flex; align-items: center; gap: 24px;
     padding: 14px 24px;
-    background: rgba(10,10,15,.85);
+    background: var(--bg-glass);
     backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
   }
   header.top .brand {
@@ -88,8 +151,7 @@
     /* v0.10.0p polish: subtle top-edge highlight so cards feel slightly lit.
        Pseudo-element gradient on the inside top border. */
     position: relative;
-    background-image: linear-gradient(180deg, rgba(255,255,255,.025) 0%, transparent 4%);
-    transition: border-color .15s ease-out;
+    background-image: linear-gradient(180deg, var(--surface-tint) 0%, transparent 4%);
   }
   .card:hover { border-color: var(--border-strong); }
   .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
@@ -104,15 +166,14 @@
   label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
 
   input[type="text"], input[type="url"], textarea, select {
-    width: 100%; background: var(--surface-2); color: var(--text);
+    width: 100%; background: var(--input-bg); color: var(--text);
     border: 1px solid var(--border-strong); border-radius: 8px;
     padding: 10px 12px; font-size: 14px; font-family: var(--sans);
-    transition: border-color .15s, background .15s;
   }
   input:focus, textarea:focus, select:focus {
-    outline: none; border-color: var(--accent); background: #1f1f2b;
-    /* v0.10.0p: soft focus ring instead of harsh border-only change. */
-    box-shadow: 0 0 0 3px rgba(255,77,42,.12);
+    outline: none; border-color: var(--accent); background: var(--input-focus-bg);
+    /* v0.10.0p: soft focus ring; tinted intensity differs per theme. */
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
   textarea { resize: vertical; min-height: 60px; }
 
@@ -135,10 +196,9 @@
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   .tile {
     background: var(--surface-2);
-    background-image: linear-gradient(180deg, rgba(255,255,255,.018) 0%, transparent 30%);
+    background-image: linear-gradient(180deg, var(--tile-tint) 0%, transparent 30%);
     border: 1px solid var(--border); border-radius: 10px;
     padding: 12px 14px; position: relative;
-    transition: border-color .12s ease-out, transform .08s ease-out;
   }
   .tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
   .tile.manual { border-color: rgba(255,77,42,.4); background-color: rgba(255,77,42,.04); }
@@ -180,7 +240,7 @@
     font-size: 72px; font-weight: 800; line-height: 1;
     font-family: var(--mono); font-variant-numeric: tabular-nums;
     letter-spacing: -0.04em;
-    background: linear-gradient(180deg, var(--text) 0%, var(--text-dim) 100%);
+    background: linear-gradient(180deg, var(--num-base) 0%, var(--num-base-2) 100%);
     -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent;
     position: relative;
@@ -349,9 +409,14 @@
   .empty .big { font-size: 32px; margin-bottom: 8px; opacity: .4; }
   .spinner {
     width: 14px; height: 14px; border-radius: 50%;
-    border: 2px solid rgba(255,255,255,.25); border-top-color: #fff;
+    /* Uses currentColor so the spinner inherits the surrounding text colour,
+       working correctly on dark, light, ghost buttons, and primary buttons. */
+    border: 2px solid currentColor; border-top-color: transparent;
+    opacity: .8;
     animation: spin .8s linear infinite; display: inline-block; vertical-align: middle;
   }
+  /* Inside a primary button (which has white text on accent), force white. */
+  button.btn:not(.ghost) .spinner { color: #fff; opacity: 1; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .muted { color: var(--text-muted); font-size: 12px; }
@@ -378,8 +443,8 @@
   .drawer header {
     padding: 14px 20px; border-bottom: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
-    /* v0.10.0p: glass effect — semi-transparent + backdrop blur. */
-    background: rgba(19,19,26,.85);
+    /* v0.10.0p: glass effect — token swaps with theme. */
+    background: var(--bg-drawer-glass);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
@@ -474,7 +539,12 @@
   .drawer .icp-pill {
     display: inline-block; padding: 2px 10px; border-radius: 999px;
     font-family: var(--mono); font-size: 12px; font-weight: 600;
+    background: var(--surface-2); color: var(--text-dim);
+    border: 1px solid var(--border);
   }
+  .icp-pill.qualify_in  { background: rgba(74,222,128,.14); color: var(--green); border-color: rgba(74,222,128,.4); }
+  .icp-pill.borderline  { background: rgba(251,191,36,.14); color: var(--yellow); border-color: rgba(251,191,36,.4); }
+  .icp-pill.qualify_out { background: rgba(239,68,68,.14); color: var(--red); border-color: rgba(239,68,68,.4); }
   .pipeline-row-clickable { cursor: pointer; }
   .pipeline-row-clickable:hover { background: var(--surface-2); }
   table.pipeline td.openlink { color: var(--accent); }
@@ -485,6 +555,18 @@
 </head>
 <body>
 
+<script>
+  // v0.10.0q: theme hydration runs INLINE before any markup paints, so the
+  // user never sees a dark-flash-then-light flicker. Reads localStorage
+  // first; falls back to the OS preference (prefers-color-scheme).
+  (function () {
+    var stored = null;
+    try { stored = localStorage.getItem('mr-theme'); } catch (_) { /* private mode */ }
+    var theme = stored
+      || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  })();
+</script>
 <header class="top">
   <div class="brand"><span class="dot"></span> MR · Lead Qualification</div>
   <nav>
@@ -492,6 +574,9 @@
     <button id="nav-pipeline" type="button">Pipeline</button>
     <button id="nav-build" type="button">Project Build</button>
   </nav>
+  <button id="theme-toggle" type="button" title="Toggle light / dark theme"
+          aria-label="Toggle light / dark theme"
+          style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;">🌙</button>
   <div class="health" id="health-bar"></div>
 </header>
 
@@ -4228,6 +4313,24 @@
 
   async function _runInit() {
     await ensureAuth();
+    // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
+    // here we sync its icon to the current theme + wire click to flip.
+    const _themeBtn = $('#theme-toggle');
+    const _syncThemeIcon = () => {
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      if (_themeBtn) _themeBtn.textContent = isLight ? '☀️' : '🌙';
+    };
+    _syncThemeIcon();
+    if (_themeBtn) {
+      _themeBtn.addEventListener('click', () => {
+        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        const next = isLight ? 'dark' : 'light';
+        if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+        else document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('mr-theme', next); } catch (_) {}
+        _syncThemeIcon();
+      });
+    }
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-build').addEventListener('click', () => switchView('build'));

@@ -5,6 +5,61 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0q] — 2026-05-21 — Light theme + theme switcher
+
+Adds a light theme alongside the existing dark one. AE clicks the
+🌙 / ☀️ button in the top nav to toggle. Choice persists in
+localStorage; first-time users get whatever their OS is set to
+(`prefers-color-scheme`).
+
+### Added
+- **Theme token system** in `:root` and `:root[data-theme="light"]`.
+  Every colour, glass surface, focus ring, and gradient routes
+  through a CSS variable so swapping themes is a single attribute
+  change.
+- **Light palette** designed for long-session readability:
+  - `--bg` warm off-white (`#f7f7f2`), `--surface` pure white,
+    `--surface-2` very subtle grey
+  - Status colours bumped slightly for white-background contrast:
+    `--green` `#16a34a`, `--yellow` `#d97706`, `--red` `#dc2626`,
+    `--blue` `#2563eb`
+  - Brand orange (`--accent #ff4d2a`) stays consistent across themes
+  - Shadows softer: `0 4px 14px rgba(20,20,30,.06)` vs dark's
+    `0 8px 24px rgba(0,0,0,.32)`
+- **Theme toggle button** (🌙 / ☀️) in the top nav, right of the
+  view tabs.
+- **Inline hydration script** in `<head>` flips the `data-theme`
+  attribute before paint so users never see a dark-flash-then-light
+  flicker.
+- **OS preference fallback**: if no stored choice, reads
+  `matchMedia('(prefers-color-scheme: light)')`.
+- **icp-pill colour variants** (`.icp-pill.qualify_in`,
+  `.borderline`, `.qualify_out`) so the score chip in the drawer
+  header carries the right colour in both themes. Was a pre-existing
+  cosmetic gap — colours were assigned but never styled.
+
+### Fixed alongside
+- **Spinner used hardcoded white** (`border-top-color: #fff`) which
+  vanished on light surfaces. Now uses `currentColor` so it inherits
+  from the surrounding text; primary buttons force white via a more
+  specific selector.
+- Backdrop-blur surfaces (top nav, drawer header) now read from
+  `--bg-glass` / `--bg-drawer-glass` tokens.
+
+### Smooth switch
+150ms `background-color`/`color`/`border-color` transition on heavy
+surfaces (cards, tiles, drawer, inputs) so flipping the theme feels
+deliberate, not jarring.
+
+### What stays the same in either theme
+- Brand orange (accent)
+- Status semantics (green = qualified, yellow = borderline, red = out)
+- Layout, hierarchy, all interactions
+
+### Tests
+- 304 total. No behavioural change — pure CSS + JS hydration.
+  Both inline `<script>` blocks parse cleanly.
+
 ## [0.10.0p] — 2026-05-17 — Re-score on lead edit + auto-summary on note save + visual polish
 
 Three asks from Ben in one release.
