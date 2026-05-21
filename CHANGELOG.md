@@ -5,6 +5,82 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0z] — 2026-05-21 — Partner contact touch cadence + overdue surfacing
+
+Phase 1 of the contact-management plan: every partner contact gets a
+**touch cadence** (default 30 days) + **last_touched_at**. Adding a
+note auto-counts as a touch. Overdue contacts surface in a top-of-page
+panel so the AE never forgets who's gone cold.
+
+### Added — backend
+- **`cadence_days`** field on partner contacts (default 30, clamped
+  1–365). Editable per contact via the form.
+- **`last_touched_at`** timestamp. Set automatically by:
+  - `add_note(...)` — server bumps it after saving any note
+  - `POST /api/partners/<id>/contacts/<cid>/touch` — explicit
+    "mark touched" without a note (for off-platform interactions)
+- **`annotate_touch_state(contact)`** — pure helper that adds
+  `next_touch_due`, `days_since_touch`, `days_until_due`, `overdue`,
+  `is_due_soon` to a contact dict. Called by `list_contacts` so the
+  UI doesn't recompute.
+- **`overdue_contacts(partner_id?)`** — returns active contacts
+  past their cadence. Across-all-partners when `partner_id=None`.
+  Baseline-from-added_at rule: never-touched contacts go overdue
+  once the cadence elapses since the contact was added.
+
+### Added — server endpoints
+- `GET  /api/partners/overdue?owner=X` — cross-partner overdue
+  roster, enriched with `partner_name` for the UI. Owner filter is
+  case-insensitive. Sorted most-overdue first.
+- `POST /api/partners/<id>/contacts/<cid>/touch` — log a touch
+  without adding a note.
+
+### Added — UI
+- **🔔 Overdue contacts panel** at the top of the Partners view
+  (red-bordered). Grouped by partner, shows name + title + last
+  touched + days overdue + cadence + MR owner. Two actions per row:
+  - **✓ Mark touched** (one-click reset)
+  - **Open partner →** (jumps to the partner detail)
+  - Collapse / Expand toggle on the panel header.
+- **Last touch column** in the contacts table. Shows friendly
+  relative date (*"today" / "12d ago" / "3mo ago"*) + a subtitle:
+  - **Overdue Nd** in red when past cadence
+  - **Due in Nd** in yellow when within 7 days
+  - **cadence Nd** in muted text otherwise
+- **Overdue rows tinted red** in the contacts table so they pop
+  even before you check the column.
+- **✓ Mark touched button** per row.
+- **Cadence picker in the contact form** — dropdown with 7/14/21/30/
+  45/60/90/120/180 day options.
+- **Last touched display** in the contact form so you can see the
+  exact timestamp when reviewing.
+- **Note add toast** updated to *"Note added · touch logged"* and
+  the overdue panel refreshes inline.
+
+### Tests
+- 359 total (+11). New `test_partner_touch_cadence.py`:
+  - Default cadence 30, clamped 1–365
+  - Recently-added contact not yet overdue
+  - 90-day-old never-touched contact IS overdue
+  - `touch_contact` bumps `last_touched_at`
+  - Touching a stale contact clears its overdue state
+  - `overdue_contacts` excludes non-active statuses
+  - Endpoint: overdue list with partner_name enrichment,
+    owner filter, touch endpoint, note-add bumps touch
+
+### Contact-management plan (for the record)
+Decided in this conversation:
+- **Distinct stores** kept for lead vs partner contacts (no
+  unification refactor).
+- **Tier 1 priority**: touch cadence → ✓ shipped this release.
+- **Tier 1 backlog**: status lifecycle on lead contacts, engagement
+  timeline per contact, owner assignment with bulk reassign.
+- **Tier 2 backlog**: cross-surface contact search, "My contacts"
+  view, stale-contacts report (now partly addressed by overdue
+  panel, but lead-side is still missing).
+- **Tier 3 backlog**: org chart visualisation, multi-tag
+  territory/region, AI-extracted contacts from call transcripts.
+
 ## [0.10.0y] — 2026-05-21 — Partners CRM view (Phase 1)
 
 New top-level surface for the Partnerships team to manage partner orgs

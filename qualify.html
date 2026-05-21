@@ -1099,6 +1099,10 @@
 
   <!-- PARTNERS VIEW =========================================== -->
   <section id="view-partners" class="view">
+    <!-- v0.10.0z: overdue contacts panel — surfaces stale relationships
+         across all partners at the top of the view. -->
+    <div id="ptn-overdue-card" class="card" style="display:none;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.04);"></div>
+
     <div class="card">
       <h2 style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
         <span>Partners</span>
@@ -5215,7 +5219,91 @@
                                 partner_types: [], statuses: [], note_types: [] };
       }
     }
+    await refreshOverdue();
     await refreshPartners();
+  }
+
+  // v0.10.0z: render the cross-partner overdue panel.
+  async function refreshOverdue() {
+    const card = $('#ptn-overdue-card');
+    if (!card) return;
+    try {
+      const data = await jsonFetch('/api/partners/overdue');
+      const rows = data.overdue || [];
+      if (!rows.length) { card.style.display = 'none'; card.innerHTML = ''; return; }
+      card.style.display = 'block';
+      // Group by partner so the panel reads as a tidy list.
+      const byPartner = {};
+      rows.forEach(c => {
+        const pn = c.partner_name || c.partner_id;
+        if (!byPartner[pn]) byPartner[pn] = [];
+        byPartner[pn].push(c);
+      });
+      const groupHtml = Object.entries(byPartner).map(([partner, list]) => `
+        <div style="margin-bottom:10px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(partner)}</div>
+          ${list.map(c => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;gap:8px;">
+              <div style="min-width:0;flex:1;">
+                <strong style="font-size:13px;">${escapeHtml(c.name || '—')}</strong>
+                <span class="muted" style="font-size:11px;">${c.title ? ' · ' + escapeHtml(c.title) : ''}</span>
+                <div class="muted" style="font-size:10px;">
+                  ${c.last_touched_at ? `Last touched ${_fmtDaysAgo(c.days_since_touch)}` : 'Never touched'}
+                  · ${Math.abs(c.days_until_due || 0)}d overdue
+                  · cadence ${c.cadence_days}d
+                  ${c.mr_owner ? ' · ' + escapeHtml(c.mr_owner) : ''}
+                </div>
+              </div>
+              <div class="btn-row" style="flex-shrink:0;">
+                <button class="btn ghost" type="button" data-od-touch="${escapeAttr(c.partner_id)}|${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">✓ Mark touched</button>
+                <button class="btn ghost" type="button" data-od-open="${escapeAttr(c.partner_id)}" style="padding:3px 8px;font-size:10px;">Open partner →</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+      card.innerHTML = `
+        <h2 style="display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--red);">
+          <span>🔔 Overdue contacts <span style="background:rgba(239,68,68,.18);color:var(--red);font-size:11px;padding:2px 10px;border-radius:12px;margin-left:6px;">${rows.length}</span></span>
+          <button id="ptn-overdue-collapse" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">Collapse</button>
+        </h2>
+        <p class="muted" style="font-size:12px;margin:0 0 12px;">These contacts haven't been touched within their cadence. Log a touch (✓) when you reach out, or open the partner to add a note.</p>
+        <div id="ptn-overdue-body">${groupHtml}</div>
+      `;
+      card.querySelectorAll('[data-od-touch]').forEach(b => {
+        b.addEventListener('click', async () => {
+          const [pid, cid] = b.dataset.odTouch.split('|');
+          try {
+            await jsonFetch(`/api/partners/${encodeURIComponent(pid)}/contacts/${encodeURIComponent(cid)}/touch`, { method: 'POST' });
+            toast('Marked as touched', 'success');
+            await refreshOverdue();
+          } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+        });
+      });
+      card.querySelectorAll('[data-od-open]').forEach(b => {
+        b.addEventListener('click', () => openPartnerDetail(b.dataset.odOpen));
+      });
+      $('#ptn-overdue-collapse').addEventListener('click', () => {
+        const body = $('#ptn-overdue-body');
+        if (!body) return;
+        const collapsed = body.style.display === 'none';
+        body.style.display = collapsed ? '' : 'none';
+        $('#ptn-overdue-collapse').textContent = collapsed ? 'Collapse' : 'Expand';
+      });
+    } catch (e) {
+      card.style.display = 'none';
+      console.warn('[overdue]', e);
+    }
+  }
+
+  // Friendly relative date — "today", "1d ago", "12d ago", "3mo ago".
+  function _fmtDaysAgo(days) {
+    if (days == null) return 'never';
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days/30)}mo ago`;
+    return `${Math.floor(days/365)}y ago`;
   }
 
   async function refreshPartners() {
@@ -5400,6 +5488,17 @@
       wrap.innerHTML = `<div class="muted" style="font-size:12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;">No contacts ${all.length ? 'match the filters' : 'yet — click + Add contact above to start'}.</div>`;
       return;
     }
+    const touchCell = (c) => {
+      const days = c.days_since_touch;
+      const overdue = c.overdue;
+      const soon = c.is_due_soon;
+      const label = c.last_touched_at ? _fmtDaysAgo(days) : 'Never';
+      const subtitle = overdue
+        ? `<span style="color:var(--red);font-weight:600;">Overdue ${Math.abs(c.days_until_due)}d</span>`
+        : (soon ? `<span style="color:var(--yellow);">Due in ${c.days_until_due}d</span>`
+                : `<span class="muted">cadence ${c.cadence_days}d</span>`);
+      return `<div style="font-size:11px;">${escapeHtml(label)}</div><div style="font-size:10px;margin-top:2px;">${subtitle}</div>`;
+    };
     wrap.innerHTML = `
       <table class="stakeholders" style="width:100%;font-size:12px;">
         <thead>
@@ -5410,19 +5509,22 @@
             <th>Region · Country</th>
             <th>Industries</th>
             <th>MR owner</th>
+            <th>Last touch</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           ${filtered.map(c => `
-            <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : ''}>
+            <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
               <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}${c.linkedin_url ? `<br><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener" style="font-size:10px;">LinkedIn ↗</a>` : ''}</td>
               <td>${escapeHtml(c.title || '—')}</td>
               <td>${escapeHtml(c.territory || '—')}</td>
               <td>${escapeHtml(c.region || '—')}${c.country ? ' · ' + escapeHtml(c.country) : ''}</td>
               <td>${(c.industries || []).map(i => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(i)}</span>`).join('') || '—'}</td>
               <td>${escapeHtml(c.mr_owner || '—')}</td>
+              <td>${touchCell(c)}</td>
               <td style="text-align:right;white-space:nowrap;">
+                <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">✓</button>
                 <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">✎</button>
                 <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">📝</button>
                 <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
@@ -5431,8 +5533,18 @@
           `).join('')}
         </tbody>
       </table>
-      <div class="muted" style="font-size:10px;margin-top:6px;">${filtered.length} of ${all.length} contact${all.length === 1 ? '' : 's'}</div>
+      <div class="muted" style="font-size:10px;margin-top:6px;">${filtered.length} of ${all.length} contact${all.length === 1 ? '' : 's'}${filtered.filter(c => c.overdue).length ? ` · ${filtered.filter(c => c.overdue).length} overdue` : ''}</div>
     `;
+    wrap.querySelectorAll('[data-contact-touch]').forEach(b => {
+      b.addEventListener('click', async () => {
+        try {
+          await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(b.dataset.contactTouch)}/touch`, { method: 'POST' });
+          toast('Marked as touched', 'success');
+          await openPartnerDetail(partner.id);
+          await refreshOverdue();
+        } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      });
+    });
     wrap.querySelectorAll('[data-contact-edit]').forEach(b => {
       b.addEventListener('click', () => {
         const c = (partner.contacts || []).find(x => x.id === b.dataset.contactEdit);
@@ -5495,6 +5607,21 @@
             </select>
           </div>
         </div>
+        <!-- v0.10.0z: touch cadence — defaults to 30 days. -->
+        <div class="row row-2">
+          <div class="field">
+            <label>Touch cadence (days) <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— how often to reach out</span></label>
+            <select id="ptn-c-cadence">
+              ${[7, 14, 21, 30, 45, 60, 90, 120, 180].map(d => `<option value="${d}"${d === (c.cadence_days || 30) ? ' selected' : ''}>${d} days</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Last touched</label>
+            <div style="padding:8px 10px;font-size:12px;color:var(--text-dim);">
+              ${c.last_touched_at ? `${escapeHtml(new Date(c.last_touched_at).toLocaleString())} <span class="muted">(${escapeHtml(_fmtDaysAgo(c.days_since_touch))})</span>` : '<span class="muted">Never — adding a note will count as a touch</span>'}
+            </div>
+          </div>
+        </div>
         <div class="btn-row" style="margin-top:10px;">
           <button id="ptn-c-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">${existing ? 'Save changes' : 'Create contact'}</button>
           <button id="ptn-c-cancel" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
@@ -5522,6 +5649,7 @@
         industries,
         status: $('#ptn-c-status').value,
         reports_to_id: $('#ptn-c-reports-to').value,
+        cadence_days: parseInt($('#ptn-c-cadence').value, 10) || 30,
       };
       try {
         const url = existing
@@ -5605,8 +5733,12 @@
           body: JSON.stringify({ type: $('#ptn-n-type').value, content }),
         });
         $('#ptn-n-content').value = '';
-        toast('Note added', 'success');
+        toast('Note added · touch logged', 'success');
         await refreshNotes();
+        // v0.10.0z: server auto-bumped last_touched_at; refresh the
+        // overdue panel so the contact drops off if it was on it.
+        // Keep the notes panel open so the AE can add another.
+        await refreshOverdue();
       } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
     });
     await refreshNotes();

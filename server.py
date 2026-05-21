@@ -1843,11 +1843,50 @@ def api_partner_notes_add(partner_id: str, contact_id: str):
         note = partner_notes_store.add_note(partner_id, contact_id, body)
     except partner_notes_store.PartnerNotesStoreError as e:
         return jsonify({"error": str(e)}), 400
+    # v0.10.0z: a note IS a touch — bump last_touched_at so the cadence
+    # clock resets. AE doesn't need a separate "log a touch" action.
+    touched = partner_contacts_store.touch_contact(partner_id, contact_id)
     audit.log_event("partner_note_added", actor=_actor(),
                     partner_id=partner_id, contact_id=contact_id,
-                    note_id=note["id"])
-    return jsonify({"note": note,
-                    "notes": partner_notes_store.list_notes(partner_id, contact_id)})
+                    note_id=note["id"], touched=bool(touched))
+    return jsonify({
+        "note": note,
+        "notes": partner_notes_store.list_notes(partner_id, contact_id),
+        # Returning the freshly-bumped contact so the UI can update the
+        # "Last touch" cell in-place without another fetch.
+        "contact": partner_contacts_store.annotate_touch_state(touched) if touched else None,
+    })
+
+
+# v0.10.0z: overdue contacts roster — Today/overview surface.
+@app.route("/api/partners/overdue", methods=["GET"])
+def api_partners_overdue():
+    """Across-partner overdue contacts. Optional ?owner= filters to MR
+    owner (so each AE can see their own list)."""
+    owner = (request.args.get("owner") or "").strip()
+    rows = partner_contacts_store.overdue_contacts(partner_id=None)
+    if owner:
+        rows = [c for c in rows if (c.get("mr_owner") or "").lower() == owner.lower()]
+    # Sort most-overdue first so the worst offenders are at the top.
+    rows.sort(key=lambda c: c.get("days_until_due") or 0)
+    # Enrich with partner name for the UI list.
+    partners_by_id = {p["id"]: p for p in partners_store.list_partners()}
+    for r in rows:
+        pid = r.get("partner_id")
+        r["partner_name"] = (partners_by_id.get(pid) or {}).get("name") or pid
+    return jsonify({"overdue": rows, "count": len(rows)})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/touch", methods=["POST"])
+def api_partner_contact_touch(partner_id: str, contact_id: str):
+    """Explicit 'log a touch' without a note. AE clicks 'mark as touched'
+    after an off-platform interaction (Slack DM, conference chat, etc.)."""
+    touched = partner_contacts_store.touch_contact(partner_id, contact_id)
+    if not touched:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("partner_contact_touched", actor=_actor(),
+                    partner_id=partner_id, contact_id=contact_id)
+    return jsonify({"contact": partner_contacts_store.annotate_touch_state(touched)})
 
 
 @app.route("/api/partners/<partner_id>/contacts/<contact_id>/notes/<note_id>", methods=["DELETE"])

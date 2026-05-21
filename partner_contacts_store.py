@@ -42,7 +42,7 @@ import json
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +111,18 @@ def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
     if isinstance(industries, str):
         industries = [s.strip() for s in industries.split(",") if s.strip()]
     industries = [str(i).strip() for i in industries if str(i).strip()]
+    # v0.10.0z: touch cadence fields. Defaults to 30 days. last_touched_at
+    # bumps automatically when a note is added; the AE-edit flow does NOT
+    # bump it (only intentional outreach counts as a touch).
+    raw_cadence = contact.get("cadence_days")
+    if raw_cadence is None or raw_cadence == "":
+        cadence_days = 30
+    else:
+        try:
+            cadence_days = int(raw_cadence)
+        except (TypeError, ValueError):
+            cadence_days = 30
+    cadence_days = max(1, min(cadence_days, 365))
     return {
         "id": cid,
         "partner_id": _slugify(partner_id),
@@ -127,19 +139,107 @@ def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
         "reports_to_id": (contact.get("reports_to_id") or "").strip() or None,
         "status": (contact.get("status") or "active").strip().lower(),
         "tags": [str(t).strip() for t in (contact.get("tags") or []) if str(t).strip()],
+        "cadence_days": cadence_days,
+        "last_touched_at": contact.get("last_touched_at") or None,
         "added_at": contact.get("added_at") or _now(),
         "updated_at": _now(),
     }
 
 
+def _parse_iso(s: str | None):
+    """Parse our ISO-Z timestamps back to a tz-aware datetime."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def annotate_touch_state(contact: dict[str, Any]) -> dict[str, Any]:
+    """Compute and attach the derived touch fields the UI needs.
+
+    Adds (in-place, returns the same dict for convenience):
+      next_touch_due: ISO timestamp string | None
+      days_since_touch: int | None — None when never touched
+      days_until_due: int — negative if overdue, positive if upcoming
+      overdue: bool
+      is_due_soon: bool — within 7 days of due (warn)
+
+    Never touched + cadence set → overdue=True (the touch is overdue
+    relative to "added_at" by however long since the contact was added).
+    """
+    cadence = int(contact.get("cadence_days") or 30)
+    last = _parse_iso(contact.get("last_touched_at"))
+    baseline = last or _parse_iso(contact.get("added_at"))
+    if baseline is None:
+        contact["next_touch_due"] = None
+        contact["days_since_touch"] = None
+        contact["days_until_due"] = 0
+        contact["overdue"] = False
+        contact["is_due_soon"] = False
+        return contact
+    now = datetime.now(timezone.utc)
+    days_since = (now - baseline).days
+    due_at = baseline + timedelta(days=cadence)
+    days_until_due = (due_at - now).days
+    contact["next_touch_due"] = due_at.isoformat(timespec="seconds").replace("+00:00", "Z")
+    contact["days_since_touch"] = days_since if last else None
+    contact["days_until_due"] = days_until_due
+    contact["overdue"] = days_until_due < 0
+    contact["is_due_soon"] = 0 <= days_until_due <= 7
+    return contact
+
+
+def touch_contact(partner_id: str, contact_id: str, *,
+                   at: str | None = None) -> dict[str, Any] | None:
+    """Bump last_touched_at to `at` (defaults to now). Returns updated
+    contact or None if not found. Used by the note-add flow + any
+    explicit "log a touch" action."""
+    rows = _load_raw(partner_id)
+    found = None
+    when = at or _now()
+    for r in rows:
+        if r.get("id") == contact_id:
+            r["last_touched_at"] = when
+            r["updated_at"] = _now()
+            found = r
+            break
+    if found is None:
+        return None
+    _write_raw(partner_id, rows)
+    return found
+
+
 def list_contacts(partner_id: str) -> list[dict[str, Any]]:
-    """All contacts under this partner, sorted active-first then alpha."""
+    """All contacts under this partner, sorted active-first then alpha.
+    Each row is annotated with touch state (overdue, days_until_due,
+    etc.) so the UI doesn't need a second computation."""
     rows = _load_raw(partner_id)
     rows.sort(key=lambda r: (
         r.get("status") != "active",
         (r.get("name") or "").lower(),
     ))
+    for r in rows:
+        annotate_touch_state(r)
     return rows
+
+
+def overdue_contacts(partner_id: str | None = None) -> list[dict[str, Any]]:
+    """Return active, overdue contacts. Pass partner_id to scope; omit
+    for an across-all-partners roster (used by the Today / overview
+    surface)."""
+    if partner_id:
+        contacts = list_contacts(partner_id)
+    else:
+        contacts = []
+        for raw in list_all_contacts():
+            annotate_touch_state(raw)
+            contacts.append(raw)
+    return [
+        c for c in contacts
+        if c.get("status") == "active" and c.get("overdue")
+    ]
 
 
 def get_contact(partner_id: str, contact_id: str) -> dict[str, Any] | None:
