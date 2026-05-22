@@ -61,17 +61,44 @@ def _looks_monthly(text: str) -> bool:
     return any(kw in t for kw in ("/month", "/mo", "monthly", "mrr", "p.m.", " pm "))
 
 
+# v1.0.0s: parser-hardening constants.
+# Words that signal the AE doesn't actually know the number yet.
+# Anything containing one of these → return None rather than extract.
+_DOUBT_MARKERS = (
+    "no idea", "not sure", "maybe", "perhaps", "guess",
+    "tbh", "could be", "no clue", "wild guess",
+)
+# Upper sanity cap on monthly value. Anything above this is almost
+# certainly a typo (£40B/month?) and would skew the forecast badly.
+# MR's largest realistic deal is ~£200k/month; £10M is generous headroom.
+_MAX_MONTHLY_GBP = 10_000_000
+
+
 def parse_deal_value_from_text(text: str | None) -> int | None:
     """Best-effort numeric extraction from a free-text deal_size field.
-    Returns monthly GBP. Returns None when nothing usable is in the string
-    (e.g. "TBD", "tbc", empty)."""
+    Returns monthly GBP. Returns None when:
+      - text is empty / a known placeholder ("TBD", "tbc", "n/a", "-")
+      - text contains explicit doubt markers ("no idea", "maybe", ...)
+      - the matched number is preceded by a negative sign
+      - the resulting value would exceed _MAX_MONTHLY_GBP
+    """
     if not text:
         return None
     s = str(text).strip()
     if not s or s.lower() in {"tbd", "tbc", "n/a", "—", "-", "unknown"}:
         return None
+    # v1.0.0s: bail out when the AE wrote a number but flagged uncertainty
+    # alongside it ("no idea, maybe £10k"). Better to surface in the
+    # missing-value bucket than silently land a fake commit.
+    s_lower = s.lower()
+    if any(marker in s_lower for marker in _DOUBT_MARKERS):
+        return None
     m = _VALUE_PATTERN.search(s)
     if not m:
+        return None
+    # Reject negatives. The regex doesn't consume "-" so "−40k" → 40000
+    # without this guard; we check the char immediately before the match.
+    if m.start() > 0 and s[m.start() - 1] in ("-", "−"):
         return None
     try:
         num = float(m.group("num").replace(",", ""))
@@ -88,6 +115,8 @@ def parse_deal_value_from_text(text: str | None) -> int | None:
     # explicitly, assume monthly (matches MR's `deal_size_label` convention).
     if _looks_annual(s) and not _looks_monthly(s):
         num = num / 12
+    if num > _MAX_MONTHLY_GBP:
+        return None
     return int(round(num))
 
 

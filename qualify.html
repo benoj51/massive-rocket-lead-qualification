@@ -6189,6 +6189,11 @@
       const wipeSuspected = h?.cache?.wipe_suspected;
       const mounted = h?.volume_mount_status?.is_mounted;
       const lastErr = h?.mirror_health?.last_error;
+      // v1.0.0s: also surface a boot-time property-check failure. If
+      // _BACKUP_PROPERTY_READY.error is set, the Notion schema isn't
+      // ready and every mirror is silently failing — the AE needs to
+      // know without having to remember to check the diagnostics URL.
+      const propError = h?.notion_backup_property?.error;
       // Strong signal: cache wipe suspected + volume NOT mounted.
       if (wipeSuspected && !mounted) {
         _showCacheWipeBanner({
@@ -6196,6 +6201,17 @@
           body: 'Railway redeployed and the persistent volume isn\'t mounted, so this container started with an empty cache. Mount /app/cache on the Railway dashboard (5-minute fix — see RAILWAY_VOLUME_MOUNT.md). Until then, every redeploy will wipe new data.',
           action: 'Open mount guide',
           actionHref: '/RAILWAY_VOLUME_MOUNT.md',
+        });
+      } else if (propError) {
+        // v1.0.0s: Notion property check failed at boot — backups are
+        // disabled until this clears. Either Notion was unreachable on
+        // first import (lazy retry handles next save) or creds are
+        // wrong / DB swapped (needs human attention).
+        _showCacheWipeBanner({
+          headline: '⚠ Notion backup is offline — schema check failed',
+          body: `The "State Backup" property couldn't be confirmed on the Notion DB. Error: ${propError}. Backups won't persist until this resolves. Check NOTION_API_KEY + that the database is reachable.`,
+          action: 'View diagnostics',
+          actionHref: '/api/diagnostics/health',
         });
       } else if (lastErr) {
         // Less severe but still worth surfacing — a recent backup
@@ -6829,7 +6845,10 @@
     }
     try {
       const cfg = await jsonFetch('/api/forecast/config');
-      const stages = ['Intro Call', 'Discovery', 'Technical Fit', 'Proposal',
+      // v1.0.0s: "Intro Call" removed — it was a dead knob (PIPELINE_STAGES
+      // excludes it, so the probability was never applied). Intro Call is
+      // pre-forecast by design.
+      const stages = ['Discovery', 'Technical Fit', 'Proposal',
                        'Negotiation', 'Legal/Procurement', 'Verbal Commit', 'Signature'];
       const stageRows = stages.map(s => {
         const v = cfg.stage_probabilities[s] || 0;
@@ -6842,7 +6861,7 @@
       }).join('');
       panel.innerHTML = `
         <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">⚙ Forecast settings</div>
-        <div class="muted" style="font-size:11px;margin-bottom:10px;">Stage → probability mapping. Tune these to match your historical conversion. Changes apply immediately on save.</div>
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Stage → probability mapping. Tune these to match your historical conversion. Changes apply immediately on save. <strong>Intro Call</strong> is excluded by design — leads only enter the forecast at Discovery.</div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;">
           ${stageRows}
         </div>

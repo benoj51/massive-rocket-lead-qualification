@@ -267,5 +267,85 @@ class BackupRestoreEndpointTests(unittest.TestCase):
         self.assertEqual(contacts[0]["name"], "Restored Person")
 
 
+class BackupHealthRingBufferTests(unittest.TestCase):
+    """v1.0.0s: the _BACKUP_HEALTH deque caps at 20 entries. Verify
+    that the cap actually evicts and that /api/diagnostics/health
+    returns the latest entries, not the earliest."""
+
+    def setUp(self):
+        os.environ["SKIP_NOTION_BOOT"] = "1"
+        os.environ["SKIP_COMMAND_CENTRE_SEED"] = "1"
+        for mod in ("server",):
+            sys.modules.pop(mod, None)
+        import server
+        self.server = server
+        self.client = server.app.test_client()
+        # Reset the ring buffer to a known state.
+        self.server._BACKUP_HEALTH.clear()
+
+    def tearDown(self):
+        for k in ("SKIP_NOTION_BOOT", "SKIP_COMMAND_CENTRE_SEED"):
+            os.environ.pop(k, None)
+
+    def test_ring_buffer_caps_at_20(self):
+        """Append 25 fake attempts; deque should hold only the latest 20."""
+        from datetime import datetime, timezone
+        for i in range(25):
+            self.server._BACKUP_HEALTH.append({
+                "lead_id": f"lead-{i}",
+                "at": datetime.now(timezone.utc).isoformat(),
+                "ok": (i % 2 == 0),
+                "error": None if (i % 2 == 0) else f"err-{i}",
+                "bytes": i * 100,
+                "chunks": 1,
+            })
+        self.assertEqual(len(self.server._BACKUP_HEALTH), 20)
+        # Oldest 5 evicted: leads 0..4 gone, 5..24 remain.
+        lead_ids = [a["lead_id"] for a in self.server._BACKUP_HEALTH]
+        self.assertNotIn("lead-0", lead_ids)
+        self.assertNotIn("lead-4", lead_ids)
+        self.assertIn("lead-5", lead_ids)
+        self.assertIn("lead-24", lead_ids)
+
+    def test_diagnostics_surfaces_latest_attempts(self):
+        """The /api/diagnostics/health endpoint returns recent[-5:],
+        i.e. the 5 most-recent attempts. After 25 fakes, those should
+        be leads 20..24."""
+        from datetime import datetime, timezone
+        for i in range(25):
+            self.server._BACKUP_HEALTH.append({
+                "lead_id": f"lead-{i}",
+                "at": datetime.now(timezone.utc).isoformat(),
+                "ok": True, "error": None, "bytes": 0, "chunks": 0,
+            })
+        r = self.client.get("/api/diagnostics/health")
+        self.assertEqual(r.status_code, 200)
+        recent = r.get_json()["mirror_health"]["recent"]
+        self.assertEqual(len(recent), 5)
+        recent_ids = [a["lead_id"] for a in recent]
+        # The deque holds 5..24; the last 5 are 20..24.
+        self.assertEqual(recent_ids, [f"lead-{i}" for i in range(20, 25)])
+
+    def test_failure_count_accurate_under_cap(self):
+        """The successes/failures tally should reflect only the
+        in-buffer attempts, not the total historical."""
+        from datetime import datetime, timezone
+        # Append 30 — first 10 fail, next 20 succeed. After cap,
+        # only the latest 20 (all successes) remain.
+        for i in range(30):
+            self.server._BACKUP_HEALTH.append({
+                "lead_id": f"lead-{i}",
+                "at": datetime.now(timezone.utc).isoformat(),
+                "ok": (i >= 10),
+                "error": None if i >= 10 else "old failure",
+                "bytes": 0, "chunks": 0,
+            })
+        r = self.client.get("/api/diagnostics/health")
+        body = r.get_json()["mirror_health"]
+        self.assertEqual(body["attempts_tracked"], 20)
+        self.assertEqual(body["successes"], 20)
+        self.assertEqual(body["failures"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

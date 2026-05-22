@@ -23,10 +23,14 @@ _DEFAULT_PATH = Path(__file__).parent / "cache" / "forecast_config.json"
 _LOCK = threading.Lock()
 
 
-# Industry-standard defaults tuned to MR's 8-stage funnel. These are the
+# Industry-standard defaults tuned to MR's stage names. These are the
 # weights applied to each stage when summing weighted pipeline.
+#
+# v1.0.0s: "Intro Call" was previously in this map but `PIPELINE_STAGES`
+# excludes it — meaning the knob did nothing. We've removed it: Intro
+# Call is pre-pipeline by design. If you want it in the forecast, add
+# it to BOTH this map AND `PIPELINE_STAGES` below.
 DEFAULT_STAGE_PROBABILITIES: dict[str, float] = {
-    "Intro Call":         0.05,
     "Discovery":          0.20,
     "Technical Fit":      0.35,
     "Proposal":           0.50,

@@ -439,17 +439,28 @@ def api_lead_agencies_add(lead_id: str):
 
 @app.route("/api/leads/<lead_id>/agencies/<agency_id>", methods=["PATCH"])
 def api_lead_agencies_update(lead_id: str, agency_id: str):
-    """Update a specific agency entry by id. PATCH semantics: only the
-    fields supplied in the body are changed; everything else is
-    preserved from the existing record."""
+    """Update a specific agency entry by id.
+
+    PATCH semantics:
+    - Keys OMITTED from the body are preserved from the existing record.
+    - Keys PRESENT in the body — including with value `null` or `""` —
+      overwrite the existing value. The store's `_normalise` then
+      collapses empty/whitespace/None to None on the optional fields
+      (`scope`, `since`, `until`, `notes`), so sending `{"notes": null}`
+      OR `{"notes": ""}` are both valid ways to clear that field.
+    - `name` and `type` are required by `_normalise`, so sending
+      `{"name": null}` raises a 400.
+    """
     body = request.get_json(silent=True) or {}
     existing = lead_agencies_store.get_agency(lead_id, agency_id)
     if existing is None:
         return jsonify({"error": "not_found"}), 404
-    # Merge body over existing so the caller can send {notes: "..."}
-    # without having to re-send name + type every time.
+    # v1.0.0s: simplified merge. Earlier code had a tautological filter
+    # `if v is not None or k in body` that did nothing — every key
+    # iterated from body.items() is by definition in body. Plain merge
+    # is the correct + readable behaviour.
     merged = dict(existing)
-    merged.update({k: v for k, v in body.items() if v is not None or k in body})
+    merged.update(body)
     merged["id"] = agency_id
     try:
         saved = lead_agencies_store.save_agency(lead_id, merged)
@@ -2473,6 +2484,42 @@ _BACKUP_PROPERTY_READY: dict = {"checked": False, "existed": False,
                                  "created": False, "error": None}
 
 
+# v1.0.0s: tracks whether we've attempted the lazy ensure-properties
+# retry yet. Without this, every mirror call would re-attempt the
+# Notion schema check, masking real errors with retry noise.
+_BACKUP_LAZY_RETRY_DONE = False
+
+
+def _maybe_lazy_retry_ensure_properties():
+    """If the boot-time self-heal errored (e.g. Notion was unreachable
+    on first import), try the schema check ONCE here, just before the
+    first real mirror attempt. After that we don't retry — repeated
+    failures need human attention via the diagnostics endpoint, not
+    silent retry loops.
+    """
+    global _BACKUP_LAZY_RETRY_DONE, _BACKUP_PROPERTY_READY
+    if _BACKUP_LAZY_RETRY_DONE:
+        return
+    if _BACKUP_PROPERTY_READY.get("error") is None:
+        # Boot self-heal succeeded — nothing to retry.
+        _BACKUP_LAZY_RETRY_DONE = True
+        return
+    _BACKUP_LAZY_RETRY_DONE = True
+    try:
+        sync = NotionSync()
+        result = sync.ensure_properties({
+            "State Backup":              {"rich_text": {}},
+            "Expected Close Date":       {"date": {}},
+            "Deal Value (Monthly GBP)":  {"number": {"format": "pound"}},
+        })
+        _BACKUP_PROPERTY_READY = result
+        if result.get("created"):
+            log.info("Lazy ensure_properties retry created: %s",
+                      ", ".join(result["created"]))
+    except Exception as e:
+        log.warning("Lazy ensure_properties retry failed: %s", e)
+
+
 def _mirror_state_to_notion(lead_id: str) -> bool:
     """Pull the lead's full local state and write the chunked backup blob
     to its Notion page. Best-effort — failure is logged, not raised, so
@@ -2483,8 +2530,15 @@ def _mirror_state_to_notion(lead_id: str) -> bool:
     here usually means the "State Backup" property is missing — the
     boot-time self-heal should have created it, but if Notion creds
     changed or DB swapped, we need visibility.
+
+    v1.0.0s: if the boot self-heal errored (Notion unreachable on first
+    import), this function lazy-retries the ensure-properties call once
+    before the first mirror attempt. Guarded by _BACKUP_LAZY_RETRY_DONE.
     """
     from datetime import datetime, timezone
+    # v1.0.0s: one-shot retry of ensure_properties if boot self-heal
+    # failed. Cheap (single GET + maybe one PATCH) and idempotent.
+    _maybe_lazy_retry_ensure_properties()
     attempt = {
         "lead_id": lead_id,
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),

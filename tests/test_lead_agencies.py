@@ -165,6 +165,44 @@ class EndpointTests(unittest.TestCase):
         # Still one row
         self.assertEqual(len(r2.get_json()["agencies"]), 1)
 
+    def test_patch_explicit_null_clears_optional_field(self):
+        """v1.0.0s: PATCH semantics — sending {notes: null} or {notes: ""}
+        should both clear the field; omitting the key preserves it."""
+        # Create with notes set
+        r = self.client.post("/api/leads/lead-1/agencies",
+                              json={"name": "VML", "type": "incumbent",
+                                    "notes": "Original."})
+        aid = r.get_json()["agency"]["id"]
+        # PATCH with explicit null — should clear notes
+        r2 = self.client.patch(f"/api/leads/lead-1/agencies/{aid}",
+                                json={"notes": None})
+        self.assertEqual(r2.status_code, 200)
+        self.assertIsNone(r2.get_json()["agency"]["notes"])
+        # Re-set notes
+        self.client.patch(f"/api/leads/lead-1/agencies/{aid}",
+                          json={"notes": "Second."})
+        # PATCH with empty string — should also clear
+        r3 = self.client.patch(f"/api/leads/lead-1/agencies/{aid}",
+                                json={"notes": ""})
+        self.assertIsNone(r3.get_json()["agency"]["notes"])
+
+    def test_patch_omitted_keys_preserved(self):
+        """Sending a PATCH without `name` doesn't accidentally wipe it
+        (which would 400 the validation)."""
+        r = self.client.post("/api/leads/lead-1/agencies",
+                              json={"name": "VML", "type": "incumbent",
+                                    "scope": "Braze ops"})
+        aid = r.get_json()["agency"]["id"]
+        # Only update notes; name + type + scope must survive.
+        r2 = self.client.patch(f"/api/leads/lead-1/agencies/{aid}",
+                                json={"notes": "Added later."})
+        self.assertEqual(r2.status_code, 200)
+        body = r2.get_json()["agency"]
+        self.assertEqual(body["name"], "VML")
+        self.assertEqual(body["type"], "incumbent")
+        self.assertEqual(body["scope"], "Braze ops")
+        self.assertEqual(body["notes"], "Added later.")
+
     def test_patch_404_when_unknown(self):
         r = self.client.patch("/api/leads/lead-1/agencies/no-such-id",
                                json={"name": "x"})

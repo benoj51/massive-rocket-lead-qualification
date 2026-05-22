@@ -5,6 +5,115 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0s] — 2026-05-21 — Code review fixes (H1, H3, M1, M3, M4)
+
+Five issues from the code-review pass on v1.0.0h..r. Each one is small
+on its own; together they tighten the platform meaningfully before
+more features land.
+
+### H1 · Drop dead code in agency PATCH merge + lock the semantic
+**File**: `server.py:455` (`api_lead_agencies_update`)
+
+The line was:
+```python
+merged.update({k: v for k, v in body.items() if v is not None or k in body})
+```
+`k in body` is always True when iterating `body.items()`, so the filter
+was a no-op. Replaced with plain `merged.update(body)` and documented
+the real PATCH semantic in the docstring: omitted keys preserve, present
+keys (including `null` / `""`) overwrite.
+
+Two new tests in `tests/test_lead_agencies.py`:
+- `test_patch_explicit_null_clears_optional_field` — locks the contract
+  that `PATCH {"notes": null}` and `PATCH {"notes": ""}` both clear the
+  field.
+- `test_patch_omitted_keys_preserved` — locks that omitting `name`
+  doesn't accidentally wipe it.
+
+### H3 · Lazy retry on `ensure_properties` + banner condition
+**Files**: `server.py:2475+` (lazy retry), `qualify.html:6191+` (banner)
+
+If Notion was unreachable at app import time, `_BACKUP_PROPERTY_READY`
+errored and every subsequent state-backup mirror silently failed. Two
+changes:
+
+1. **`_maybe_lazy_retry_ensure_properties()`** — called at the top of
+   `_mirror_state_to_notion`. If the boot self-heal errored, retries
+   the schema check exactly once (gated by `_BACKUP_LAZY_RETRY_DONE`).
+   If Notion is back up by the time of the first real save, the
+   property gets created and mirrors succeed from then on.
+2. **Cache-wipe banner** now also fires on `notion_backup_property.error`
+   — separate red banner that reads "Notion backup is offline — schema
+   check failed", with the actual error string so Ben can fix it
+   without having to remember the diagnostics URL.
+
+### M1 · Harden the deal-value parser against hostile input
+**File**: `forecast.py:43+`
+
+Three new guards on `parse_deal_value_from_text`:
+- **Doubt markers** — bail out when text contains "no idea", "not sure",
+  "maybe", "perhaps", "guess", "tbh", "could be", "no clue", "wild
+  guess". Better to land in the missing-value bucket than silently
+  inflate the forecast with a guessed number.
+- **Negative numbers** — reject any number preceded by `-` or `−`. The
+  regex didn't consume the minus, so `-40k` used to parse as `40000`.
+- **Upper cap** — `_MAX_MONTHLY_GBP = 10_000_000`. Anything above is
+  almost certainly a typo and would skew the forecast badly. MR's
+  largest realistic deal is ~£200k/month; £10M is generous headroom.
+
+Four new tests in `tests/test_forecast.py`:
+- `test_rejects_doubt_markers`
+- `test_rejects_negative_numbers`
+- `test_caps_unrealistic_values`
+- `test_ignores_embedded_script_garbage` — soft test (either None or
+  £1 acceptable; the cap protects us either way).
+
+### M3 · "Intro Call" stage probability was dead config
+**Files**: `forecast_config_store.py:32+`, `qualify.html:6843+`
+
+`DEFAULT_STAGE_PROBABILITIES` had `"Intro Call": 0.05` but
+`PIPELINE_STAGES` excluded it — so the 5% knob did nothing. An AE
+who tweaked it would think the system was broken.
+
+Removed Intro Call from the defaults map AND from the settings panel's
+stage list. Added a one-line note in the settings panel's help text:
+*"Intro Call is excluded by design — leads only enter the forecast at
+Discovery."* The forecast view itself was already correct; only the
+config + UI changed.
+
+### M4 · Ring buffer cap test
+**File**: `tests/test_state_backup.py`
+
+Three new tests verifying `_BACKUP_HEALTH` actually evicts at 20:
+- `test_ring_buffer_caps_at_20` — append 25, assert deque holds only
+  the latest 20 (leads 0..4 evicted)
+- `test_diagnostics_surfaces_latest_attempts` — endpoint returns the
+  5 most-recent attempts, not the 5 oldest
+- `test_failure_count_accurate_under_cap` — tally reflects only
+  in-buffer state, not historical total
+
+### Deferred from the review (low-cost, low-urgency)
+- **H2** (multi-store write race) — only matters under concurrent
+  writes. Single-user MR usage today; deferred until team usage lands.
+- **M2** (boot side-effects on every gunicorn worker) — Notion's
+  PATCH is idempotent so it's wasteful not destructive; not worth
+  the worker-zero gating complexity yet.
+- **M5** (JS test coverage gaps) — would need a Selenium / Playwright
+  setup we don't have.
+- **L1..L7** — style / cosmetic / nits.
+
+### Tests
+- 515 total (+9). All passing.
+
+### Files touched
+- `server.py` — H1 merge simplification, H3 lazy retry
+- `qualify.html` — H3 banner condition, M3 settings panel
+- `forecast.py` — M1 parser guards
+- `forecast_config_store.py` — M3 default map
+- `tests/test_lead_agencies.py` — 2 new tests for H1
+- `tests/test_forecast.py` — 4 new tests for M1
+- `tests/test_state_backup.py` — 3 new tests for M4
+
 ## [1.0.0r] — 2026-05-21 — Inline-editable MR owner dropdowns in list tables
 
 Ben asked: "need to be able to use dropdowns for MR owner even in the
