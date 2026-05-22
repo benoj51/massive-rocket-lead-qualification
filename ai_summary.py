@@ -636,3 +636,123 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
         "scope_criteria": scope_criteria_out or None,
         "contacts_mentioned": contacts_mentioned_out,
     }
+
+
+# v1.0.0m: partner-contact-side synthesis. Mirrors `synthesise_lead`
+# but for individual partner contacts (e.g. Marina at Braze). The
+# schema is different — partner-contact conversations are about who
+# THEY are working with (their accounts), what's changed, what their
+# territory looks like, what blocks them, what they see opening up.
+
+_PARTNER_CONTACT_CONVO_SYSTEM_PROMPT = """You synthesise the conversation
+history Massive Rocket has had with a specific PARTNER contact (e.g. a
+Braze AE, a Hightouch sales manager — not a prospect, not a customer).
+
+You receive: the contact's name + title + territory + region + country,
+the partner they work at (Braze / Hightouch / etc.), and the full
+chronological note history. The MOST RECENT note is flagged so you can
+weight it.
+
+Return ONE JSON object, no preamble, no markdown fences:
+
+{
+  "summary": "<2-3 sentence summary of the MOST RECENT conversation —
+              what was discussed, the headline takeaway>",
+  "accounts_discussed": [
+    "<account name + 1-line context — accounts THEY mentioned in the
+      most recent conversation (their customers / prospects, not MR's)>"
+  ],
+  "updates_on_prior_accounts": [
+    "<account from a PRIOR conversation + what's changed since
+      (new info, status shift, deal moved, etc.). Empty array if there
+      are no prior accounts to update on.>"
+  ],
+  "territory_info": [
+    "<bullet about their patch — geography they cover, the segment
+      they own (Strategic Ent / Enterprise / Scale), what their book
+      looks like, who their managers are, recent re-orgs that affect
+      them>"
+  ],
+  "challenges": [
+    "<a specific friction THEY surfaced — internal process, tooling,
+      missing exec sponsorship, ramp pressure, anything blocking them>"
+  ],
+  "opportunities": [
+    "<an opening THEY see — for their patch, for the MR partnership,
+      for a co-sell, for an account MR could be a wedge for>"
+  ],
+  "additional_info": "<anything else worth recording that doesn't fit
+                      the buckets above — personal context, comp
+                      structure, manager preferences, sibling teams.
+                      Empty string if nothing.>"
+}
+
+Rules:
+- Ground every bullet in the notes. Do NOT fabricate.
+- Plain English. No em-dashes. No marketing tone.
+- Lead with what the contact ACTUALLY said. Avoid generic
+  partner-success cliches.
+- If the data is thin (only one note), `updates_on_prior_accounts`
+  should be an empty array and `summary` should acknowledge the
+  thinness honestly.
+- Keep each array to at most 6 bullets — concision over completeness.
+- The audience is the partnerships AE (Ben) glancing at the contact
+  card before their next call. Optimise for "what do I need to
+  remember before I speak to this person again."
+"""
+
+
+def synthesise_partner_contact_conversation(payload: dict) -> dict | None:
+    """Run Claude across a partner contact's note history + return the
+    structured 7-field summary. Returns None if AI is unconfigured or
+    the call fails (best-effort — never raises).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+
+    try:
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_DEFAULT_MODEL, max_tokens=1500,
+            system=_PARTNER_CONTACT_CONVO_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(payload, default=str)}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+        data = json.loads(text)
+    except Exception as e:
+        log.warning("Partner-contact conversation synthesis failed: %s", e)
+        return None
+
+    def _str_list(key: str, cap: int = 6) -> list[str]:
+        out: list[str] = []
+        for b in (data.get(key) or []):
+            # Drop genuine None entries — str(None) would produce the
+            # literal string "None" which would leak into the UI.
+            if b is None:
+                continue
+            s = str(b).strip()
+            if s:
+                out.append(s)
+        return out[:cap]
+
+    return {
+        "summary":                    str(data.get("summary") or "").strip(),
+        "accounts_discussed":         _str_list("accounts_discussed"),
+        "updates_on_prior_accounts":  _str_list("updates_on_prior_accounts"),
+        "territory_info":             _str_list("territory_info"),
+        "challenges":                 _str_list("challenges"),
+        "opportunities":              _str_list("opportunities"),
+        "additional_info":            str(data.get("additional_info") or "").strip(),
+    }

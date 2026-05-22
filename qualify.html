@@ -6885,14 +6885,24 @@
     }, 30);
     detailEl.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
-        <h4 style="margin:0 0 6px;">📝 Notes — ${escapeHtml(c.name)}</h4>
-        <div class="muted" style="font-size:11px;margin-bottom:10px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
+          <div style="min-width:0;flex:1;">
+            <h4 style="margin:0 0 4px;">📝 Notes — ${escapeHtml(c.name)}</h4>
+            <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
+          </div>
+          <button id="ptn-n-refresh" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;flex-shrink:0;" title="Re-synthesise from all notes">✨ Refresh summary</button>
+        </div>
+        <!-- v1.0.0m: AI-synthesised conversation summary. Mirrors the
+             lead-side call summary pattern but with the partner-contact
+             schema (summary / accounts discussed / updates on prior /
+             territory / challenges / opportunities / additional). -->
+        <div id="ptn-n-summary" style="margin-bottom:14px;"></div>
         <div class="row" style="grid-template-columns:140px 1fr;gap:8px;margin-bottom:8px;">
           <div class="field" style="margin:0;"><label>Type</label>
             <select id="ptn-n-type">${(enums.note_types || ['touch']).map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('')}</select>
           </div>
           <div class="field" style="margin:0;"><label>Note</label>
-            <textarea id="ptn-n-content" rows="3" placeholder="Touch-base, intro, key takeaway…"></textarea>
+            <textarea id="ptn-n-content" rows="3" placeholder="What did they say? Accounts they mentioned, what's changed since last time, challenges, opportunities they see…"></textarea>
           </div>
         </div>
         <div class="btn-row" style="margin-bottom:12px;">
@@ -6903,6 +6913,77 @@
       </div>
     `;
     $('#ptn-n-close').addEventListener('click', () => { detailEl.innerHTML = ''; });
+
+    function renderPartnerContactSummary(s, notesCount) {
+      const el = $('#ptn-n-summary');
+      if (!el) return;
+      if (!s) {
+        if (notesCount > 0) {
+          el.innerHTML = '<div class="muted" style="font-size:11px;font-style:italic;background:var(--surface);border:1px dashed var(--border);border-radius:6px;padding:10px;">No synthesised summary yet. Click <strong>✨ Refresh summary</strong> to generate one, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> if AI is off.</div>';
+        } else {
+          el.innerHTML = '';
+        }
+        return;
+      }
+      const when = s.generated_at ? new Date(s.generated_at).toLocaleString() : '';
+      const mkList = (label, items, color) => {
+        if (!items || !items.length) return '';
+        const lis = items.map(i => `<li style="margin:3px 0;">${escapeHtml(i)}</li>`).join('');
+        return `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:${color};margin:8px 0 4px;">${escapeHtml(label)}</div>
+          <ul style="margin:0 0 0 18px;padding:0;font-size:12px;color:var(--text);">${lis}</ul>
+        `;
+      };
+      el.innerHTML = `
+        <div style="background:rgba(255,77,42,.04);border:1px solid rgba(255,77,42,.25);border-radius:8px;padding:12px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;margin-bottom:6px;">✨ Conversation summary</div>
+          ${s.summary ? `<div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:4px;">${escapeHtml(s.summary)}</div>` : ''}
+          ${mkList('Accounts discussed', s.accounts_discussed, 'var(--green)')}
+          ${mkList('Updates on prior accounts', s.updates_on_prior_accounts, 'var(--yellow)')}
+          ${mkList('Their territory', s.territory_info, 'var(--blue, #60a5fa)')}
+          ${mkList('Challenges', s.challenges, 'var(--red)')}
+          ${mkList('Opportunities', s.opportunities, 'var(--accent)')}
+          ${s.additional_info ? `
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin:8px 0 4px;">Additional</div>
+            <div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;">${escapeHtml(s.additional_info)}</div>
+          ` : ''}
+          <div class="muted" style="font-size:10px;border-top:1px solid var(--border);padding-top:6px;margin-top:10px;">
+            ✨ Synthesised from ${notesCount} note${notesCount === 1 ? '' : 's'} · generated ${when}
+          </div>
+        </div>
+      `;
+    }
+
+    async function loadSummary(notesCount) {
+      try {
+        const data = await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/summary`);
+        renderPartnerContactSummary(data.summary, notesCount);
+      } catch (_) {
+        renderPartnerContactSummary(null, notesCount);
+      }
+    }
+
+    $('#ptn-n-refresh').addEventListener('click', async () => {
+      const btn = $('#ptn-n-refresh');
+      const original = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Synthesising…';
+      try {
+        const data = await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/summary`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        const notesCount = ($('#ptn-n-list').querySelectorAll('[data-note-del]') || []).length;
+        if (data.summary) {
+          renderPartnerContactSummary(data.summary, notesCount);
+          toast('Summary refreshed', 'success');
+        } else {
+          toast(data.error || 'No summary available', 'error');
+        }
+      } catch (e) {
+        toast(`Refresh failed: ${e.body?.error || e.message}`, 'error');
+      } finally {
+        btn.disabled = false; btn.innerHTML = original;
+      }
+    });
     async function refreshNotes() {
       try {
         const data = await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes`);
@@ -6937,21 +7018,43 @@
     $('#ptn-n-add').addEventListener('click', async () => {
       const content = $('#ptn-n-content').value.trim();
       if (!content) { toast('Note content required', 'error'); return; }
+      const btn = $('#ptn-n-add');
+      const origLabel = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…';
       try {
-        await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes`, {
+        // v1.0.0m: server returns the freshly-synthesised summary
+        // alongside the note. Render it without a second round-trip.
+        const res = await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: $('#ptn-n-type').value, content }),
         });
         $('#ptn-n-content').value = '';
-        toast('Note added · touch logged', 'success');
+        const summaryMsg = res?.summary ? ' · summary refreshed' : '';
+        toast(`Note added · touch logged${summaryMsg}`, 'success');
         await refreshNotes();
+        const notesCount = (res?.notes || []).length;
+        if (res?.summary) {
+          renderPartnerContactSummary(res.summary, notesCount);
+        } else {
+          // AI is off or synthesis failed — re-load the cached summary
+          // (may still exist from a prior save when AI was on).
+          await loadSummary(notesCount);
+        }
         // v0.10.0z: server auto-bumped last_touched_at; refresh the
         // overdue panel so the contact drops off if it was on it.
         // Keep the notes panel open so the AE can add another.
         await refreshOverdue();
-      } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      } catch (e) {
+        toast(`Failed: ${e.body?.error || e.message}`, 'error');
+      } finally {
+        btn.disabled = false; btn.innerHTML = origLabel;
+      }
     });
     await refreshNotes();
+    // v1.0.0m: load cached summary on open. If notes exist but no
+    // summary yet, the panel shows a hint to click Refresh.
+    const notesCount = ($('#ptn-n-list').querySelectorAll('[data-note-del]') || []).length;
+    await loadSummary(notesCount);
   }
 })();
 </script>

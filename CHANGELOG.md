@@ -5,6 +5,96 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0m] — 2026-05-21 — AI synthesis for partner-contact notes
+
+Ben asked for partner-contact notes to have the same kind of AI
+synthesis that lead-side calls already have, but with a contact-centric
+schema. The synthesis answers "what do I need to remember before my
+next call with this person."
+
+### Synthesis schema (7 fields)
+
+```json
+{
+  "summary":                    "2-3 sentences on the most recent conversation",
+  "accounts_discussed":         ["account + 1-line context they mentioned"],
+  "updates_on_prior_accounts":  ["account + what's changed since"],
+  "territory_info":             ["geography / segment / book / managers"],
+  "challenges":                 ["frictions they surfaced"],
+  "opportunities":              ["openings they see"],
+  "additional_info":            "free text — comp, manager prefs, siblings"
+}
+```
+
+Arrays cap at 6 entries each. None values are dropped (we don't let
+the literal string "None" leak through). Plain English; no marketing
+tone — same writing rules as lead-side synthesis.
+
+### Plumbing
+
+- **`ai_summary.synthesise_partner_contact_conversation(payload)`** —
+  new function paralleling `synthesise_lead`. Same model, same
+  best-effort failure behaviour (returns None on missing API key or
+  errors; never raises).
+- **`partner_contact_summary_store`** — new tiny store mirroring
+  `lead_summary_store`. JSON file per contact at
+  `cache/partner_contact_summaries/<partner_slug>/<contact_id>.json`.
+- **`_refresh_partner_contact_summary(partner_id, contact_id)`** —
+  server-side helper that gathers (contact + partner + full note
+  history with the most-recent flagged), calls the AI, caches the
+  result. Shared by the add-note path + the explicit refresh endpoint.
+
+### Endpoints
+
+- `POST /api/partners/<pid>/contacts/<cid>/notes` — now returns
+  `{ note, notes, contact, summary }`. The summary key is the freshly
+  re-synthesised payload (or null if AI is off).
+- `GET  /api/partners/<pid>/contacts/<cid>/summary` — returns the
+  cached payload without re-running Claude. Used to populate the
+  modal on open.
+- `POST /api/partners/<pid>/contacts/<cid>/summary` — forces a refresh
+  (the ✨ Refresh summary button in the modal).
+
+### UI
+
+`openContactNotes` modal grew a synthesis panel at the top:
+- Orange-tinted card matching the lead drawer's summary style
+- Each of the 7 fields rendered with its own colour-coded section
+  header (green for accounts_discussed, yellow for updates_on_prior,
+  blue for territory, red for challenges, orange for opportunities)
+- ✨ Refresh button in the modal header to re-synthesise on demand
+- Auto-loads cached summary on modal open
+- Auto-refreshes after every Add-note save (server returns the new
+  summary in the same response, no extra round-trip)
+- When AI is off, surfaces a friendly hint to set
+  `ANTHROPIC_API_KEY` rather than silently skipping
+
+### Tests
+- 448 total (+9). New `tests/test_partner_contact_summary.py` covers:
+  - Store round-trips (save/load/delete)
+  - Synthesis normalisation (arrays cap at 6, None entries dropped,
+    missing fields defaulted)
+  - Endpoint integration: add-note returns summary key, GET returns
+    cached payload, POST refreshes, friendly message when AI is off
+  - Caching: mocked synthesis persists across GET
+
+### Test isolation regression caught + fixed
+While adding the new test class, found that the existing
+`test_partner_touch_cadence` started failing when run after the new
+file. Root cause: my test's tearDown was unconditionally popping
+`SKIP_COMMAND_CENTRE_SEED` from os.environ, which unset a flag set
+by the test runner on the command line. The next test class's
+`importlib.import_module("server")` then triggered the auto-seed,
+polluting its temp dir with 137 contacts. Fix: snapshot the original
+env value in setUp and restore it in tearDown.
+
+### Files touched
+- `ai_summary.py` — new prompt + `synthesise_partner_contact_conversation`
+- `partner_contact_summary_store.py` — new module
+- `server.py` — import + helper + 2 new endpoints + updated notes-add
+- `qualify.html` — `openContactNotes` modal grew the summary panel
+- `tests/test_partner_contact_summary.py` — new file (9 tests)
+
 ## [1.0.0l] — 2026-05-21 — Country + Region as separate columns
 
 Ben pointed out the partner contacts table jammed "Region · Country"

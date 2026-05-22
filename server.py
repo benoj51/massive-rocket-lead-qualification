@@ -38,6 +38,7 @@ import audit
 import bant_health
 import calls_store
 import lead_contact_notes_store
+import partner_contact_summary_store
 import lead_partner_assignments
 import partner_contacts_store
 import partner_notes_store
@@ -2112,13 +2113,96 @@ def api_partner_notes_add(partner_id: str, contact_id: str):
     audit.log_event("partner_note_added", actor=_actor(),
                     partner_id=partner_id, contact_id=contact_id,
                     note_id=note["id"], touched=bool(touched))
+    # v1.0.0m: re-run the partner-contact conversation synthesis after
+    # every note save, so the summary panel reflects the latest add.
+    # Best-effort — failure is logged, never blocks the user-visible save.
+    fresh_summary = _refresh_partner_contact_summary(partner_id, contact_id)
     return jsonify({
         "note": note,
         "notes": partner_notes_store.list_notes(partner_id, contact_id),
         # Returning the freshly-bumped contact so the UI can update the
         # "Last touch" cell in-place without another fetch.
         "contact": partner_contacts_store.annotate_touch_state(touched) if touched else None,
+        "summary": fresh_summary,
     })
+
+
+def _refresh_partner_contact_summary(partner_id: str, contact_id: str):
+    """Build the payload + run Claude + cache. Returns the summary dict
+    or None if AI is unconfigured / errored. Wrapped here so the
+    add-note path + the explicit refresh endpoint share one
+    implementation."""
+    try:
+        import ai_summary
+        contact = partner_contacts_store.get_contact(partner_id, contact_id)
+        if contact is None:
+            return None
+        partner = partners_store.get_partner(partner_id)
+        notes = partner_notes_store.list_notes(partner_id, contact_id)
+        if not notes:
+            # No notes to synthesise. Clear any stale cached summary.
+            partner_contact_summary_store.delete(partner_id, contact_id)
+            return None
+        # The notes list is already ordered newest-first by the store.
+        # We pass them as-is and flag the head as the most recent so the
+        # prompt can lean on it for the `summary` field.
+        notes_for_prompt = []
+        for i, n in enumerate(notes):
+            entry = dict(n)
+            entry["is_most_recent"] = (i == 0)
+            notes_for_prompt.append(entry)
+        payload = {
+            "partner": {
+                "id": partner.get("id") if partner else partner_id,
+                "name": (partner or {}).get("name") or "",
+                "type": (partner or {}).get("type") or "",
+            },
+            "contact": {
+                "id": contact.get("id"),
+                "name": contact.get("name"),
+                "title": contact.get("title"),
+                "email": contact.get("email"),
+                "territories": contact.get("territories") or [],
+                "regions": contact.get("regions") or [],
+                "country": contact.get("country"),
+                "industries": contact.get("industries") or [],
+                "mr_owner": contact.get("mr_owner"),
+            },
+            "notes": notes_for_prompt,
+        }
+        summary = ai_summary.synthesise_partner_contact_conversation(payload)
+        if summary is None:
+            return None
+        saved = partner_contact_summary_store.save(partner_id, contact_id, summary)
+        return saved
+    except Exception as e:
+        log.warning("Partner-contact summary refresh failed for %s/%s: %s",
+                     partner_id, contact_id, e)
+        return None
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/summary",
+            methods=["GET"])
+def api_partner_contact_summary_get(partner_id: str, contact_id: str):
+    """Return the cached partner-contact synthesis. The UI calls this
+    when opening the notes modal to render the summary panel without
+    spending tokens on every open."""
+    summary = partner_contact_summary_store.load(partner_id, contact_id)
+    return jsonify({"summary": summary})
+
+
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/summary",
+            methods=["POST"])
+def api_partner_contact_summary_refresh(partner_id: str, contact_id: str):
+    """Force a fresh synthesis run. Used by the ✨ Refresh button in the
+    notes modal — useful if the AE wants to re-synthesise after editing
+    notes manually, or when AI was off when the last note was added."""
+    summary = _refresh_partner_contact_summary(partner_id, contact_id)
+    if summary is None:
+        return jsonify({"summary": None,
+                         "error": "AI is off or synthesis failed — set "
+                                  "ANTHROPIC_API_KEY in the environment."}), 200
+    return jsonify({"summary": summary})
 
 
 # v0.10.0z: overdue contacts roster — Today/overview surface.
