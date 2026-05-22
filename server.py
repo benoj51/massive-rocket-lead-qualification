@@ -2831,6 +2831,44 @@ def api_admin_seed_command_centre():
         return jsonify({"error": str(e)}), 500
 
 
+# v1.0.0t: Dashboard endpoint ----------------------------------------------
+
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    """Manager dashboard: touch/call counts per MR owner + per partner
+    over a configurable time window. Optionally scoped to a single owner.
+
+    Query params:
+      window — days to aggregate over (default 7; clamped 1..365)
+      owner  — filter to a single mr_owner name (case-insensitive)
+    """
+    import dashboard
+    try:
+        window = max(1, min(365, int(request.args.get("window", "7"))))
+    except ValueError:
+        window = 7
+    owner_filter = (request.args.get("owner") or "").strip() or None
+
+    # Pipeline rows fetched best-effort; if Notion is unavailable we
+    # still return partner-side stats so the dashboard isn't blank.
+    pipeline_rows: list[dict] = []
+    try:
+        sync = NotionSync()
+        pipeline_rows = sync.list_pipeline(limit=500)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Dashboard: pipeline fetch failed (continuing without lead stats): %s", e)
+    try:
+        payload = dashboard.build_dashboard(
+            window_days=window,
+            owner_filter=owner_filter,
+            pipeline_rows=pipeline_rows,
+        )
+        return jsonify(payload)
+    except Exception as e:
+        log.exception("Dashboard build failed")
+        return jsonify({"error": str(e)}), 500
+
+
 # v1.0.0n: Forecasting endpoints ------------------------------------------
 
 @app.route("/api/forecast", methods=["GET"])

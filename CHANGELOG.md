@@ -5,6 +5,94 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0t] — 2026-05-21 — 📊 Team Activity Dashboard
+
+Ben asked for a manager surface — "looking over the team, see number
+of touches/calls etc from a partnership perspective." New Dashboard
+nav tab aggregating activity by MR owner + by partner over a sliding
+window.
+
+### What it shows
+
+A new **📊 Dashboard** tab between Forecast and Project Build:
+
+**KPI row** (5 cards):
+- Total touches in window (partner notes + lead calls combined)
+- Partner notes (touches logged on partner contacts)
+- Lead calls (touches logged on prospect leads)
+- New leads (proxy: last_edited inside the window)
+- Cadence compliance % (active contacts within cadence ÷ total)
+
+**Touch-type breakdown**: chip row showing how many call / email /
+intro / touch / other entries hit each owner this window.
+
+**By MR Owner table** (the manager view):
+| Owner | Touches | Partner contacts | Overdue | Leads owned | Active leads |
+- Sorted by touches descending; goose-eggs included so you can see
+  who's NOT active
+- Role + region in the subtitle ("Daniel Ergueta · Account Manager · AMER")
+- Overdue column red-highlighted when > 0
+
+**By Partner table**:
+| Partner | Touches | Contacts | Overdue | Never touched | Leads sourced |
+- Same shape; pivots the activity to the partner side
+- Never-touched column yellow-highlighted
+
+**Coverage health card** at the bottom — single big % with breakdown
+(active / within cadence / overdue / never touched).
+
+### Window + filter
+- Top toggle: **7 days** / **30 days** (default) / **90 days**
+- Owner dropdown: filter to a single MR owner (uses the v1.0.0o
+  central roster); empty = "All owners"
+
+### Attribution model
+We attribute activity by the **current `mr_owner` on each contact**
+(or `owner` on each lead), not by who actually typed the note. This
+is the right semantic for a manager: "how much work has Daniel done"
+means "touches on Daniel's book". If you reassign a contact to a new
+owner, the activity follows. Note `author` field is unreliable today
+because the UI doesn't set `X-Actor` (defaults to "anon"); fixing
+that is a future iteration if needed.
+
+### Endpoint
+- `GET /api/dashboard?window=<int>&owner=<name>` — returns the full
+  payload. Pipeline rows fetched best-effort; if Notion is down the
+  dashboard still loads with partner-side stats.
+
+### Tests
+- 528 total (+13). `tests/test_dashboard.py` covers:
+  - Window filtering (in vs out)
+  - Per-owner attribution via mr_owner
+  - Per-owner table includes inactive owners (zero rows for managers
+    looking for gaps)
+  - Owner-filter param scopes both totals + the per-owner list
+  - Per-partner rollup
+  - Coverage compliance math (3/4 = 75%)
+  - Never-touched flag for old contacts that have never been logged
+  - Inactive (status=left/dormant) contacts excluded from coverage
+  - Empty roster: 0 KPIs + 12 zero owner rows (no crash)
+  - Endpoint: shape, window clamping (1..365), graceful degradation
+    when Notion is unavailable
+
+### Files touched
+- `dashboard.py` (new) — pure-logic aggregator
+- `server.py` — `/api/dashboard` endpoint
+- `qualify.html` — new view markup, KPI cards, two tables, coverage
+  health card, window + owner filter wiring
+- `tests/test_dashboard.py` (new, 13 tests)
+
+### What's next (if useful)
+- Trends — weekly touches as a line chart (requires a tiny SVG
+  renderer; not in MVP)
+- Pipeline value per owner — already in the Forecast view's "By
+  Owner" slice, surface a link
+- Manager comments / kudos — surface a "🎉 most touches this week"
+  card automatically
+- "Stale leads" surface — leads with no calls in 14+ days (the
+  inverse of the new-leads metric)
+- Activity heatmap (day-of-week × hour) — power-user visualisation
+
 ## [1.0.0s] — 2026-05-21 — Code review fixes (H1, H3, M1, M3, M4)
 
 Five issues from the code-review pass on v1.0.0h..r. Each one is small

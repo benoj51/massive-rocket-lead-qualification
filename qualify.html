@@ -694,6 +694,7 @@
     <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
     <button id="nav-forecast" type="button">📈 Forecast</button>
+    <button id="nav-dashboard" type="button">📊 Dashboard</button>
     <button id="nav-build" type="button">Project Build</button>
     <button id="nav-partners" type="button">Partners</button>
   </nav>
@@ -1042,6 +1043,48 @@
       <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
         Only leads with a known sales stage (Discovery+) and a numeric deal value count toward the forecast.
         Disqualified / On Hold / Closed Lost are excluded. Leads without an Expected Close Date land in the current quarter — see the "needs close date" list below to clean up.
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD VIEW (v1.0.0t) ================================= -->
+  <section id="view-dashboard" class="view">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h2 style="margin:0;">📊 Team Activity Dashboard</h2>
+          <p class="muted" style="margin:4px 0 0;">Touches + calls + coverage across MR owners and partners. Attribution by the current <code style="font-family:var(--mono);">mr_owner</code> on each contact — when ownership reassigns, the activity follows the contact.</p>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button id="db-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
+        </div>
+      </div>
+      <!-- Window + owner filter -->
+      <div style="margin:14px 0 6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Window:</span>
+        <button class="chip" data-db-window="7"  type="button" style="font-size:11px;padding:4px 10px;">7 days</button>
+        <button class="chip active" data-db-window="30" type="button" style="font-size:11px;padding:4px 10px;">30 days</button>
+        <button class="chip" data-db-window="90" type="button" style="font-size:11px;padding:4px 10px;">90 days</button>
+        <span style="flex:1;"></span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Owner:</span>
+        <select id="db-owner-filter" data-mr-owner-select style="padding:5px 10px;font-size:12px;">
+          <option value="">All owners</option>
+        </select>
+      </div>
+      <!-- KPI cards -->
+      <div id="db-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0 8px;"></div>
+      <!-- Touch type breakdown -->
+      <div id="db-types" style="margin:14px 0;"></div>
+      <!-- By owner table -->
+      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">By MR owner</div>
+      <div id="db-by-owner"></div>
+      <!-- By partner table -->
+      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">By partner</div>
+      <div id="db-by-partner"></div>
+      <!-- Coverage health -->
+      <div id="db-coverage" style="margin-top:18px;"></div>
+      <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
+        Touches = partner notes + lead-side calls inside the window. Cadence compliance = active partner contacts within their cadence ÷ total active. New leads = leads with last_edited inside the window (best-effort proxy until we add a first_seen field).
       </div>
     </div>
   </section>
@@ -6397,6 +6440,21 @@
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
+    // v1.0.0t: Dashboard view wiring.
+    $('#nav-dashboard').addEventListener('click', () => { switchView('dashboard'); loadDashboard(); });
+    $('#db-refresh').addEventListener('click', loadDashboard);
+    document.querySelectorAll('[data-db-window]').forEach(b => {
+      b.addEventListener('click', () => {
+        dashboardState.window = parseInt(b.dataset.dbWindow, 10) || 7;
+        document.querySelectorAll('[data-db-window]').forEach(x =>
+          x.classList.toggle('active', x.dataset.dbWindow === String(dashboardState.window)));
+        loadDashboard();
+      });
+    });
+    $('#db-owner-filter').addEventListener('change', (e) => {
+      dashboardState.owner = e.target.value || '';
+      loadDashboard();
+    });
     // v1.0.0p: agency add/edit form wiring in the lead drawer.
     const agSaveBtn = document.getElementById('ld-ag-save');
     const agClearBtn = document.getElementById('ld-ag-clear');
@@ -6674,6 +6732,151 @@
     // v0.10.0y: Partners view event wiring (idempotent).
     $('#nav-partners').addEventListener('click', () => switchView('partners'));
     $('#ptn-add-partner').addEventListener('click', openAddPartnerForm);
+  }
+
+  // =============================================================
+  //  Dashboard view (v1.0.0t) — manager surface
+  // =============================================================
+  const dashboardState = { data: null, window: 30, owner: '' };
+
+  async function loadDashboard() {
+    const btn = $('#db-refresh');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Loading…';
+    try {
+      const qs = new URLSearchParams({ window: String(dashboardState.window) });
+      if (dashboardState.owner) qs.set('owner', dashboardState.owner);
+      const data = await jsonFetch(`/api/dashboard?${qs.toString()}`);
+      dashboardState.data = data;
+      renderDashboard();
+    } catch (e) {
+      $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    } finally {
+      btn.disabled = false; btn.innerHTML = '↻ Refresh';
+    }
+  }
+
+  function renderDashboard() {
+    const d = dashboardState.data;
+    if (!d) return;
+    const t = d.totals || {};
+    const card = (label, value, sub) => `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(label)}</div>
+        <div style="font-size:22px;font-weight:600;color:var(--text);line-height:1.1;">${escapeHtml(String(value))}</div>
+        ${sub ? `<div class="muted" style="font-size:10px;margin-top:4px;">${sub}</div>` : ''}
+      </div>
+    `;
+    $('#db-kpis').innerHTML = [
+      card('Total touches', t.touches || 0,
+            `last ${d.window_days}d · partner + lead activity`),
+      card('Partner notes', t.partner_notes || 0,
+            'logged on partner contacts'),
+      card('Lead calls', t.lead_calls || 0,
+            'logged on prospect leads'),
+      card('New leads',  t.new_leads || 0,
+            `edited in window (proxy)`),
+      card('Cadence', `${t.cadence_compliance_pct || 0}%`,
+            'active contacts within cadence'),
+    ].join('');
+
+    // Touch type breakdown — pills row
+    const typesEl = $('#db-types');
+    const byType = t.by_type || {};
+    const typeKeys = Object.keys(byType).sort((a, b) => (byType[b] || 0) - (byType[a] || 0));
+    if (typeKeys.length) {
+      typesEl.innerHTML = `
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">Touch types in window</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${typeKeys.map(k => `
+            <span class="tag signal" style="font-size:11px;padding:4px 10px;">
+              ${escapeHtml(k)} <strong style="margin-left:4px;color:var(--accent-text);">${byType[k]}</strong>
+            </span>
+          `).join('')}
+        </div>
+      `;
+    } else {
+      typesEl.innerHTML = '<div class="muted" style="font-size:12px;font-style:italic;">No touches logged in this window.</div>';
+    }
+
+    // By owner table
+    const owners = d.by_owner || [];
+    $('#db-by-owner').innerHTML = owners.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:var(--surface-2);">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Owner</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Touches</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Partner contacts</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);">Overdue</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Leads owned</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);">Active leads</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${owners.map(o => `
+            <tr>
+              <td style="padding:8px 10px;font-weight:500;">${escapeHtml(o.name)}<div class="muted" style="font-size:10px;">${escapeHtml(o.role || '')} · ${escapeHtml(o.region || '')}</div></td>
+              <td style="padding:8px 10px;text-align:right;font-weight:600;color:${o.touches > 0 ? 'var(--accent-text)' : 'var(--text-muted)'};">${o.touches || 0}</td>
+              <td style="padding:8px 10px;text-align:right;">${o.partner_contacts || 0}</td>
+              <td style="padding:8px 10px;text-align:right;color:${o.partner_contacts_overdue > 0 ? 'var(--red)' : 'var(--text-muted)'};font-weight:${o.partner_contacts_overdue > 0 ? '600' : '400'};">${o.partner_contacts_overdue || 0}</td>
+              <td style="padding:8px 10px;text-align:right;">${o.leads_owned || 0}</td>
+              <td style="padding:8px 10px;text-align:right;color:var(--green);font-weight:500;">${o.leads_active || 0}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '<div class="muted" style="font-size:12px;padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">No MR owners configured.</div>';
+
+    // By partner table
+    const partners = d.by_partner || [];
+    $('#db-by-partner').innerHTML = partners.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:var(--surface-2);">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Partner</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Touches</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Contacts</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);">Overdue</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);">Never touched</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);">Leads sourced</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${partners.map(p => `
+            <tr>
+              <td style="padding:8px 10px;font-weight:500;">${escapeHtml(p.name)}</td>
+              <td style="padding:8px 10px;text-align:right;font-weight:600;color:${p.touches > 0 ? 'var(--accent-text)' : 'var(--text-muted)'};">${p.touches || 0}</td>
+              <td style="padding:8px 10px;text-align:right;">${p.contacts || 0}</td>
+              <td style="padding:8px 10px;text-align:right;color:${p.contacts_overdue > 0 ? 'var(--red)' : 'var(--text-muted)'};font-weight:${p.contacts_overdue > 0 ? '600' : '400'};">${p.contacts_overdue || 0}</td>
+              <td style="padding:8px 10px;text-align:right;color:${p.contacts_never_touched > 0 ? 'var(--yellow)' : 'var(--text-muted)'};">${p.contacts_never_touched || 0}</td>
+              <td style="padding:8px 10px;text-align:right;color:var(--green);">${p.leads_sourced || 0}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '<div class="muted" style="font-size:12px;padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">No partners registered.</div>';
+
+    // Coverage health
+    const cov = d.coverage || {};
+    const pct = cov.compliance_pct || 0;
+    const pctColor = pct >= 75 ? 'var(--green)' : pct >= 50 ? 'var(--yellow)' : 'var(--red)';
+    $('#db-coverage').innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Coverage health</div>
+            <div class="muted" style="font-size:10px;margin-top:2px;">% of active partner contacts within their cadence — the higher the better.</div>
+          </div>
+          <div style="font-size:28px;font-weight:700;color:${pctColor};">${pct}%</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+          <div style="font-size:11px;"><span class="muted">Active contacts</span><div style="font-size:16px;font-weight:600;color:var(--text);">${cov.active_contacts || 0}</div></div>
+          <div style="font-size:11px;"><span class="muted">Within cadence</span><div style="font-size:16px;font-weight:600;color:var(--green);">${cov.within_cadence || 0}</div></div>
+          <div style="font-size:11px;"><span class="muted">Overdue</span><div style="font-size:16px;font-weight:600;color:var(--red);">${cov.overdue || 0}</div></div>
+          <div style="font-size:11px;"><span class="muted">Never touched</span><div style="font-size:16px;font-weight:600;color:var(--yellow);">${cov.never_touched || 0}</div></div>
+        </div>
+      </div>
+    `;
   }
 
   // =============================================================
