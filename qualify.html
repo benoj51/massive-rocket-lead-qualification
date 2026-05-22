@@ -912,6 +912,18 @@
             <div id="chk-sourced-for" class="filters" style="margin-top:0;"></div>
           </div>
         </div>
+        <!-- v1.0.0p: incumbent capture at qualification time. Optional —
+             AE can add more later via the lead drawer's Agencies section. -->
+        <div class="row row-2" style="margin-bottom: 12px;">
+          <div>
+            <label>Incumbent agency <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— who runs their Braze / CDP / data work today?</span></label>
+            <input id="sel-incumbent" type="text" placeholder="e.g. VML, Razorfish, in-house, none" />
+          </div>
+          <div>
+            <label>Incumbent scope <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— what they do</span></label>
+            <input id="sel-incumbent-scope" type="text" placeholder="e.g. Braze ops, campaign exec, loyalty" />
+          </div>
+        </div>
         <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the pipeline.</p>
         <div class="btn-row">
           <button id="btn-notion" class="btn" type="button">Save lead</button>
@@ -1530,6 +1542,56 @@
       <summary><span data-section-label>Project &amp; Pricing</span></summary>
       <div class="section-body">
         <div id="ld-project-summary" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    </details>
+
+    <!-- v1.0.0p: AGENCIES section — incumbent + previous. Sits between
+         Qualification and Contacts because competitive context is the
+         second thing an AE wants to know after the basics. -->
+    <details class="group" data-section="agencies">
+      <summary>
+        <span><span data-section-label>Agencies</span> <span class="section-count" id="ld-agencies-count"></span></span>
+      </summary>
+      <div class="section-body">
+        <p class="muted" style="font-size:11px;margin:0 0 10px;">
+          Who's running their Braze/CDP/data work today (incumbent), and who they've used before (previous). Feeds the AI summary's displacement angle.
+        </p>
+        <!-- Add form -->
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">+ Add agency</div>
+          <div class="row row-2" style="gap:8px;margin-bottom:6px;">
+            <div class="field" style="margin:0;">
+              <input id="ld-ag-name" type="text" placeholder="Agency name (e.g. VML)" style="width:100%;" />
+            </div>
+            <div class="field" style="margin:0;">
+              <select id="ld-ag-type" style="width:100%;">
+                <option value="incumbent">Incumbent (current)</option>
+                <option value="previous">Previous</option>
+              </select>
+            </div>
+          </div>
+          <div class="row row-2" style="gap:8px;margin-bottom:6px;">
+            <div class="field" style="margin:0;">
+              <input id="ld-ag-scope" type="text" placeholder="Scope (e.g. Braze ops, loyalty)" style="width:100%;" />
+            </div>
+            <div class="field" style="margin:0;">
+              <div class="row row-2" style="gap:6px;">
+                <input id="ld-ag-since" type="date" title="Since (start of relationship)" style="width:100%;" />
+                <input id="ld-ag-until" type="date" title="Until (end — leave blank if still active)" style="width:100%;" />
+              </div>
+            </div>
+          </div>
+          <div class="field" style="margin:0 0 8px;">
+            <textarea id="ld-ag-notes" rows="2" placeholder="Notes — quality of execution, exec dynamic, displacement angle…"></textarea>
+          </div>
+          <div class="btn-row">
+            <button id="ld-ag-save" class="btn" type="button" style="padding:4px 12px;font-size:11px;">Add agency</button>
+            <button id="ld-ag-clear" class="btn ghost" type="button" style="padding:4px 12px;font-size:11px;">Clear</button>
+            <span id="ld-ag-edit-id" data-edit-id="" style="display:none;"></span>
+          </div>
+        </div>
+        <!-- List -->
+        <div id="ld-agencies-list" class="muted" style="font-size:12px;">Loading…</div>
       </div>
     </details>
 
@@ -2448,6 +2510,28 @@
           state.currentResult.saved_id = res.page_id;
           renderStakeholders(state.currentResult);
         }
+        // v1.0.0p: if the AE typed an incumbent agency on the qualify
+        // form, persist it as an incumbent entry now that the lead has
+        // an id. Best-effort — Notion-side save already succeeded.
+        const incumbentName = ($('#sel-incumbent').value || '').trim();
+        if (incumbentName) {
+          try {
+            await jsonFetch(`/api/leads/${encodeURIComponent(res.page_id)}/agencies`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: incumbentName,
+                type: 'incumbent',
+                scope: ($('#sel-incumbent-scope').value || '').trim() || null,
+              }),
+            });
+            toast(`Incumbent recorded: ${incumbentName}`, 'success');
+            $('#sel-incumbent').value = '';
+            $('#sel-incumbent-scope').value = '';
+          } catch (e) {
+            toast(`Lead saved but incumbent capture failed: ${e.body?.error || e.message}`, 'error');
+          }
+        }
         // v0.10.0 Phase B: if the AE accepted a parent suggestion before
         // the lead was saved, auto-link it now that the lead has an id.
         if (state.pendingParentLink) {
@@ -2607,6 +2691,141 @@
       $('#pb-new-name').value = companyName || '';
       pbLoadProject(leadId);
     }, 50);
+  }
+
+  // v1.0.0p: agencies — incumbent + previous. Load + render + the
+  // save/edit/delete handlers. Mirrors the lead-side contacts pattern.
+  async function loadLeadAgencies(leadId) {
+    if (!leadId) return;
+    const listEl = $('#ld-agencies-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<span class="spinner"></span> Loading agencies…';
+    try {
+      const data = await jsonFetch(`/api/leads/${encodeURIComponent(leadId)}/agencies`);
+      renderLeadAgencies(data.agencies || []);
+    } catch (e) {
+      listEl.innerHTML = `<div style="color:var(--red);font-size:12px;">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function renderLeadAgencies(rows) {
+    const listEl = $('#ld-agencies-list');
+    const countEl = $('#ld-agencies-count');
+    if (countEl) {
+      const inc = rows.filter(r => r.type === 'incumbent').length;
+      const prev = rows.length - inc;
+      countEl.textContent = rows.length
+        ? `(${inc} incumbent${inc === 1 ? '' : 's'}${prev ? ', ' + prev + ' previous' : ''})`
+        : '';
+    }
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;text-align:center;background:var(--surface);border:1px dashed var(--border);border-radius:6px;">No agency relationships recorded yet — add an incumbent above.</div>';
+      return;
+    }
+    const row = (r) => {
+      const isIncumbent = r.type === 'incumbent';
+      const window_ = [r.since, r.until].filter(Boolean).join(' → ') ||
+                       (isIncumbent ? 'ongoing' : '');
+      const bg = isIncumbent ? 'rgba(255,77,42,.06)' : 'var(--surface)';
+      const borderColor = isIncumbent ? 'rgba(255,77,42,.30)' : 'var(--border)';
+      const badge = isIncumbent
+        ? '<span class="tag signal" style="background:rgba(255,77,42,.18);color:var(--accent-text);font-size:9px;">INCUMBENT</span>'
+        : '<span class="tag signal" style="background:var(--surface-2);color:var(--text-muted);font-size:9px;">PREVIOUS</span>';
+      return `
+        <div style="background:${bg};border:1px solid ${borderColor};border-radius:8px;padding:10px 12px;margin-bottom:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="min-width:0;flex:1;">
+              <div style="font-weight:600;font-size:13px;color:var(--text);">${escapeHtml(r.name)} ${badge}</div>
+              <div class="muted" style="font-size:11px;margin-top:2px;">
+                ${r.scope ? escapeHtml(r.scope) : '—'}${window_ ? ' · ' + escapeHtml(window_) : ''}
+              </div>
+              ${r.notes ? `<div style="font-size:12px;color:var(--text-dim);margin-top:6px;white-space:pre-wrap;">${escapeHtml(r.notes)}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button class="btn ghost" type="button" data-ag-edit="${escapeAttr(r.id)}" style="padding:2px 8px;font-size:10px;" title="Edit">✎</button>
+              <button class="btn ghost" type="button" data-ag-del="${escapeAttr(r.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Delete">×</button>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+    listEl.innerHTML = rows.map(row).join('');
+    // Wire edit + delete buttons.
+    listEl.querySelectorAll('[data-ag-edit]').forEach(b => {
+      b.addEventListener('click', () => {
+        const r = rows.find(x => x.id === b.dataset.agEdit);
+        if (!r) return;
+        $('#ld-ag-name').value = r.name || '';
+        $('#ld-ag-type').value = r.type || 'incumbent';
+        $('#ld-ag-scope').value = r.scope || '';
+        $('#ld-ag-since').value = r.since || '';
+        $('#ld-ag-until').value = r.until || '';
+        $('#ld-ag-notes').value = r.notes || '';
+        $('#ld-ag-edit-id').dataset.editId = r.id;
+        $('#ld-ag-save').textContent = 'Save changes';
+        $('#ld-ag-name').focus();
+        $('#ld-ag-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+    listEl.querySelectorAll('[data-ag-del]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!window.confirm('Remove this agency entry?')) return;
+        try {
+          await jsonFetch(`/api/leads/${encodeURIComponent(drawerState.id)}/agencies/${encodeURIComponent(b.dataset.agDel)}`,
+                          { method: 'DELETE' });
+          await loadLeadAgencies(drawerState.id);
+        } catch (e) {
+          toast(`Delete failed: ${e.body?.error || e.message}`, 'error');
+        }
+      });
+    });
+  }
+
+  function _resetAgencyForm() {
+    $('#ld-ag-name').value = '';
+    $('#ld-ag-type').value = 'incumbent';
+    $('#ld-ag-scope').value = '';
+    $('#ld-ag-since').value = '';
+    $('#ld-ag-until').value = '';
+    $('#ld-ag-notes').value = '';
+    $('#ld-ag-edit-id').dataset.editId = '';
+    $('#ld-ag-save').textContent = 'Add agency';
+  }
+
+  async function _saveAgencyFromForm() {
+    if (!drawerState.id) return;
+    const name = ($('#ld-ag-name').value || '').trim();
+    if (!name) { toast('Agency name required', 'error'); return; }
+    const editId = $('#ld-ag-edit-id').dataset.editId || '';
+    const payload = {
+      name,
+      type:  $('#ld-ag-type').value || 'incumbent',
+      scope: ($('#ld-ag-scope').value || '').trim() || null,
+      since: $('#ld-ag-since').value || null,
+      until: $('#ld-ag-until').value || null,
+      notes: ($('#ld-ag-notes').value || '').trim() || null,
+    };
+    const btn = $('#ld-ag-save');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      const url = editId
+        ? `/api/leads/${encodeURIComponent(drawerState.id)}/agencies/${encodeURIComponent(editId)}`
+        : `/api/leads/${encodeURIComponent(drawerState.id)}/agencies`;
+      const method = editId ? 'PATCH' : 'POST';
+      await jsonFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      _resetAgencyForm();
+      await loadLeadAgencies(drawerState.id);
+      toast(editId ? 'Agency updated' : 'Agency added', 'success');
+    } catch (e) {
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
   }
 
   // v0.11.0: partner contacts assigned to this lead. Loads the
@@ -3809,6 +4028,8 @@
       // Load contacts + calls + project in parallel (page_id is the lead_id slug)
       loadLeadContacts(pageId);
       loadLeadPartnerContacts(pageId);
+      // v1.0.0p: agencies (incumbent + previous).
+      loadLeadAgencies(pageId);
       // v1.0.0g: surface Restore button if local cache appears empty
       // (no calls AND no contacts) AND a Notion backup exists.
       checkRestoreAvailability(pageId, lead);
@@ -6042,6 +6263,11 @@
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
+    // v1.0.0p: agency add/edit form wiring in the lead drawer.
+    const agSaveBtn = document.getElementById('ld-ag-save');
+    const agClearBtn = document.getElementById('ld-ag-clear');
+    if (agSaveBtn) agSaveBtn.addEventListener('click', _saveAgencyFromForm);
+    if (agClearBtn) agClearBtn.addEventListener('click', _resetAgencyForm);
     // v1.0.0n: Forecast view wiring.
     $('#fc-refresh').addEventListener('click', loadForecast);
     $('#fc-settings').addEventListener('click', openForecastSettings);

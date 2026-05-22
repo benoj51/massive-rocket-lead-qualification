@@ -37,6 +37,7 @@ import apollo
 import audit
 import bant_health
 import calls_store
+import lead_agencies_store
 import lead_contact_notes_store
 import partner_contact_summary_store
 import lead_partner_assignments
@@ -404,6 +405,75 @@ def api_lead_contact_notes_delete(lead_id: str, contact_id: str, note_id: str):
     if not ok:
         return jsonify({"error": "not_found"}), 404
     return jsonify({"deleted": True})
+
+
+# v1.0.0p: incumbent + previous agencies per lead -----------------------------
+
+@app.route("/api/leads/<lead_id>/agencies", methods=["GET"])
+def api_lead_agencies_list(lead_id: str):
+    """List agencies tracked against this lead — incumbent + previous."""
+    return jsonify({
+        "agencies": lead_agencies_store.list_agencies(lead_id),
+        "types":    lead_agencies_store.AGENCY_TYPES,
+    })
+
+
+@app.route("/api/leads/<lead_id>/agencies", methods=["POST"])
+def api_lead_agencies_add(lead_id: str):
+    """Create or upsert (when id supplied) an agency entry."""
+    body = request.get_json(silent=True) or {}
+    try:
+        saved = lead_agencies_store.save_agency(lead_id, body)
+    except lead_agencies_store.LeadAgenciesStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("lead_agency_saved", actor=_actor(),
+                    lead_id=lead_id, agency_id=saved["id"],
+                    type=saved["type"], name=saved["name"])
+    # Mirror to Notion so this survives Railway redeploys.
+    _mirror_state_to_notion(lead_id)
+    return jsonify({
+        "agency":   saved,
+        "agencies": lead_agencies_store.list_agencies(lead_id),
+    })
+
+
+@app.route("/api/leads/<lead_id>/agencies/<agency_id>", methods=["PATCH"])
+def api_lead_agencies_update(lead_id: str, agency_id: str):
+    """Update a specific agency entry by id. PATCH semantics: only the
+    fields supplied in the body are changed; everything else is
+    preserved from the existing record."""
+    body = request.get_json(silent=True) or {}
+    existing = lead_agencies_store.get_agency(lead_id, agency_id)
+    if existing is None:
+        return jsonify({"error": "not_found"}), 404
+    # Merge body over existing so the caller can send {notes: "..."}
+    # without having to re-send name + type every time.
+    merged = dict(existing)
+    merged.update({k: v for k, v in body.items() if v is not None or k in body})
+    merged["id"] = agency_id
+    try:
+        saved = lead_agencies_store.save_agency(lead_id, merged)
+    except lead_agencies_store.LeadAgenciesStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("lead_agency_updated", actor=_actor(),
+                    lead_id=lead_id, agency_id=agency_id)
+    _mirror_state_to_notion(lead_id)
+    return jsonify({
+        "agency":   saved,
+        "agencies": lead_agencies_store.list_agencies(lead_id),
+    })
+
+
+@app.route("/api/leads/<lead_id>/agencies/<agency_id>", methods=["DELETE"])
+def api_lead_agencies_delete(lead_id: str, agency_id: str):
+    ok = lead_agencies_store.delete_agency(lead_id, agency_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("lead_agency_deleted", actor=_actor(),
+                    lead_id=lead_id, agency_id=agency_id)
+    _mirror_state_to_notion(lead_id)
+    return jsonify({"deleted": True,
+                     "agencies": lead_agencies_store.list_agencies(lead_id)})
 
 
 # v1.0.0c (Tier 2a + 2b): cross-surface contact search + "My contacts".
@@ -1380,6 +1450,10 @@ def _gather_lead_context(lead_id: str) -> dict:
     ctx["calls_total"] = len(calls)
     # Contacts
     ctx["contacts"] = contacts_store.list_contacts(lead_id)
+    # v1.0.0p: agencies (incumbent + previous) — gives Claude the
+    # displacement angle ("VML runs Braze today, fired Razorfish in
+    # 2022 over data-quality issues").
+    ctx["agencies"] = lead_agencies_store.list_agencies(lead_id)
     # v0.10.0 Phase D: account-group context. If this lead is a child of a
     # parent (or is itself a parent), include sibling-brand state so Claude
     # can write portfolio-aware commentary ("Yum operating companies in

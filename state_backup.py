@@ -39,6 +39,7 @@ from typing import Any
 
 import calls_store
 import contacts_store
+import lead_agencies_store
 import lead_contact_notes_store
 import lead_summary_store
 import pricing_store
@@ -82,6 +83,9 @@ def gather(lead_id: str) -> dict[str, Any]:
     # AI summary.
     summary = lead_summary_store.load(lead_id)
 
+    # v1.0.0p: agencies — incumbent + previous.
+    agencies = lead_agencies_store._load_raw(lead_id)
+
     return {
         "schema_version": _SCHEMA_VERSION,
         "lead_id": lead_id,
@@ -93,6 +97,7 @@ def gather(lead_id: str) -> dict[str, Any]:
         "pricing": pricing_cfg,
         "roadmap": roadmap_dict,
         "summary": summary,
+        "agencies": agencies,
     }
 
 
@@ -206,6 +211,15 @@ def apply_backup(lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             summary["summary_restored"] = True
         except Exception as e:
             summary["summary_error"] = str(e)
+
+    # v1.0.0p: agencies — direct overwrite via the store's private writer.
+    agencies = payload.get("agencies") or []
+    if agencies:
+        try:
+            lead_agencies_store._write_raw(lead_id, agencies)
+            summary["agencies"] = len(agencies)
+        except Exception as e:
+            summary["agencies_error"] = str(e)
 
     return summary
 

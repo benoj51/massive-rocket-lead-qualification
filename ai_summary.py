@@ -224,9 +224,11 @@ knows about a sales lead into a tight summary the AE can scan in 15
 seconds. You receive: company info, the ICP score + status, the current
 project streams, MEDDPICC entries collected so far, any project scope
 notes, the full call/note history (synthesised + raw), the contact
-list, and optionally a `group` block with parent/sibling brand context
-(e.g. KFC's payload includes Yum! Brands as the parent plus Pizza Hut,
-Taco Bell, Habit Burger as sibling brands with their statuses).
+list, the AGENCY relationships (current + previous — competitive
+context for the displacement angle), and optionally a `group` block
+with parent/sibling brand context (e.g. KFC's payload includes Yum!
+Brands as the parent plus Pizza Hut, Taco Bell, Habit Burger as
+sibling brands with their statuses).
 
 Return ONE JSON object, no preamble, no markdown fences:
 
@@ -258,6 +260,18 @@ Rules:
 - Plain English. No em-dashes. No marketing tone.
 - If the data is thin (e.g. only one note), say so honestly in
   state_of_play.
+
+AGENCY CONTEXT (when present in `agencies`):
+- type="incumbent": the agency running this work TODAY. Surface the
+  displacement angle in state_of_play or risks ("VML runs their
+  Braze ops today — replace narrative needs a clean migration story
+  + retention guarantee"). If the incumbent is "in-house", flag the
+  build-vs-buy lens.
+- type="previous": agencies they USED to use. Useful pattern-matching
+  signal — frequent agency churn = retention risk; specific predecessor
+  = bring up if MR has reference cases of fixing what that agency
+  broke (e.g. "they fired Razorfish — MR has the case study on
+  fixing Razorfish-grade Braze sprawl, lead with that").
 
 GROUP CONTEXT (when present):
 - If `group.role == "child"`: the parent + sibling brands describe a

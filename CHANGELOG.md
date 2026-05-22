@@ -5,6 +5,114 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0p] — 2026-05-21 — Incumbent + previous agencies per lead
+
+Ben asked for the ability to track competitive context: who's running
+their Braze/CDP/data work TODAY (incumbent) and who they've used in
+the PAST (previous). Two entry points: at qualification time (capture
+the incumbent up-front so the AI summary frames the displacement
+angle from call 1), and after the fact in the lead drawer (add
+previous agencies as they surface in calls).
+
+### Data model
+
+Per-lead JSON file at `cache/lead_agencies/<lead_id>.json` —
+same pattern as `contacts_store` / `lead_contact_notes_store`. Each
+entry:
+```json
+{
+  "id": "12char-uuid",
+  "lead_id": "lead-slug",
+  "name": "VML",
+  "type": "incumbent" | "previous",
+  "scope": "Braze ops",
+  "since": "2023-04-01",
+  "until": null,
+  "notes": "Mediocre execution — replace narrative needs migration story",
+  "added_at": "2026-05-21T22:30:00Z",
+  "updated_at": "..."
+}
+```
+
+### Endpoints
+- `GET    /api/leads/<lead_id>/agencies`
+- `POST   /api/leads/<lead_id>/agencies` — create or upsert by id
+- `PATCH  /api/leads/<lead_id>/agencies/<agency_id>` — partial update
+  (only sends fields you want to change; name + type preserved)
+- `DELETE /api/leads/<lead_id>/agencies/<agency_id>`
+
+Every write mirrors to the Notion State Backup so agencies survive
+Railway cache wipes alongside calls + contacts + project.
+
+### AI synthesis updates
+- `_gather_lead_context` now includes `agencies` in the Claude
+  payload
+- `_LEAD_SUMMARY_SYSTEM_PROMPT` extended with an **AGENCY CONTEXT**
+  section that tells Claude how to use it:
+  - Incumbent → surface displacement angle in state_of_play or risks
+  - "in-house" incumbent → flag the build-vs-buy lens
+  - Previous churn → pattern-match retention risk ("they fire
+    agencies every 18mo")
+  - Specific predecessor MR has a case study against → lead with it
+
+### UI
+
+**Qualify form** — two new fields below sourced-for:
+- **Incumbent agency** text input ("VML / Razorfish / in-house")
+- **Incumbent scope** text input ("Braze ops / loyalty / campaign exec")
+
+When the AE clicks Save lead, the standard Notion upsert runs first;
+if either field has content, a POST follows to
+`/api/leads/<page_id>/agencies` to record the incumbent. The capture
+fields clear on success.
+
+**Lead drawer** — new collapsible "Agencies" section between
+Qualification and Contacts. Shows:
+- Inline add/edit form: name + type dropdown + scope + since/until
+  dates + notes textarea
+- List below, **incumbents-first** then alpha. Each row:
+  - Coloured panel (orange-tinted for incumbents, neutral for
+    previous)
+  - INCUMBENT / PREVIOUS badge
+  - Scope · since→until window
+  - Notes block
+  - ✎ Edit (loads back into the form) / × Delete buttons
+- Section count chip shows e.g. "(1 incumbent, 2 previous)"
+
+### state_backup integration
+- `gather()` includes `agencies` field
+- `apply_backup()` restores agencies via the store's `_write_raw`
+- Auto-mirrored after every agency create/update/delete (same path
+  call-saves already use)
+
+### Tests
+- 505 total (+15). `tests/test_lead_agencies.py` covers:
+  - Store: requires name, rejects unknown type, upsert by id,
+    incumbents-first sort, delete idempotency
+  - `summarise_for_ai()` includes type + scope + window
+  - All 4 endpoints (GET / POST / PATCH partial / DELETE)
+  - 400 on missing name, 404 on unknown id
+  - state_backup gather + restore round-trip preserves agencies
+
+### Files touched
+- `lead_agencies_store.py` (new)
+- `server.py` — 4 endpoints + import + context-gather extension
+- `state_backup.py` — gather + apply integration
+- `ai_summary.py` — prompt extended with AGENCY CONTEXT section
+- `qualify.html` — qualify form fields, drawer section, JS handlers
+- `tests/test_lead_agencies.py` (new, 15 tests)
+
+### What you'll see
+- **New lead from Qualify form**: optional Incumbent agency + scope
+  fields. Filled in → recorded automatically as `type: incumbent`.
+- **Existing lead drawer**: scroll past Qualification, the
+  **Agencies** section is right there. Add incumbents + previous,
+  edit/delete via the row buttons.
+- **AI lead summary** (when you refresh it): displacement-angle
+  framing automatically — e.g. "VML runs their Braze today, mediocre
+  exec — lead with the migration playbook MR ran for [similar
+  account]" instead of the generic "engage stakeholders" line.
+
 ## [1.0.0o] — 2026-05-21 — MR owners roster (single source of truth)
 
 Ben supplied the full Massive Rocket team — 12 people across CEO,
