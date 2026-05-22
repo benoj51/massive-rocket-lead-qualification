@@ -5,6 +5,77 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0r] — 2026-05-21 — Inline-editable MR owner dropdowns in list tables
+
+Ben asked: "need to be able to use dropdowns for MR owner even in the
+lists." Previously the dropdowns lived only in modal forms — re-assigning
+an owner in any list view meant opening the drawer/edit modal, picking
+the new owner, saving. This collapses that into a one-click change in
+the row.
+
+### Three list surfaces now have inline dropdowns
+- **Pipeline table** — Owner column on every lead row (both grouped
+  parent rows + flat rows)
+- **Partners table** — MR owner column on every partner row
+- **Partner contacts table** — MR owner column on every contact row
+  (under any partner's drilldown)
+
+### How it looks
+The cell reads as plain text by default (no chrome). Hover → background
+tint + border outline appear, signalling it's clickable. Click → native
+`<select>` opens with all 12 MR owners. Change → instant PATCH +
+success toast ("Owner updated → Daniel Ergueta"); failure reverts the
+selection + surfaces the error.
+
+### Plumbing
+- **`renderInlineOwnerCell(currentValue, entityType, ids, field)`** —
+  helper that returns a `<select class="inline-owner-cell">` with
+  `data-mr-owner-select` (so `hydrateOwnerSelects` populates it from
+  `/api/owners`) plus `data-inline-endpoint` + `data-inline-field`
+  encoding the PATCH target.
+  - Entity types: `lead` → `/api/lead/<id>` field=`owner`;
+    `partner` → `/api/partners/<id>` field=`owner`;
+    `partner_contact` → `/api/partners/<pid>/contacts/<cid>`
+    field=`mr_owner`.
+- **`wireInlineOwnerCells(root)`** — binds change handlers. Stops
+  event propagation so a pipeline-row click doesn't open the drawer
+  when the user is interacting with the select.
+- **CSS** `select.inline-owner-cell` — transparent until hover/focus,
+  appearance reset, disabled state during the PATCH round-trip.
+
+Every table render call site now does:
+```js
+tbody.innerHTML = rowsHtml;
+// ... wire other handlers ...
+hydrateOwnerSelects(tbody);
+wireInlineOwnerCells(tbody);
+```
+
+### Optimistic UX
+- On change, the select disables for the duration of the PATCH (subtle
+  opacity dim — no spinner needed; round-trip is <200ms).
+- Success → toast + the `data-original` value updates so a second
+  change is detected correctly.
+- Failure → select reverts to the previous owner; toast surfaces the
+  server error.
+
+### Skipped on purpose
+- **Overdue contacts card** — the mr_owner is shown inline in a
+  cramped meta line (last touched · Xd overdue · cadence · owner).
+  Adding a dropdown there would feel claustrophobic. The card is a
+  transient touch-or-dismiss surface, not a roster.
+- **Org chart node text** — same reason: it's a card meta line, not
+  a table.
+
+### Files touched
+- `qualify.html` — helpers (`renderInlineOwnerCell` + `wireInlineOwnerCells`),
+  CSS for `.inline-owner-cell`, 3 cell replacements, 3 wiring hooks.
+
+### What you'll see
+Open the Pipeline view, hover any row's Owner cell — it lights up.
+Click → pick a new owner from the dropdown → done. Same in the
+Partners table, same in any partner's contacts table.
+
 ## [1.0.0q] — 2026-05-21 — "Last call · <date>" on synthesised summaries
 
 Ben pointed out: the AI synthesis panels describe "the most recent
