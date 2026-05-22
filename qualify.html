@@ -667,6 +667,7 @@
   <nav>
     <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
+    <button id="nav-forecast" type="button">📈 Forecast</button>
     <button id="nav-build" type="button">Project Build</button>
     <button id="nav-partners" type="button">Partners</button>
   </nav>
@@ -966,6 +967,43 @@
         <div class="big">⌁</div>
         <div>No leads loaded yet.</div>
         <div class="muted" style="margin-top: 4px;">Click ↻ Refresh once Notion is configured.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FORECAST VIEW (v1.0.0n) ================================== -->
+  <section id="view-forecast" class="view">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h2 style="margin:0;">📈 Pipeline Forecast</h2>
+          <p class="muted" style="margin:4px 0 0;">Weighted quarterly bookings across every active lead.
+            Commit = Verbal+Signed · Best = Negotiation+ · Pipeline = Discovery+.</p>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button id="fc-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
+          <button id="fc-settings" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">⚙ Settings</button>
+        </div>
+      </div>
+      <!-- Top KPI row -->
+      <div id="fc-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 8px;"></div>
+      <!-- Slice toggle -->
+      <div style="margin:12px 0 6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Break down by:</span>
+        <button class="chip active" data-fc-slice="quarter" type="button" style="font-size:11px;padding:4px 10px;">Quarter</button>
+        <button class="chip" data-fc-slice="owner" type="button" style="font-size:11px;padding:4px 10px;">Owner</button>
+        <button class="chip" data-fc-slice="partner" type="button" style="font-size:11px;padding:4px 10px;">Partner source</button>
+        <button class="chip" data-fc-slice="vertical" type="button" style="font-size:11px;padding:4px 10px;">Vertical</button>
+        <button class="chip" data-fc-slice="region" type="button" style="font-size:11px;padding:4px 10px;">Region</button>
+      </div>
+      <div id="fc-slice" style="margin-top:8px;"></div>
+      <!-- Missing-value follow-up list -->
+      <div id="fc-missing" style="margin-top:18px;"></div>
+      <!-- Settings panel (hidden by default) -->
+      <div id="fc-settings-panel" style="display:none;margin-top:18px;padding:14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;"></div>
+      <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
+        Only leads with a known sales stage (Discovery+) and a numeric deal value count toward the forecast.
+        Disqualified / On Hold / Closed Lost are excluded. Leads without an Expected Close Date land in the current quarter — see the "needs close date" list below to clean up.
       </div>
     </div>
   </section>
@@ -1461,7 +1499,18 @@
         </div>
         <div class="row-2">
           <div class="field"><label>Region</label><input type="text" data-ld="region" /></div>
-          <div class="field"><label>Deal Size</label><input type="text" data-ld="deal_size" /></div>
+          <div class="field"><label>Deal Size <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— free text (e.g. £40k/month)</span></label><input type="text" data-ld="deal_size" /></div>
+        </div>
+        <!-- v1.0.0n: structured forecasting fields. -->
+        <div class="row-2">
+          <div class="field">
+            <label>Deal value (monthly GBP) <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— numeric, overrides Deal Size text for forecast</span></label>
+            <input type="number" min="0" step="500" data-ld="deal_value_monthly_gbp" placeholder="e.g. 40000" />
+          </div>
+          <div class="field">
+            <label>Expected close date <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— buckets the deal into a forecast quarter</span></label>
+            <input type="date" data-ld="expected_close_date" />
+          </div>
         </div>
         <div class="field"><label>Tech Stack</label><input type="text" data-ld="tech_stack" /></div>
         <div class="field"><label>Complexity</label><input type="text" data-ld="complexity" /></div>
@@ -5935,6 +5984,18 @@
     }
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
+    $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
+    // v1.0.0n: Forecast view wiring.
+    $('#fc-refresh').addEventListener('click', loadForecast);
+    $('#fc-settings').addEventListener('click', openForecastSettings);
+    document.querySelectorAll('[data-fc-slice]').forEach(b => {
+      b.addEventListener('click', () => {
+        forecastState.slice = b.dataset.fcSlice;
+        document.querySelectorAll('[data-fc-slice]').forEach(x =>
+          x.classList.toggle('active', x.dataset.fcSlice === forecastState.slice));
+        renderForecastSlice();
+      });
+    });
     $('#nav-build').addEventListener('click', () => switchView('build'));
     $('#pb-lead-select').addEventListener('change', (e) => pbLoadProject(e.target.value));
     $('#pb-save').addEventListener('click', pbSave);
@@ -6196,6 +6257,229 @@
     // v0.10.0y: Partners view event wiring (idempotent).
     $('#nav-partners').addEventListener('click', () => switchView('partners'));
     $('#ptn-add-partner').addEventListener('click', openAddPartnerForm);
+  }
+
+  // =============================================================
+  //  Forecast view (v1.0.0n)
+  // =============================================================
+  const forecastState = { data: null, slice: 'quarter' };
+
+  function fmtGbp(amount) {
+    if (amount == null) return '—';
+    if (amount >= 1_000_000) return `£${(amount / 1_000_000).toFixed(1)}M`;
+    if (amount >= 1_000) return `£${Math.round(amount / 1_000)}k`;
+    return `£${amount}`;
+  }
+
+  function fmtPct(p) {
+    if (p == null) return '—';
+    return `${Math.round(p * 100)}%`;
+  }
+
+  async function loadForecast() {
+    const refreshBtn = $('#fc-refresh');
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = '<span class="spinner"></span> Loading…';
+    try {
+      const data = await jsonFetch('/api/forecast?horizon=4');
+      forecastState.data = data;
+      renderForecast();
+    } catch (e) {
+      $('#fc-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Forecast failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = '↻ Refresh';
+    }
+  }
+
+  function renderForecast() {
+    const d = forecastState.data;
+    if (!d) return;
+    // KPI row: 4 cards (Commit / Best / Pipeline / Coverage)
+    const t = d.totals;
+    const targetGbp = d.config_used?.quarterly_target_gbp || 0;
+    const coverage = d.coverage_ratio_this_quarter || 0;
+    const coverageClass = coverage >= 3 ? 'green' : coverage >= 2 ? 'yellow' : 'red';
+    const card = (label, value, sub, valueColor) => `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(label)}</div>
+        <div style="font-size:22px;font-weight:600;color:${valueColor || 'var(--text)'};line-height:1.1;">${escapeHtml(value)}</div>
+        ${sub ? `<div class="muted" style="font-size:10px;margin-top:4px;">${sub}</div>` : ''}
+      </div>
+    `;
+    $('#fc-kpis').innerHTML = [
+      card('Commit (annualised)', fmtGbp(d.totals_annualised?.commit_gbp),
+            `${fmtGbp(t.commit_gbp)}/month · Verbal + Signed`),
+      card('Best case (annualised)', fmtGbp(d.totals_annualised?.best_case_gbp),
+            `${fmtGbp(t.best_case_gbp)}/month · Negotiation+`),
+      card('Pipeline (annualised)', fmtGbp(d.totals_annualised?.pipeline_gbp),
+            `${fmtGbp(t.pipeline_gbp)}/month · ${t.deal_count} deal${t.deal_count === 1 ? '' : 's'}`),
+      card(`Coverage — ${d.horizon[0]}`, `${coverage}x`,
+            `vs ${fmtGbp(targetGbp)}/Q target`,
+            coverageClass === 'green' ? 'var(--green)'
+              : coverageClass === 'yellow' ? 'var(--yellow)' : 'var(--red)'),
+    ].join('');
+    renderForecastSlice();
+    renderForecastMissing();
+  }
+
+  function renderForecastSlice() {
+    const d = forecastState.data;
+    if (!d) return;
+    const wrap = $('#fc-slice');
+    const slice = forecastState.slice;
+    const sliceMap = {
+      quarter: { label: 'quarter', data: d.by_quarter, order: d.horizon },
+      owner: { label: 'owner', data: d.by_owner },
+      partner: { label: 'partner source', data: d.by_partner },
+      vertical: { label: 'vertical', data: d.by_vertical },
+      region: { label: 'region', data: d.by_region },
+    };
+    const cfg = sliceMap[slice];
+    if (!cfg) { wrap.innerHTML = ''; return; }
+    // For quarter slice we use the horizon order; for others, sort by
+    // pipeline_gbp descending.
+    let keys;
+    if (cfg.order) {
+      keys = cfg.order;
+    } else {
+      keys = Object.keys(cfg.data).sort((a, b) =>
+        (cfg.data[b]?.pipeline_gbp || 0) - (cfg.data[a]?.pipeline_gbp || 0));
+    }
+    if (!keys.length) {
+      wrap.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">No deals to forecast in any ${escapeHtml(cfg.label)}.</div>`;
+      return;
+    }
+    // Find the max for the bar widths.
+    const maxPipe = Math.max(1, ...keys.map(k => cfg.data[k]?.pipeline_gbp || 0));
+    const rows = keys.map(k => {
+      const b = cfg.data[k] || { commit_gbp: 0, best_case_gbp: 0, pipeline_gbp: 0, deal_count: 0 };
+      const widthPipe = (b.pipeline_gbp / maxPipe) * 100;
+      const widthBest = (b.best_case_gbp / maxPipe) * 100;
+      const widthCommit = (b.commit_gbp / maxPipe) * 100;
+      return `
+        <tr>
+          <td style="padding:8px 10px;font-weight:500;font-size:12px;white-space:nowrap;">${escapeHtml(k)}</td>
+          <td style="padding:8px 10px;font-size:11px;color:var(--text-dim);text-align:right;white-space:nowrap;">${b.deal_count} deal${b.deal_count === 1 ? '' : 's'}</td>
+          <td style="padding:8px 10px;font-size:12px;text-align:right;color:var(--green);white-space:nowrap;font-weight:500;">${escapeHtml(fmtGbp(b.commit_gbp))}</td>
+          <td style="padding:8px 10px;font-size:12px;text-align:right;color:var(--yellow);white-space:nowrap;font-weight:500;">${escapeHtml(fmtGbp(b.best_case_gbp))}</td>
+          <td style="padding:8px 10px;font-size:12px;text-align:right;color:var(--accent);white-space:nowrap;font-weight:500;">${escapeHtml(fmtGbp(b.pipeline_gbp))}</td>
+          <td style="padding:8px 10px;width:35%;">
+            <div style="position:relative;height:18px;background:var(--surface);border-radius:4px;overflow:hidden;border:1px solid var(--border);">
+              <div style="position:absolute;left:0;top:0;height:100%;width:${widthPipe.toFixed(1)}%;background:rgba(255,77,42,.18);"></div>
+              <div style="position:absolute;left:0;top:0;height:100%;width:${widthBest.toFixed(1)}%;background:rgba(234,179,8,.30);"></div>
+              <div style="position:absolute;left:0;top:0;height:100%;width:${widthCommit.toFixed(1)}%;background:rgba(34,197,94,.45);"></div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    wrap.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:var(--surface-2);">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">${escapeHtml(cfg.label)}</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Deals</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);">Commit</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);">Best</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);">Pipeline</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Distribution</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="muted" style="font-size:10px;margin-top:6px;">All values are weighted monthly GBP (deal_value × stage_probability). Bars: green=commit, yellow=best, orange=pipeline.</div>
+    `;
+  }
+
+  function renderForecastMissing() {
+    const d = forecastState.data;
+    if (!d) return;
+    const missing = d.missing_value || [];
+    const el = $('#fc-missing');
+    if (!missing.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div style="background:rgba(234,179,8,.06);border:1px solid rgba(234,179,8,.30);border-radius:8px;padding:12px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);font-weight:600;margin-bottom:6px;">⚠ ${missing.length} lead${missing.length === 1 ? '' : 's'} excluded — deal value missing</div>
+        <div class="muted" style="font-size:11px;margin-bottom:8px;">Open each lead and fill in either <strong>Deal value (monthly GBP)</strong> or update <strong>Deal Size</strong> to a parseable value like "£40k/month".</div>
+        <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text-dim);">
+          ${missing.map(m => `
+            <li style="margin:3px 0;">
+              <a href="#" data-fc-open-lead="${escapeAttr(m.id)}" style="color:var(--accent);text-decoration:none;">${escapeHtml(m.company || m.id)}</a>
+              <span class="muted" style="font-size:10px;">— ${escapeHtml(m.sales_stage || 'no stage')}${m.deal_size ? ' · current: ' + escapeHtml(m.deal_size) : ''}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `;
+    el.querySelectorAll('[data-fc-open-lead]').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        openLeadDrawer(a.dataset.fcOpenLead);
+      });
+    });
+  }
+
+  async function openForecastSettings() {
+    const panel = $('#fc-settings-panel');
+    if (panel.style.display === 'block') {
+      panel.style.display = 'none';
+      return;
+    }
+    try {
+      const cfg = await jsonFetch('/api/forecast/config');
+      const stages = ['Intro Call', 'Discovery', 'Technical Fit', 'Proposal',
+                       'Negotiation', 'Legal/Procurement', 'Verbal Commit', 'Signature'];
+      const stageRows = stages.map(s => {
+        const v = cfg.stage_probabilities[s] || 0;
+        return `
+          <div class="row" style="grid-template-columns:1fr 100px;gap:8px;margin-bottom:6px;align-items:center;">
+            <label style="font-size:12px;color:var(--text);">${escapeHtml(s)}</label>
+            <input type="number" min="0" max="100" step="1" data-fc-stage="${escapeAttr(s)}" value="${Math.round(v * 100)}" style="padding:4px 8px;font-size:12px;text-align:right;" /> <span class="muted" style="font-size:11px;">%</span>
+          </div>
+        `;
+      }).join('');
+      panel.innerHTML = `
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">⚙ Forecast settings</div>
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Stage → probability mapping. Tune these to match your historical conversion. Changes apply immediately on save.</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;">
+          ${stageRows}
+        </div>
+        <div class="row" style="grid-template-columns:1fr 160px;gap:8px;align-items:center;">
+          <label style="font-size:12px;">Quarterly bookings target (£)</label>
+          <input id="fc-target" type="number" min="0" step="10000" value="${cfg.quarterly_target_gbp}" style="padding:4px 8px;font-size:12px;text-align:right;" />
+        </div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button id="fc-settings-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save</button>
+          <button id="fc-settings-cancel" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+        </div>
+      `;
+      panel.style.display = 'block';
+      $('#fc-settings-cancel').addEventListener('click', () => { panel.style.display = 'none'; });
+      $('#fc-settings-save').addEventListener('click', async () => {
+        const stage_probabilities = {};
+        panel.querySelectorAll('[data-fc-stage]').forEach(inp => {
+          const pct = parseFloat(inp.value);
+          if (!isNaN(pct)) stage_probabilities[inp.dataset.fcStage] = Math.max(0, Math.min(100, pct)) / 100;
+        });
+        const quarterly_target_gbp = parseInt($('#fc-target').value, 10) || 0;
+        try {
+          await jsonFetch('/api/forecast/config', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage_probabilities, quarterly_target_gbp }),
+          });
+          toast('Forecast settings saved · reloading forecast', 'success');
+          panel.style.display = 'none';
+          await loadForecast();
+        } catch (e) {
+          toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+        }
+      });
+    } catch (e) {
+      panel.innerHTML = `<div style="color:var(--red);font-size:12px;">Failed to load settings: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      panel.style.display = 'block';
+    }
   }
 
   // =============================================================

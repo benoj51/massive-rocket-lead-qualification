@@ -2559,27 +2559,35 @@ def api_lead_notion_history(page_id: str):
 
 
 def _boot_self_heal_backup_property():
-    """Best-effort: at app startup, ensure the Notion DB has a
-    'State Backup' property. If it doesn't, create it. Captures status
-    into the global so /api/diagnostics/health can surface it.
+    """Best-effort: at app startup, ensure the Notion DB has the
+    properties we depend on:
+      - "State Backup" (v1.0.0g — durable mirror lifeline)
+      - "Expected Close Date" (v1.0.0n — forecasting)
+      - "Deal Value (Monthly GBP)" (v1.0.0n — forecasting)
+
+    All created in a single batched PATCH. Status captured into the
+    module global so /api/diagnostics/health can surface it.
 
     Never raises — a startup self-heal must never crash the app.
     """
     global _BACKUP_PROPERTY_READY
     try:
         sync = NotionSync()
-        result = sync.ensure_state_backup_property()
+        result = sync.ensure_properties({
+            "State Backup":              {"rich_text": {}},
+            "Expected Close Date":       {"date": {}},
+            "Deal Value (Monthly GBP)":  {"number": {"format": "pound"}},
+        })
         _BACKUP_PROPERTY_READY = result
         if result.get("created"):
-            log.info("Created 'State Backup' Notion property on boot.")
-        elif result.get("existed"):
-            log.info("'State Backup' Notion property already exists.")
-        elif result.get("error"):
-            log.warning("Boot self-heal of 'State Backup' property failed: %s",
+            log.info("Created Notion properties on boot: %s",
+                      ", ".join(result["created"]))
+        if result.get("error"):
+            log.warning("Boot self-heal of Notion properties failed: %s",
                          result["error"])
     except Exception as e:
-        _BACKUP_PROPERTY_READY = {"checked": True, "existed": False,
-                                    "created": False, "error": str(e)}
+        _BACKUP_PROPERTY_READY = {"checked": True, "existed": [],
+                                    "created": [], "error": str(e)}
         log.warning("Boot self-heal threw: %s", e)
 
 
@@ -2657,6 +2665,60 @@ def api_admin_seed_command_centre():
     except Exception as e:
         log.exception("Manual Command Centre seed failed")
         return jsonify({"error": str(e)}), 500
+
+
+# v1.0.0n: Forecasting endpoints ------------------------------------------
+
+@app.route("/api/forecast", methods=["GET"])
+def api_forecast():
+    """Quarterly bookings forecast across every active lead, sliced by
+    owner / partner-source / vertical / region. Caller can also pass
+    ?horizon=4 to control how many quarters to project.
+
+    The pipeline list is fetched fresh from Notion every time — this
+    endpoint is cheap (one Notion query + pure-Python aggregation) and
+    Ben hits it from the Forecast nav so we want it always-current.
+    """
+    import forecast
+    try:
+        horizon = max(1, min(8, int(request.args.get("horizon", "4"))))
+    except ValueError:
+        horizon = 4
+    try:
+        sync = NotionSync()
+        # Pull a generous slab so we capture the long tail. The
+        # forecast logic filters out disqualified/on-hold/closed-lost.
+        rows = sync.list_pipeline(limit=500)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Forecast: pipeline fetch failed: %s", e)
+        return jsonify({"error": str(e)}), 502
+    try:
+        payload = forecast.build_forecast(rows, horizon_quarters=horizon)
+        return jsonify(payload)
+    except Exception as e:
+        log.exception("Forecast build failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/forecast/config", methods=["GET"])
+def api_forecast_config_get():
+    """Return the current forecast config (stage probabilities + target)."""
+    import forecast_config_store
+    return jsonify(forecast_config_store.load())
+
+
+@app.route("/api/forecast/config", methods=["PATCH"])
+def api_forecast_config_update():
+    """Update stage probabilities and/or the quarterly target. Body:
+        { "stage_probabilities": {"Discovery": 0.30, ...},
+          "quarterly_target_gbp": 750000 }
+    """
+    import forecast_config_store
+    body = request.get_json(silent=True) or {}
+    updated = forecast_config_store.save(body)
+    audit.log_event("forecast_config_updated", actor=_actor(),
+                    keys=sorted(body.keys()))
+    return jsonify(updated)
 
 
 # Run the self-heal at import time so it executes whether we're

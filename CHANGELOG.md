@@ -5,6 +5,133 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0n] — 2026-05-21 — Pipeline forecast (quarterly bookings + slices)
+
+Ben asked for forecasting. Scoped to weighted quarterly pipeline as
+the primary view, with editable stage probabilities + slices across
+Quarter / Owner / Partner / Vertical / Region.
+
+### What it shows
+
+A new **📈 Forecast** nav surface with:
+- **4 KPI cards** at the top: Commit / Best case / Pipeline (all
+  annualised £) + Coverage ratio vs the quarterly target
+- **Slice breakdown table**: click chips to switch between Quarter
+  (the default — uses the 4-quarter horizon), Owner, Partner source,
+  Vertical, Region. Each row shows commit/best/pipeline + a stacked
+  distribution bar (green=commit, yellow=best, orange=pipeline).
+- **"Needs close date" list**: leads excluded because deal value
+  isn't parseable — click each to open its drawer and fix it.
+- **⚙ Settings panel**: inline editor for the 8 stage probabilities
+  + quarterly target. Saved to `cache/forecast_config.json`, applies
+  immediately on save.
+
+### Definitions
+- **Commit** = stages ≥ Verbal Commit (95%+ default probability) —
+  the deals you'd actually bet on
+- **Best case** = stages ≥ Negotiation (70%+) — what could close
+  this quarter if things go well
+- **Pipeline** = stages ≥ Discovery (20%+) — total weighted
+  opportunity in flight
+- **Coverage** = (3-month pipeline) / quarterly target. 3x is the
+  SaaS rule-of-thumb for healthy coverage; UI colour-codes green ≥3x,
+  yellow ≥2x, red below 2x.
+- **Disqualified / On Hold / Closed Lost / Intro Call** excluded
+  from all aggregations.
+
+### Deal value resolution (the right answer, not the only one)
+1. **Explicit `deal_value_monthly_gbp`** — new structured numeric
+   field. Always wins.
+2. **Parsed `deal_size`** — extracts numbers + units from the
+   existing free-text field. Handles `£40k/month`, `£500k ARR`,
+   `$2m ARR`, commas, k/M/B units. Annual → monthly conversion
+   automatic when the text says ARR/annual/year/TCV.
+3. **`pricing_store` total** — falls back to the per-lead pricing
+   config when set.
+4. **"Missing value" bucket** — surfaces in the UI so Ben can clean
+   them up rather than silently dropping them.
+
+### Stage probabilities (sensible defaults)
+| Stage | Default |
+|---|---|
+| Intro Call | 5% (excluded from pipeline sum — too early) |
+| Discovery | 20% |
+| Technical Fit | 35% |
+| Proposal | 50% |
+| Negotiation | 70% |
+| Legal/Procurement | 85% |
+| Verbal Commit | 95% |
+| Signature | 100% |
+
+All user-editable via the ⚙ Settings panel.
+
+### Close date bucketing
+- Reads new `expected_close_date` field. Buckets into year-quarter
+  (`2026-Q3`).
+- Missing date → bucketed into the current quarter so the deal still
+  shows up. UI flags the "needs close date" follow-ups separately.
+- Outside the 4-quarter horizon → lumps into the last horizon
+  bucket (Q+3 currently).
+
+### Plumbing
+- **`forecast.py`** — pure logic module. `parse_deal_value_from_text`,
+  `resolve_deal_value`, `parse_close_date`, `resolve_close_quarter`,
+  `build_forecast`. No Flask, no Notion — easy to test.
+- **`forecast_config_store.py`** — JSON-on-disk store mirroring
+  `lead_summary_store`. Defaults applied on load; user overrides
+  clamped to [0, 1] for probabilities, ≥0 for the target.
+- **Notion property auto-create** — `ensure_state_backup_property`
+  generalised into `ensure_properties(spec)`, batched. Boot self-heal
+  now ensures `State Backup` + `Expected Close Date` + `Deal Value
+  (Monthly GBP)` all in one PATCH.
+- **`_page_to_detail` + `_row_from_page`** extended to surface the
+  two new fields (plus `region` on rows so the slice has data).
+- **`update_page`** wired to write both fields back to Notion.
+
+### Endpoints
+- `GET  /api/forecast?horizon=4` — full payload with all slices,
+  totals, missing-value list, coverage ratio. Pulls 500 pipeline
+  rows from Notion + aggregates in pure Python (cheap).
+- `GET  /api/forecast/config` — stage probabilities + target.
+- `PATCH /api/forecast/config` — save overrides. Clamps invalid
+  values; ignores unrecognised keys.
+
+### Lead drawer
+Two new fields in the Qualification → Quant section:
+- **Deal value (monthly GBP)** — numeric input (£), explicit override
+  for the forecast
+- **Expected close date** — `<input type="date">`; buckets the deal
+
+### Tests
+- 480 total (+32). `tests/test_forecast.py` covers:
+  - Deal value parsing: £/$/€ symbols, k/M units, commas, annual→monthly
+    conversion, unparseable input (TBD/n/a/empty) → None
+  - Resolve order: explicit > parsed > pricing_store > unknown
+  - Eligibility: disqualified/on-hold/closed-lost/intro-call excluded
+  - Weighted pipeline math + commit/best/pipeline bucketing
+  - Close date bucketing (explicit ISO + inferred fallback to current Q)
+  - All 4 slices (owner / partner / vertical / region) with the
+    partner slice correctly handling multi-tag sourced_for_partners
+  - Coverage ratio math
+  - Config store: defaults, overrides, invalid values clamped, target update
+  - Endpoint integration: 200 with mocked pipeline, 502 on Notion error
+
+### Files touched
+- `forecast.py` (new) · `forecast_config_store.py` (new)
+- `notion_sync.py` — new property surface, ensure_properties helper,
+  write paths for the two new fields
+- `server.py` — 3 new endpoints + boot self-heal extended
+- `qualify.html` — Forecast view + JS + lead drawer fields + nav item
+- `tests/test_forecast.py` (new, 32 tests)
+
+### What you do
+1. Once the redeploy lands, open the **📈 Forecast** tab.
+2. The "needs close date" list shows every lead missing the new
+   fields — click through and fill in the structured Deal Value +
+   Expected Close Date for each.
+3. Hit ⚙ Settings to tune stage probabilities against MR's actual
+   conversion history if the defaults don't match.
+
 ## [1.0.0m] — 2026-05-21 — AI synthesis for partner-contact notes
 
 Ben asked for partner-contact notes to have the same kind of AI

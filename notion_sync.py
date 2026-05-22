@@ -394,6 +394,9 @@ def _page_to_detail(page: dict) -> dict:
         "tech_stack": _extract_text(props.get("Tech Stack")),
         "region": _extract_text(props.get("Region")),
         "deal_size": _extract_text(props.get("Deal Size")),
+        # v1.0.0n: forecasting fields.
+        "deal_value_monthly_gbp": props.get("Deal Value (Monthly GBP)", {}).get("number"),
+        "expected_close_date": _extract_text(props.get("Expected Close Date")),
         "complexity": _extract_text(props.get("Complexity")),
         "fit_summary": _extract_text(props.get("Fit Summary")),
         "next_steps": _extract_text(props.get("Next Steps")),
@@ -425,6 +428,12 @@ def _row_from_page(page: dict) -> dict:
         "next_steps": _extract_text(props.get("Next Steps")),
         "opportunity_source": _extract_text(props.get("Partner Source")),
         "sourced_for_partners": _extract_multi_select(props.get("Sourced For")),
+        # v1.0.0n: include forecast fields in pipeline rows so the
+        # /api/forecast endpoint can compute without a second fetch.
+        "deal_size": _extract_text(props.get("Deal Size")),
+        "deal_value_monthly_gbp": props.get("Deal Value (Monthly GBP)", {}).get("number"),
+        "expected_close_date": _extract_text(props.get("Expected Close Date")),
+        "region": _extract_text(props.get("Region")),
         "last_edited": page.get("last_edited_time"),
     }
 
@@ -530,20 +539,31 @@ class NotionSync:
     # property is absent. Safe to call once at app boot.
     def ensure_state_backup_property(self) -> dict[str, Any]:
         """Make sure the Notion DB has a "State Backup" rich-text
-        property. If it doesn't, create it. Returns a small status
-        dict so callers can log + surface in diagnostics.
+        property. See `ensure_properties` for the generic helper —
+        kept as a thin wrapper for backward-compat with v1.0.0i."""
+        return self.ensure_properties({
+            "State Backup": {"rich_text": {}},
+        })
 
-        Failure modes are reported, not raised — we never want a
-        startup self-heal to crash the app.
+    # v1.0.0n: generic property-self-heal. Adds any missing properties
+    # in one PATCH. Idempotent — existing properties are reported as
+    # `existed`, missing ones are created in a single round-trip.
+    def ensure_properties(self, spec: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """For each (property_name → Notion property spec) in `spec`,
+        check the DB schema and create any that don't exist. One PATCH
+        for all missing ones (Notion accepts batched property creation).
+
+        Returns a status dict the caller can log + surface in
+        diagnostics. Never raises — startup self-heal must not crash
+        the app.
         """
         status: dict[str, Any] = {
             "checked": True,
-            "existed": False,
-            "created": False,
+            "existed": [],
+            "created": [],
             "error": None,
         }
         try:
-            db_id = self.database_id or self._ensure_data_source_id()
             # Try the data source schema first (2025-09+), fall back to
             # the database endpoint for older API versions.
             try:
@@ -553,17 +573,17 @@ class NotionSync:
             except NotionSyncError:
                 schema = self._request("GET", f"/databases/{self.database_id}")
                 schema_endpoint = f"/databases/{self.database_id}"
-            props = schema.get("properties") or {}
-            if "State Backup" in props:
-                status["existed"] = True
-                return status
-            # Property missing — create it as a rich_text column.
-            self._request(
-                "PATCH",
-                schema_endpoint,
-                json_body={"properties": {"State Backup": {"rich_text": {}}}},
-            )
-            status["created"] = True
+            existing_props = schema.get("properties") or {}
+            to_create: dict[str, dict[str, Any]] = {}
+            for name, prop_spec in spec.items():
+                if name in existing_props:
+                    status["existed"].append(name)
+                else:
+                    to_create[name] = prop_spec
+            if to_create:
+                self._request("PATCH", schema_endpoint,
+                              json_body={"properties": to_create})
+                status["created"] = list(to_create.keys())
             return status
         except Exception as e:
             status["error"] = str(e)
@@ -770,6 +790,29 @@ class NotionSync:
         ):
             if key in edits:
                 props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}
+
+        # v1.0.0n: forecasting fields. Numeric deal value + expected
+        # close date. Both optional; both auto-created on boot if the
+        # Notion DB doesn't have them yet (see ensure_forecast_properties).
+        if "deal_value_monthly_gbp" in edits:
+            val = edits["deal_value_monthly_gbp"]
+            if val is None or val == "":
+                props["Deal Value (Monthly GBP)"] = {"number": None}
+            else:
+                try:
+                    props["Deal Value (Monthly GBP)"] = {"number": float(val)}
+                except (TypeError, ValueError):
+                    pass
+        if "expected_close_date" in edits:
+            val = edits["expected_close_date"]
+            if val is None or val == "":
+                props["Expected Close Date"] = {"date": None}
+            else:
+                # Notion accepts ISO yyyy-mm-dd; strip time component if
+                # the UI sent a full datetime.
+                date_str = str(val).split("T")[0].strip()
+                if date_str:
+                    props["Expected Close Date"] = {"date": {"start": date_str}}
 
         # v0.10.0p: numeric ICP score writes — enables re-scoring on lead
         # update when scoring-relevant fields change.
