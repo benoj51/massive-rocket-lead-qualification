@@ -1970,6 +1970,16 @@ def api_partners_enums():
     })
 
 
+# v1.0.0o: MR owners — single source of truth for the people the UI
+# offers in every owner / mr_owner dropdown.
+@app.route("/api/owners", methods=["GET"])
+def api_owners():
+    """Return the list of MR owners (lead owner + partner-contact
+    `mr_owner`). Includes role + region + email for richer dropdowns."""
+    import mr_owners
+    return jsonify({"owners": mr_owners.list_owners(active_only=True)})
+
+
 @app.route("/api/partners", methods=["GET"])
 def api_partners_list():
     rows = partners_store.list_partners()

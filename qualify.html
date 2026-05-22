@@ -882,9 +882,9 @@
           </div>
           <div>
             <label>Owner</label>
-            <select id="sel-owner">
-              <option>Ben Ojuolape</option>
-              <option>Unassigned</option>
+            <select id="sel-owner" data-mr-owner-select>
+              <!-- v1.0.0o: populated from /api/owners on init. -->
+              <option value="">Unassigned</option>
             </select>
           </div>
         </div>
@@ -1414,10 +1414,9 @@
         </div>
         <div class="field">
           <label>Owner</label>
-          <select data-ld="owner">
-            <option value="">—</option>
-            <option>Ben Ojuolape</option>
-            <option>Unassigned</option>
+          <!-- v1.0.0o: populated from /api/owners on init. -->
+          <select data-ld="owner" data-mr-owner-select>
+            <option value="">Unassigned</option>
           </select>
         </div>
       </div>
@@ -3783,6 +3782,11 @@
       // load-time value — AE flips Status to "Qualified", saves, but
       // the header still screamed DISQUALIFIED (uppercase via CSS).
       refreshHeaderStatusChip(lead.status);
+      // v1.0.0o: ensure owners are loaded before setting field values —
+      // otherwise the owner select would be missing the lead's owner
+      // option at the moment `el.value = value` runs, and the value
+      // would silently fall back to "Unassigned".
+      await hydrateOwnerSelects($('#lead-drawer'));
       // Populate all fields by their data-ld key
       $$('#lead-drawer [data-ld]').forEach(el => {
         const key = el.dataset.ld;
@@ -5959,11 +5963,64 @@
     });
   }
 
+  // v1.0.0o: MR owners — single source of truth fetched from /api/owners.
+  // Every dropdown with [data-mr-owner-select] gets populated by
+  // hydrateOwnerSelects(). Cached for the session; call refreshOwners()
+  // if the list changes mid-session.
+  let _ownersCache = null;
+
+  async function loadMrOwners() {
+    if (_ownersCache) return _ownersCache;
+    try {
+      const data = await jsonFetch('/api/owners');
+      _ownersCache = data.owners || [];
+    } catch (_) {
+      _ownersCache = [];
+    }
+    return _ownersCache;
+  }
+
+  function populateOwnerSelect(sel, owners) {
+    if (!sel) return;
+    // Preserve a value the caller asked us to keep (e.g. when re-rendering
+    // an edit form whose contact already has an owner set). The value
+    // lives in `data-preserve-value` or, if absent, the current `.value`.
+    const preserve = sel.dataset.preserveValue || sel.value || '';
+    // Wipe everything except the leading "Unassigned" option.
+    const head = sel.querySelector('option[value=""]');
+    sel.innerHTML = '';
+    if (head) sel.appendChild(head);
+    else sel.appendChild(new Option('Unassigned', ''));
+    owners.forEach(o => {
+      const opt = new Option(o.name, o.name);
+      // Tooltip shows role + region — helps Ben pick the right person.
+      const meta = [o.role, o.region].filter(Boolean).join(' · ');
+      if (meta) opt.title = meta;
+      sel.appendChild(opt);
+    });
+    // Restore preserved value if it's now in the list.
+    if (preserve && Array.from(sel.options).some(o => o.value === preserve)) {
+      sel.value = preserve;
+    }
+  }
+
+  async function hydrateOwnerSelects(root = document) {
+    const owners = await loadMrOwners();
+    root.querySelectorAll('[data-mr-owner-select]').forEach(sel => {
+      populateOwnerSelect(sel, owners);
+    });
+  }
+
   async function _runInit() {
     await ensureAuth();
     // v1.0.0i: fire-and-forget cache-health check. Banner appears
     // post-init if anything looks off.
     _checkCacheHealth();
+    // v1.0.0o: populate every owner dropdown that's in the static HTML
+    // (the qualify-form + lead-drawer selects). Dynamically rendered
+    // ones (partner-add-form, partner-contact-form) call hydrateOwnerSelects
+    // themselves after their template renders.
+    hydrateOwnerSelects();
     // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
     // here we sync its icon to the current theme + wire click to flip.
     const _themeBtn = $('#theme-toggle');
@@ -6680,7 +6737,12 @@
       </div>
       <div class="row row-2">
         <div class="field"><label>URL</label><input id="ptn-new-url" type="text" placeholder="braze.com" /></div>
-        <div class="field"><label>MR owner</label><input id="ptn-new-owner" type="text" placeholder="Ben Ojuolape" /></div>
+        <div class="field"><label>MR owner</label>
+          <!-- v1.0.0o: populated from /api/owners on init. -->
+          <select id="ptn-new-owner" data-mr-owner-select>
+            <option value="">Unassigned</option>
+          </select>
+        </div>
       </div>
       <div class="field"><label>Description</label><textarea id="ptn-new-desc" rows="2" placeholder="What we work with them on…"></textarea></div>
       <div class="btn-row">
@@ -6688,6 +6750,8 @@
         <button id="ptn-new-cancel" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
       </div>
     `;
+    // v1.0.0o: hydrate the freshly-rendered owner select.
+    hydrateOwnerSelects(el);
     $('#ptn-new-name').focus();
     $('#ptn-new-save').addEventListener('click', async () => {
       const name = $('#ptn-new-name').value.trim();
@@ -7061,7 +7125,13 @@
         </div>
         <div class="row row-2">
           <div class="field"><label>Country</label><input id="ptn-c-country" type="text" value="${escapeAttr(c.country || '')}" placeholder="e.g. United States" /></div>
-          <div class="field"><label>MR owner</label><input id="ptn-c-mr-owner" type="text" value="${escapeAttr(c.mr_owner || '')}" /></div>
+          <div class="field"><label>MR owner</label>
+            <!-- v1.0.0o: populated from /api/owners after this template renders.
+                 The current value is preserved by populateOwnerSelect's preserveValue arg. -->
+            <select id="ptn-c-mr-owner" data-mr-owner-select data-preserve-value="${escapeAttr(c.mr_owner || '')}">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
         </div>
         <div class="field">
           <label>Industries (multi-select)</label>
@@ -7100,6 +7170,8 @@
         </div>
       </div>
     `;
+    // v1.0.0o: populate the freshly-rendered MR owner select.
+    hydrateOwnerSelects(detailEl);
     // v1.0.0e: all three tag groups now use chip multi-select.
     [['#ptn-c-territories', 'data-territory'],
      ['#ptn-c-regions', 'data-region'],

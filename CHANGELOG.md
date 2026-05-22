@@ -5,6 +5,81 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0o] — 2026-05-21 — MR owners roster (single source of truth)
+
+Ben supplied the full Massive Rocket team — 12 people across CEO,
+Growth, Account Management (current + AE-transition), Marketing, and
+Partner Management. Previously the lead drawer + qualify form
+hardcoded "Ben Ojuolape" + "Unassigned"; partner contact forms had
+free-text mr_owner inputs. This release centralises that into one
+data module + one endpoint.
+
+### The roster
+| Name | Role | Region |
+|---|---|---|
+| Thierry Sequeira | CEO UK | Global |
+| Daniel Craig | Director of Growth | Global |
+| Ben Ojuolape | Growth Lead (Partnerships + GTM) | UK → US |
+| Daniel Ergueta | Account Manager | AMER |
+| Tsveti Grncarova | Account Manager | EMEA |
+| Jorge Arrechea | AMER AM, transitioning to AE | AMER |
+| Marija Veljanova | AMER AM, transitioning to AE | EMEA |
+| Darren Addy | EMEA AM, transitioning to AE | EMEA |
+| Claudia Lima | Partner Manager, AMER | AMER |
+| Sonal Dalia | Partner Manager | EMEA |
+| Jamie MacDow | Marketing — co-owns New Accounts OKR | Global |
+| Lea | Marketing | Global |
+
+Notes:
+- Sonal Dalia's email is intentionally blank (not supplied) — placeholder
+  in the module, fill in when confirmed.
+- Lea is single-name pending surname confirmation; email assumed
+  `lea@massiverocket.com`.
+
+### Plumbing
+
+- **`mr_owners.py`** (new) — module-level `OWNERS` list of dicts with
+  `{name, role, region, email, active}`. Helpers: `list_owners()`,
+  `names()`, `get_owner(name)`. To add/remove: append/edit in code,
+  one place.
+- **`GET /api/owners`** — returns `{owners: [...]}` for the UI.
+- **`hydrateOwnerSelects(root=document)`** — JS helper that finds
+  every `[data-mr-owner-select]` element and populates its options
+  from the cached endpoint response. Preserves the current/existing
+  value via `data-preserve-value` (so editing a contact whose owner
+  is set keeps that selection after re-render).
+
+### Surfaces updated
+- **Qualify form** owner dropdown (`#sel-owner`)
+- **Lead drawer** owner dropdown (`data-ld="owner"`)
+- **Partners view** new-partner form mr_owner — converted from free-text
+  input to dropdown
+- **Partner contact form** mr_owner — converted from free-text input
+  to dropdown (preserves the current value on edit)
+
+### Tests
+- 490 total (+10). New `tests/test_mr_owners.py` covers:
+  - Module shape (required fields, unique names, email format)
+  - Every name Ben supplied is present
+  - Active/inactive filtering
+  - Case-insensitive `get_owner()` lookup
+  - Endpoint returns the full roster
+
+### Files touched
+- `mr_owners.py` (new)
+- `server.py` — `GET /api/owners` endpoint
+- `qualify.html` — 4 owner-surface conversions + `hydrateOwnerSelects` helper
+- `tests/test_mr_owners.py` (new)
+
+### What you'll see
+Open any lead drawer or the Qualify form — the Owner dropdown now
+lists all 12 MR team members. Hover any option to see role + region
+in the tooltip. Add a new partner → same dropdown. Edit any partner
+contact → MR owner becomes a dropdown instead of free-text.
+
+To add someone (e.g. a new AE): one-line edit in `mr_owners.py`.
+Every dropdown picks it up on next page load.
+
 ## [1.0.0n] — 2026-05-21 — Pipeline forecast (quarterly bookings + slices)
 
 Ben asked for forecasting. Scoped to weighted quarterly pipeline as
