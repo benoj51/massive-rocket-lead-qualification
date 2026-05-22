@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0q] — 2026-05-21 — "Last call · <date>" on synthesised summaries
+
+Ben pointed out: the AI synthesis panels describe "the most recent
+conversation" but the footer only said when Claude was run, not when
+the conversation actually happened. Easy to lose track of freshness.
+
+### Fix
+
+When the server saves a synthesis, it now attaches metadata about
+the most-recent input note/call:
+- `most_recent_note_at` / `most_recent_call_at` — ISO timestamp
+- `most_recent_note_type` / `most_recent_call_type` — e.g. "call",
+  "email", "intro"
+- `notes_count` / `calls_count`
+
+Both surfaces now render a prominent line at the top of the summary
+panel:
+
+```
+Last call · 21 May 2026
+```
+
+Date format is locale-aware ("21 May 2026" / "May 21, 2026" depending
+on the user's browser). Type is whatever the AE picked when saving
+the note ("call" / "email" / "intro" / "touch" / "other").
+
+### Where it applies
+- **Partner contact summary** (the panel inside the 📝 notes modal —
+  the one Ben flagged)
+- **Lead-side AI lead summary** (same gap; same fix)
+
+### Backward compat
+- Cached summaries without the new metadata still render fine —
+  the "Last call" line just doesn't appear until the next refresh.
+- Lead-side summary also falls back to the most-recent `calls[0]`
+  in the JS render if the server hasn't attached the metadata yet.
+
+### Tests
+- 506 total (+1). Extended `test_partner_contact_summary.py` with
+  `test_summary_attaches_most_recent_note_metadata` — verifies the
+  server attaches the right fields with the right values when
+  multiple notes exist.
+
+### Files touched
+- `server.py` — `_refresh_partner_contact_summary` + the two lead
+  synthesis call sites (manual refresh + auto-after-call-add) all
+  attach the metadata before saving
+- `qualify.html` — `renderPartnerContactSummary` + `renderAiLeadSummary`
+  both render the "Last call · <date>" line at the top
+- `tests/test_partner_contact_summary.py` — new test
+
 ## [1.0.0p] — 2026-05-21 — Incumbent + previous agencies per lead
 
 Ben asked for the ability to track competitive context: who's running

@@ -735,6 +735,15 @@ def api_calls_add(lead_id: str):
             ctx = _gather_lead_context(lead_id)
             synth = ai_summary.synthesise_lead(ctx)
             if synth:
+                # v1.0.0q: attach most-recent-call metadata before saving
+                # so the UI's "Last call: <date>" line stays accurate.
+                calls_for_meta = calls_store.list_calls(lead_id)
+                if calls_for_meta:
+                    latest_c = calls_for_meta[0]
+                    synth["most_recent_call_at"]    = latest_c.get("created_at")
+                    synth["most_recent_call_type"]  = latest_c.get("type")
+                    synth["most_recent_call_title"] = latest_c.get("title")
+                    synth["calls_count"]            = len(calls_for_meta)
                 fresh_summary = lead_summary_store.save(lead_id, synth)
                 # Mirror to Notion (best-effort, same pattern as the
                 # explicit refresh endpoint).
@@ -1557,6 +1566,16 @@ def api_lead_summary_refresh(lead_id: str):
     result = ai_summary.synthesise_lead(ctx)
     if result is None:
         return jsonify({"error": "Synthesis failed"}), 502
+    # v1.0.0q: attach the most-recent-call metadata so the UI can show
+    # "Last call: <date>" prominently. calls_store.list_calls returns
+    # newest-first.
+    calls_for_meta = calls_store.list_calls(lead_id)
+    if calls_for_meta:
+        latest = calls_for_meta[0]
+        result["most_recent_call_at"]   = latest.get("created_at")
+        result["most_recent_call_type"] = latest.get("type")
+        result["most_recent_call_title"] = latest.get("title")
+        result["calls_count"]           = len(calls_for_meta)
     saved = lead_summary_store.save(lead_id, result)
     notion_synced = False
     try:
@@ -2257,6 +2276,13 @@ def _refresh_partner_contact_summary(partner_id: str, contact_id: str):
         summary = ai_summary.synthesise_partner_contact_conversation(payload)
         if summary is None:
             return None
+        # v1.0.0q: attach the most-recent-note metadata so the UI can
+        # render "Last call: <date>" instead of the synthesis-generation
+        # timestamp. notes[0] is newest because list_notes sorts desc.
+        latest = notes[0]
+        summary["most_recent_note_at"]   = latest.get("created_at")
+        summary["most_recent_note_type"] = latest.get("type")
+        summary["notes_count"]           = len(notes)
         saved = partner_contact_summary_store.save(partner_id, contact_id, summary)
         return saved
     except Exception as e:

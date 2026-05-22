@@ -259,6 +259,40 @@ class EndpointIntegrationTests(unittest.TestCase):
         self.assertEqual(r2.get_json()["summary"]["summary"],
                           "Marina is focused on Popeyes Q3.")
 
+    def test_summary_attaches_most_recent_note_metadata(self):
+        """v1.0.0q: server attaches most_recent_note_at + type + count
+        so the UI can render 'Last call: <date>'."""
+        # Two notes so we can verify the metadata picks the freshest.
+        self.client.post(
+            f"/api/partners/{self.partner['id']}/contacts/braze-marina-klusas/notes",
+            json={"type": "intro", "content": "First contact."},
+        )
+        self.client.post(
+            f"/api/partners/{self.partner['id']}/contacts/braze-marina-klusas/notes",
+            json={"type": "call", "content": "Popeyes Q3 push."},
+        )
+
+        import ai_summary
+        fake = {
+            "summary": "s", "accounts_discussed": [],
+            "updates_on_prior_accounts": [], "territory_info": [],
+            "challenges": [], "opportunities": [], "additional_info": "",
+        }
+        with mock.patch.object(
+            ai_summary, "synthesise_partner_contact_conversation",
+            return_value=fake,
+        ):
+            r = self.client.post(
+                f"/api/partners/{self.partner['id']}/contacts/braze-marina-klusas/summary"
+            )
+
+        s = r.get_json()["summary"]
+        self.assertIn("most_recent_note_at", s)
+        self.assertIsNotNone(s["most_recent_note_at"])
+        # Latest note was the call.
+        self.assertEqual(s["most_recent_note_type"], "call")
+        self.assertEqual(s["notes_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

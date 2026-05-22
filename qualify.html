@@ -3755,6 +3755,19 @@
     // Cache so the header Copy button can read the structured data.
     if (drawerState.id) _summaryCache[drawerState.id] = ai;
     const when = ai.generated_at ? new Date(ai.generated_at).toLocaleString() : '';
+    // v1.0.0q: surface the date of the most recent call/note at the top
+    // of the summary panel so the AE knows the freshness at a glance.
+    // Fall back to the most-recent call in the `calls` array if the
+    // server hasn't attached the metadata yet (older cached summary).
+    const lastCallAt = ai.most_recent_call_at ||
+                        (calls && calls.length > 0 ? calls[0].created_at : null);
+    const lastCallType = ai.most_recent_call_type ||
+                          (calls && calls.length > 0 ? calls[0].type : null);
+    const lastCallLabel = lastCallAt
+      ? new Date(lastCallAt).toLocaleDateString(undefined, {
+          day: 'numeric', month: 'short', year: 'numeric',
+        })
+      : null;
     const factsHtml = (ai.key_facts || []).map(f =>
       `<li style="margin:3px 0;">${escapeHtml(f)}</li>`).join('');
     const questionsHtml = (ai.open_questions || []).map(q =>
@@ -3763,6 +3776,13 @@
       `<li style="margin:3px 0;color:var(--red);">${escapeHtml(r)}</li>`).join('');
     el.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        ${lastCallLabel ? `
+          <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+            <span style="font-size:11px;color:var(--text);font-weight:500;">
+              Last ${escapeHtml(lastCallType || 'call')} · <span style="color:var(--accent-text);">${escapeHtml(lastCallLabel)}</span>
+            </span>
+          </div>
+        ` : ''}
         <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px;">
           ${escapeHtml(ai.state_of_play || '')}
         </div>
@@ -7508,6 +7528,19 @@
         return;
       }
       const when = s.generated_at ? new Date(s.generated_at).toLocaleString() : '';
+      // v1.0.0q: show the date of the most recent NOTE/CALL at the top
+      // of the panel — that's what the synthesis is summarising.
+      // Falls back to nothing if the server hasn't attached it yet
+      // (e.g. older cached summary).
+      const lastNoteAt = s.most_recent_note_at
+        ? new Date(s.most_recent_note_at)
+        : null;
+      const lastNoteLabel = lastNoteAt
+        ? lastNoteAt.toLocaleDateString(undefined, {
+            day: 'numeric', month: 'short', year: 'numeric',
+          })
+        : null;
+      const lastNoteType = s.most_recent_note_type || 'note';
       const mkList = (label, items, color) => {
         if (!items || !items.length) return '';
         const lis = items.map(i => `<li style="margin:3px 0;">${escapeHtml(i)}</li>`).join('');
@@ -7518,7 +7551,14 @@
       };
       el.innerHTML = `
         <div style="background:rgba(255,77,42,.04);border:1px solid rgba(255,77,42,.25);border-radius:8px;padding:12px;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;margin-bottom:6px;">✨ Conversation summary</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">✨ Conversation summary</div>
+            ${lastNoteLabel ? `
+              <div style="font-size:11px;color:var(--text);font-weight:500;">
+                Last ${escapeHtml(lastNoteType)} · <span style="color:var(--accent-text);">${escapeHtml(lastNoteLabel)}</span>
+              </div>
+            ` : ''}
+          </div>
           ${s.summary ? `<div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:4px;">${escapeHtml(s.summary)}</div>` : ''}
           ${mkList('Accounts discussed', s.accounts_discussed, 'var(--green)')}
           ${mkList('Updates on prior accounts', s.updates_on_prior_accounts, 'var(--yellow)')}
