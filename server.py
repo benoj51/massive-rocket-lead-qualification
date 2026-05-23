@@ -1464,6 +1464,8 @@ def _gather_lead_context(lead_id: str) -> dict:
             "note": c.get("note") or "",
             "content_excerpt": (c.get("content") or "")[:1500],
             "extracted_meddpicc": (c.get("extracted") or {}).get("meddpicc"),
+            # v1.0.0z: who told us this. Empty for internal notes.
+            "partner_source": c.get("partner_source") or None,
         }
         for c in calls[:6]
     ]
@@ -2363,6 +2365,19 @@ def api_partner_notes_delete(partner_id: str, contact_id: str, note_id: str):
     if not ok:
         return jsonify({"error": "not_found"}), 404
     return jsonify({"deleted": True})
+
+
+# v1.0.0z: rollup — every lead-side call/note across the whole pipeline
+# whose partner_source matches this partner contact. Surfaces "every
+# piece of intel Marina has contributed" on her contact card so Ben
+# can see her cumulative value.
+@app.route("/api/partners/<partner_id>/contacts/<contact_id>/sourced-calls",
+            methods=["GET"])
+def api_partner_contact_sourced_calls(partner_id: str, contact_id: str):
+    rows = calls_store.list_calls_sourced_from(
+        partner_id=partner_id, contact_id=contact_id,
+    )
+    return jsonify({"calls": rows, "count": len(rows)})
 
 
 # --- Lead ↔ Partner-contact assignments (v0.11.0) -------------------------

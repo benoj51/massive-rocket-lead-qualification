@@ -261,6 +261,18 @@ Rules:
 - If the data is thin (e.g. only one note), say so honestly in
   state_of_play.
 
+CALL ATTRIBUTION (when present in any `calls[*].partner_source`):
+- If a call has `partner_source.contact_name` + `partner_source.partner_name`,
+  that intel CAME FROM that specific person at that partner. Attribute
+  it inline: "Marina (Braze) flagged Popeyes Q3 is moving" rather than
+  the generic "we heard Popeyes Q3 is moving."
+- If only `partner_source.partner_name` is set, attribute to the
+  partner generically: "Braze partnerships team confirmed ..."
+- Internal notes (no partner_source) carry no attribution — write
+  them as MR-side observations.
+- Partner-sourced facts are STRONGER signals than internal speculation
+  — weight them accordingly in state_of_play + key_facts.
+
 AGENCY CONTEXT (when present in `agencies`):
 - type="incumbent": the agency running this work TODAY. Surface the
   displacement angle in state_of_play or risks ("VML runs their

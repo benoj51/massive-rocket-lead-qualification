@@ -510,6 +510,15 @@
      subtle blue tint. */
   .org-node .n-pill.country { background: rgba(59,130,246,.10); color: #1e40af; border-color: rgba(59,130,246,.30); }
   :root:not([data-theme="light"]) .org-node .n-pill.country { color: #93c5fd; }
+  /* v1.0.0z: partner-source chip on call cards. Same blue-tint
+     palette as the country pill — both modes get readable contrast. */
+  .source-chip {
+    background: rgba(59,130,246,.10); color: #1e40af;
+    border: 1px solid rgba(59,130,246,.30);
+    font-size: 9px; padding: 2px 7px; border-radius: 10px;
+    margin-left: 6px;
+  }
+  :root:not([data-theme="light"]) .source-chip { color: #93c5fd; }
 
   /* Document preview modal — v0.10.0u ----------------------- */
   .doc-preview-overlay {
@@ -963,6 +972,44 @@
           <div>
             <label>Incumbent scope <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— what they do</span></label>
             <input id="sel-incumbent-scope" type="text" placeholder="e.g. Braze ops, campaign exec, loyalty" />
+          </div>
+        </div>
+        <!-- v1.0.0z: initial notes captured during qualification. Buffered
+             until Save lead returns a page_id, then posted as calls
+             against the new lead. Optional partner-source on each. -->
+        <div style="margin:14px 0 12px;padding:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Initial qualification notes</div>
+              <div class="muted" style="font-size:10px;margin-top:2px;">Optional. Each note can be attributed to a partner source. Buffered until Save lead — then committed as calls under the new lead.</div>
+            </div>
+            <span id="qf-notes-count" class="muted" style="font-size:11px;"></span>
+          </div>
+          <div id="qf-notes-buffered" style="display:none;margin-bottom:8px;"></div>
+          <div class="row" style="grid-template-columns:140px 1fr 220px;gap:8px;margin-bottom:6px;">
+            <div class="field" style="margin:0;">
+              <label>Type</label>
+              <select id="qf-new-note-type">
+                <option value="call">Call</option>
+                <option value="note">Note</option>
+                <option value="transcript">Transcript</option>
+                <option value="email">Email</option>
+              </select>
+            </div>
+            <div class="field" style="margin:0;">
+              <label>Content</label>
+              <textarea id="qf-new-note-content" rows="3" placeholder="Initial intel, intro-call notes, partner-shared context…"></textarea>
+            </div>
+            <div class="field" style="margin:0;">
+              <label>Source</label>
+              <select id="qf-new-note-source">
+                <option value="">Internal</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="qf-add-note" class="btn ghost" type="button" style="padding:4px 12px;font-size:11px;">+ Buffer note</button>
+            <span class="muted" style="font-size:11px;">Notes commit when you click <strong>Save lead</strong>.</span>
           </div>
         </div>
         <p class="muted" style="margin: 0 0 12px;">Creates or updates this lead in the pipeline.</p>
@@ -1440,6 +1487,16 @@
             </div>
             <div class="field"><label>Title (optional)</label><input type="text" id="ld-new-call-title" placeholder="e.g. Discovery #2" /></div>
           </div>
+          <!-- v1.0.0z: optional partner attribution. When set, the note
+               is rolled up under the partner contact's profile + the AI
+               synthesis frames it as "Marina (Braze) said ..." -->
+          <div class="field">
+            <label>Source <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— who told us this? Leave as Internal for MR-side observations.</span></label>
+            <select id="ld-new-call-source">
+              <option value="">Internal — MR-side observation</option>
+              <!-- Options populated from /api/partners + their contacts on drawer open -->
+            </select>
+          </div>
           <div class="field"><label>Content / paste transcript</label><textarea rows="5" id="ld-new-call-content" placeholder="Paste call notes, transcript snippets, or write a quick recap…" style="font-family:var(--mono);font-size:12px;"></textarea></div>
           <div class="btn-row">
             <button id="ld-add-call" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save note now</button>
@@ -1823,6 +1880,58 @@
     authToken: null,
     lastSavedPageId: null,   // set after Push to Notion succeeds
   };
+
+  // v1.0.0z: qualify-form buffered notes — captured pre-lead-save and
+  // posted as calls once the lead has a page_id.
+  const qfState = { pendingNotes: [] };
+
+  function _renderQfBufferedNotes() {
+    const el = document.getElementById('qf-notes-buffered');
+    const count = document.getElementById('qf-notes-count');
+    if (!el || !count) return;
+    const rows = qfState.pendingNotes;
+    count.textContent = rows.length
+      ? `${rows.length} buffered note${rows.length === 1 ? '' : 's'}`
+      : '';
+    if (!rows.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.innerHTML = rows.map((n, i) => {
+      const src = n.partner_source;
+      const who = src ? (src.contact_name
+        ? `${src.contact_name} · ${src.partner_name}`
+        : src.partner_name) : 'Internal';
+      const excerpt = n.content.length > 80 ? n.content.slice(0, 80) + '…' : n.content;
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;">
+          <div style="min-width:0;flex:1;font-size:11px;">
+            <strong style="text-transform:uppercase;letter-spacing:.05em;font-size:9px;color:var(--text-muted);">${escapeHtml(n.type)}</strong>
+            <span class="muted" style="margin-left:6px;">${escapeHtml(who)}</span>
+            <div style="color:var(--text);margin-top:2px;">${escapeHtml(excerpt)}</div>
+          </div>
+          <button class="btn ghost" type="button" data-qf-note-remove="${i}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);flex-shrink:0;">×</button>
+        </div>
+      `;
+    }).join('');
+    el.querySelectorAll('[data-qf-note-remove]').forEach(b => {
+      b.addEventListener('click', () => {
+        qfState.pendingNotes.splice(parseInt(b.dataset.qfNoteRemove, 10), 1);
+        _renderQfBufferedNotes();
+      });
+    });
+  }
+
+  function _qfBufferNote() {
+    const content = ($('#qf-new-note-content').value || '').trim();
+    if (!content) { toast('Content required', 'error'); return; }
+    qfState.pendingNotes.push({
+      type:           $('#qf-new-note-type').value || 'note',
+      content,
+      partner_source: _readPartnerSourceSelect('#qf-new-note-source'),
+    });
+    $('#qf-new-note-content').value = '';
+    $('#qf-new-note-source').value = '';
+    _renderQfBufferedNotes();
+  }
 
   // Stable mapping of orchestrator `discovered` keys -> UI tile config.
   const TILES = [
@@ -2644,6 +2753,33 @@
         if (state.currentResult) {
           state.currentResult.saved_id = res.page_id;
           renderStakeholders(state.currentResult);
+        }
+        // v1.0.0z: flush any buffered initial notes as calls against
+        // the freshly-created lead. Best-effort — Notion save already
+        // succeeded, so a failure here is reported but non-fatal.
+        if (qfState.pendingNotes.length) {
+          const total = qfState.pendingNotes.length;
+          let saved = 0;
+          for (const n of qfState.pendingNotes) {
+            try {
+              await jsonFetch(`/api/calls/${encodeURIComponent(res.page_id)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: n.type, content: n.content,
+                  company_name: state.currentResult?.company?.name || '',
+                  partner_source: n.partner_source || null,
+                }),
+              });
+              saved++;
+            } catch (e) {
+              console.error('[qf-notes] flush failed', e);
+            }
+          }
+          toast(`Committed ${saved}/${total} initial note${total === 1 ? '' : 's'}`,
+                 saved === total ? 'success' : 'error');
+          qfState.pendingNotes = [];
+          _renderQfBufferedNotes();
         }
         // v1.0.0p: if the AE typed an incumbent agency on the qualify
         // form, persist it as an incumbent entry now that the lead has
@@ -3791,13 +3927,23 @@
               : `<span class="muted" style="font-style:italic;">No synthesised note yet. Click <strong>✎ Edit note</strong> to write one, or re-save the call to retry AI extraction.</span>`);
         const editedBadge = (aeNote && synthesised)
           ? `<span style="font-size:9px;color:var(--text-muted);margin-left:4px;">(edited)</span>` : '';
+        // v1.0.0z: attribution chip. Shows when the note was sourced
+        // from a specific partner contact (Marina · Braze) or partner
+        // generically (Braze). Blue tint to read as "external intel".
+        const src = c.partner_source;
+        const srcChip = src ? (() => {
+          const who = src.contact_name
+            ? `${src.contact_name} · ${src.partner_name || src.partner_id}`
+            : (src.partner_name || src.partner_id);
+          return `<span class="source-chip" title="Sourced from this partner">🔗 ${escapeHtml(who)}</span>`;
+        })() : '';
         return `
           <div style="background:var(--surface-2);border:1px solid var(--border);padding:14px;border-radius:8px;margin-bottom:12px;" data-call-id="${escapeAttr(c.id)}">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
               <div style="font-size:11px;color:var(--text-dim);">
                 <strong style="color:var(--text);text-transform:uppercase;letter-spacing:.05em;">${escapeHtml(c.type)}</strong>
                 ${c.title ? ' · ' + escapeHtml(c.title) : ''} · ${escapeHtml(when)}
-                ${aiTag}${editedBadge}
+                ${aiTag}${editedBadge}${srcChip}
               </div>
               <div class="btn-row" style="flex-shrink:0;">
                 <button class="btn ghost" type="button" data-call-copy="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;" title="Copy synthesised note">📋 Copy</button>
@@ -4060,6 +4206,8 @@
         title: $('#ld-new-call-title').value.trim(),
         content,
         company_name: drawerState.original?.company || '',
+        // v1.0.0z: optional partner attribution.
+        partner_source: _readPartnerSourceSelect('#ld-new-call-source'),
       };
       const data = await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}`, {
         method: 'POST',
@@ -4071,6 +4219,10 @@
       const scope = !!extracted?.project_scope;
       $('#ld-new-call-content').value = '';
       $('#ld-new-call-title').value = '';
+      // v1.0.0z: reset source back to Internal so the next note doesn't
+      // accidentally inherit the previous attribution.
+      const srcSel = $('#ld-new-call-source');
+      if (srcSel) srcSel.value = '';
       // v0.10.0n: programmatic .value changes don't fire `input` events,
       // so the dirty-state badge would stay stuck at "Save · 1" after the
       // note saves. Manually refresh so the badge clears.
@@ -4185,6 +4337,8 @@
       loadLeadPartnerContacts(pageId);
       // v1.0.0p: agencies (incumbent + previous).
       loadLeadAgencies(pageId);
+      // v1.0.0z: populate the note-source dropdown with the partner roster.
+      populatePartnerSourceSelect('#ld-new-call-source');
       // v1.0.0g: surface Restore button if local cache appears empty
       // (no calls AND no contacts) AND a Notion backup exists.
       checkRestoreAvailability(pageId, lead);
@@ -4525,6 +4679,8 @@
           title: $('#ld-new-call-title')?.value?.trim() || '',
           content: pendingNote,
           company_name: drawerState.original?.company || '',
+          // v1.0.0z: carry the source through the combined-save path too.
+          partner_source: _readPartnerSourceSelect('#ld-new-call-source'),
         };
         const callRes = await jsonFetch(`/api/calls/${encodeURIComponent(drawerState.id)}`, {
           method: 'POST',
@@ -4533,6 +4689,9 @@
         });
         $('#ld-new-call-content').value = '';
         if ($('#ld-new-call-title')) $('#ld-new-call-title').value = '';
+        // v1.0.0z: clear partner source on the combined-save success path.
+        const srcSel2 = $('#ld-new-call-source');
+        if (srcSel2) srcSel2.value = '';
         await loadLeadCalls(drawerState.id);
         // v0.10.0p: server auto-refreshes the summary — render new state-of-play.
         if (callRes?.summary) {
@@ -6366,6 +6525,100 @@
   // if the list changes mid-session.
   let _ownersCache = null;
 
+  // v1.0.0z: partner-source dropdowns for the note composer. Cached
+  // per session — refreshed by passing force=true if the partner
+  // roster changes mid-session.
+  let _partnerSourcesCache = null;
+
+  async function loadPartnerSources(force) {
+    if (_partnerSourcesCache && !force) return _partnerSourcesCache;
+    try {
+      const data = await jsonFetch('/api/partners');
+      const partners = data.partners || [];
+      // For each partner, pull its contacts (one round-trip per partner).
+      // With 2 partners (Braze + Hightouch) this is cheap; if the roster
+      // grows we can switch to a dedicated /api/partners/contacts endpoint.
+      const out = [];
+      for (const p of partners) {
+        try {
+          const det = await jsonFetch(`/api/partners/${encodeURIComponent(p.id)}`);
+          const contacts = (det.partner?.contacts || [])
+            .filter(c => (c.status || 'active') === 'active')
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          out.push({ id: p.id, name: p.name, contacts });
+        } catch (_) {
+          out.push({ id: p.id, name: p.name, contacts: [] });
+        }
+      }
+      _partnerSourcesCache = out;
+    } catch (_) {
+      _partnerSourcesCache = [];
+    }
+    return _partnerSourcesCache;
+  }
+
+  // Encoding: option value = "<partner_id>|<contact_id>".
+  // Empty contact_id = "partner generically." Empty value = Internal.
+  async function populatePartnerSourceSelect(selector) {
+    const sel = (typeof selector === 'string') ? $(selector) : selector;
+    if (!sel) return;
+    const preserved = sel.value || '';
+    const partners = await loadPartnerSources();
+    // Wipe everything except the leading Internal option.
+    const head = sel.querySelector('option[value=""]');
+    sel.innerHTML = '';
+    if (head) sel.appendChild(head);
+    else sel.appendChild(new Option('Internal — MR-side observation', ''));
+    partners.forEach(p => {
+      // Partner-generic option ("Braze partnerships team")
+      const generic = new Option(`${p.name} — generic`, `${p.id}|`);
+      sel.appendChild(generic);
+      // Per-contact options (grouped under an optgroup)
+      if (p.contacts.length) {
+        const og = document.createElement('optgroup');
+        og.label = p.name;
+        p.contacts.forEach(c => {
+          const opt = new Option(`${c.name}${c.title ? ' · ' + c.title : ''}`,
+                                  `${p.id}|${c.id}`);
+          og.appendChild(opt);
+        });
+        sel.appendChild(og);
+      }
+    });
+    // Restore preserved value if still in the list.
+    if (preserved && Array.from(sel.options).some(o => o.value === preserved)) {
+      sel.value = preserved;
+    }
+  }
+
+  // Decodes a select's current value into the partner_source shape
+  // the server expects. Returns null for Internal.
+  function _readPartnerSourceSelect(selector) {
+    const sel = (typeof selector === 'string') ? $(selector) : selector;
+    if (!sel || !sel.value) return null;
+    const [pid, cid] = (sel.value || '').split('|');
+    if (!pid) return null;
+    // Look up display names from the cache so the server stores them
+    // alongside the ids (useful for the AI synthesis prompt without a
+    // second round-trip).
+    let partnerName = '', contactName = '';
+    if (_partnerSourcesCache) {
+      const p = _partnerSourcesCache.find(x => x.id === pid);
+      if (p) {
+        partnerName = p.name || '';
+        if (cid) {
+          const c = (p.contacts || []).find(x => x.id === cid);
+          if (c) contactName = c.name || '';
+        }
+      }
+    }
+    const out = { partner_id: pid };
+    if (cid) out.contact_id = cid;
+    if (partnerName) out.partner_name = partnerName;
+    if (contactName) out.contact_name = contactName;
+    return out;
+  }
+
   async function loadMrOwners() {
     if (_ownersCache) return _ownersCache;
     try {
@@ -6487,6 +6740,11 @@
     // ones (partner-add-form, partner-contact-form) call hydrateOwnerSelects
     // themselves after their template renders.
     hydrateOwnerSelects();
+    // v1.0.0z: populate the qualify-form note-source dropdown (the
+    // lead-drawer one populates on drawer open). Wire the buffer button.
+    populatePartnerSourceSelect('#qf-new-note-source');
+    const qfAddBtn = document.getElementById('qf-add-note');
+    if (qfAddBtn) qfAddBtn.addEventListener('click', _qfBufferNote);
     // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
     // here we sync its icon to the current theme + wire click to flip.
     const _themeBtn = $('#theme-toggle');

@@ -5,6 +5,110 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0z] — 2026-05-23 — Partner-sourced notes + initial qualification notes
+
+Ben asked: "record notes from a partner (select which partner) — roll
+them up under the account, and support adding notes during initial
+qualification."
+
+### Data model
+`calls_store` records now carry an optional `partner_source`:
+```json
+{
+  "partner_id": "braze",                  // required
+  "contact_id": "braze-marina-klusas",    // optional — "Braze generic" without it
+  "partner_name": "Braze",                // display, captured at save time
+  "contact_name": "Marina Klusas"         // display
+}
+```
+Stored on every new call. Editable post-hoc via `update_call`.
+`_normalise_partner_source` handles None / empty / partial inputs
+defensively.
+
+### Lead drawer note composer
+New **Source** dropdown above the content textarea:
+- Default: `Internal — MR-side observation` (no attribution)
+- Per partner: `Braze — generic` (no specific contact)
+- Per partner-contact: optgroup of all active contacts under each
+  partner (`Marina Klusas · Strategic Enterprise AE — CPG`)
+
+The source is captured both on the "Save note now" path (immediate
+save) and the "Save changes" combined-save path (buffered note flushed
+on save). Resets to Internal after each successful save so the next
+note doesn't accidentally inherit the previous attribution.
+
+### Call card chip
+Every saved note that has a partner_source renders a blue-tinted
+`🔗 Marina Klusas · Braze` chip in the card header (CSS class
+`.source-chip` — theme-aware, same blue palette as the country pill).
+Internal notes have no chip.
+
+### Initial qualification notes
+New section in the Qualify form, below the sourced-for partners
+field, above Save lead. AE buffers initial intel notes pre-save:
+- Type (call / note / transcript / email)
+- Content
+- Source (Internal or any partner / partner contact)
+- "+ Buffer note" stages it; "× remove" pulls it back
+
+On Save lead success, every buffered note is posted to the new lead's
+`calls_store` with its partner_source attached, then the buffer
+clears. Toast surfaces the commit count
+(`Committed 3/3 initial notes`).
+
+### AI synthesis update
+`_LEAD_SUMMARY_SYSTEM_PROMPT` extended with a CALL ATTRIBUTION
+section:
+- When a call has `partner_source.contact_name + partner_name`, the
+  prompt is told to attribute inline: *"Marina (Braze) flagged
+  Popeyes Q3 is moving"* instead of *"we heard…"*
+- When only `partner_name` is set, attribute to the partner
+  generically: *"Braze partnerships team confirmed…"*
+- Partner-sourced facts are weighted as stronger signals than internal
+  speculation
+- `_gather_lead_context` passes `partner_source` on each call so the
+  prompt has the data
+
+### Rollup endpoint
+`GET /api/partners/<pid>/contacts/<cid>/sourced-calls` returns every
+lead-side call across the whole pipeline whose `partner_source`
+matches that contact. Powers a future "everything Marina has
+contributed" rollup view on her partner contact card (UI surface
+deferred — endpoint ready when we build it).
+
+### Tests
+- 550 total (+16). `tests/test_calls_partner_source.py` covers:
+  - `_normalise_partner_source`: None / empty / missing-key / whitespace
+    / non-dict all → None or clean dict appropriately
+  - `add_call` round-trips partner_source; defaults to None when omitted
+  - `update_call` can set partner_source after-the-fact + can clear it
+  - `list_calls_sourced_from`: by contact_id, by partner_id (catches
+    partner-generic too), combined filter, no-match, empty filter
+
+### Files touched
+- `calls_store.py` — `partner_source` field + `_normalise` helper
+  + `list_calls_sourced_from()`
+- `server.py` — `_gather_lead_context` includes partner_source;
+  new `GET /api/partners/<pid>/contacts/<cid>/sourced-calls` endpoint
+- `ai_summary.py` — CALL ATTRIBUTION section in lead-summary prompt
+- `qualify.html` — note-composer source dropdown, source chip on
+  call cards, initial qualification notes section + buffer flow,
+  `populatePartnerSourceSelect` + `_readPartnerSourceSelect` helpers
+- `tests/test_calls_partner_source.py` (new, 16 tests)
+
+### What you'll see
+**Existing lead drawer**: open the Calls section. Above the content
+textarea there's a new "Source" dropdown. Pick "Marina Klusas ·
+Strategic Enterprise AE — CPG" before saving. The saved note shows
+🔗 Marina Klusas · Braze in the card header. Next time you refresh
+the AI summary, it'll attribute the intel to Marina by name.
+
+**New qualification flow**: in the Qualify view, fill in the company,
+score it, then before Save lead — type any initial notes (intro-call
+recaps, partner-shared context) with the right source attribution,
+hit + Buffer. As many as you need. Click Save lead → every buffered
+note commits to the new lead as a call, with its attribution intact.
+
 ## [1.0.0y] — 2026-05-23 — LinkedIn cell — direct link, or pre-filled search
 
 Apollo doesn't always return a `linkedin_url` for the people it finds.

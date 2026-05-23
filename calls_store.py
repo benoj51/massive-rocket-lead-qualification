@@ -114,11 +114,42 @@ def add_call(lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "content": content,
         "note": note,
         "extracted": extracted,
+        # v1.0.0z: attribution. Optional — when set, this note was
+        # sourced from a specific partner / partner contact (e.g.
+        # "Marina at Braze told us Popeyes Q3 is moving"). Powers
+        # rollup views on the partner contact + smarter AI synthesis
+        # ("Marina (Braze) flagged ..." vs generic "we heard ...").
+        # Shape: {partner_id, contact_id?, partner_name?, contact_name?}.
+        # contact_id is optional for "Braze partnership team" attribution.
+        "partner_source": _normalise_partner_source(payload.get("partner_source")),
     }
     rows = _load_raw(lead_id)
     rows.append(record)
     _write_raw(lead_id, rows)
     return record
+
+
+def _normalise_partner_source(src: Any) -> dict[str, Any] | None:
+    """Coerce caller-supplied partner_source into a clean dict.
+    Accepts None, empty dict, or a dict with partner_id / contact_id
+    plus optional display names. Returns None when nothing useful is
+    present so the field can be safely omitted from older records."""
+    if not src or not isinstance(src, dict):
+        return None
+    partner_id = (src.get("partner_id") or "").strip()
+    if not partner_id:
+        return None
+    out: dict[str, Any] = {"partner_id": partner_id}
+    cid = (src.get("contact_id") or "").strip()
+    if cid:
+        out["contact_id"] = cid
+    pname = (src.get("partner_name") or "").strip()
+    if pname:
+        out["partner_name"] = pname
+    cname = (src.get("contact_name") or "").strip()
+    if cname:
+        out["contact_name"] = cname
+    return out
 
 
 def update_call(lead_id: str, call_id: str, edits: dict[str, Any]) -> dict[str, Any] | None:
@@ -136,6 +167,10 @@ def update_call(lead_id: str, call_id: str, edits: dict[str, Any]) -> dict[str, 
         if "attendees" in edits:
             r["attendees"] = [str(a).strip() for a in (edits["attendees"] or [])
                               if str(a).strip()]
+        # v1.0.0z: partner_source is editable so an AE who forgot to
+        # attribute on first save can fix it later.
+        if "partner_source" in edits:
+            r["partner_source"] = _normalise_partner_source(edits["partner_source"])
         r["updated_at"] = _now()
         _write_raw(lead_id, rows)
         return r
@@ -149,6 +184,44 @@ def delete_call(lead_id: str, call_id: str) -> bool:
         return False
     _write_raw(lead_id, new_rows)
     return True
+
+
+# v1.0.0z: cross-lead lookup for partner-sourced notes. Used by the
+# "all account intel Marina has contributed" rollup on a partner
+# contact's summary surface.
+def list_calls_sourced_from(
+    *, partner_id: str | None = None, contact_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return every call across every lead whose partner_source
+    matches the supplied filter. If contact_id is set, matches that
+    specific person; else if only partner_id is set, matches any
+    note attributed to that partner generically. Each returned row is
+    annotated with the lead_id it belongs to (already on the record)."""
+    if not partner_id and not contact_id:
+        return []
+    out: list[dict[str, Any]] = []
+    d = _store_dir()
+    if not d.exists():
+        return out
+    for f in d.glob("*.json"):
+        try:
+            data = json.loads(f.read_text())
+            if not isinstance(data, list):
+                continue
+        except (json.JSONDecodeError, OSError):
+            continue
+        for row in data:
+            src = row.get("partner_source") or {}
+            if contact_id and src.get("contact_id") != contact_id:
+                continue
+            if partner_id and src.get("partner_id") != partner_id:
+                continue
+            if not src.get("partner_id"):
+                continue
+            out.append(row)
+    # Newest first — matches list_calls convention.
+    out.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return out
 
 
 def aggregate_extractions(lead_id: str) -> dict[str, Any]:
