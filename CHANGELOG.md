@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0w] — 2026-05-23 — Light-mode contrast audit (7 more sites)
+
+Systematic audit of every hardcoded colour in `qualify.html` that
+could break in light mode. Fixed seven occurrences of "dark-mode
+tint" patterns where `rgba(255,255,255,.06–.08)` was used as a subtle
+recessed background or border — invisible in light mode.
+
+### Status badges (4 sites)
+"ALREADY ASSIGNED", "LEFT" (×2 different surfaces), "UNCLEAR",
+"SAVED" pill badges were all using `rgba(255,255,255,.06–.08)` as
+the background. Replaced with `var(--surface-2)` + `border:1px solid
+var(--border)` so they render as a subtle recessed chip in both
+modes (cream-on-cream in light, dark-on-dark in dark).
+
+### Row tinting (2 sites)
+- Apollo contact-search "already saved" row tint
+  (`rgba(255,255,255,.04)`) → `var(--surface-2)`
+- Apollo contact-search "saved" border ternary → unified to
+  `var(--border)` for both branches (the visual "saved" state comes
+  from the row opacity already)
+
+### Country pill text colour
+`.org-node .n-pill.country` had `color: #93c5fd` (pastel blue) which
+read fine on dark surfaces but failed contrast on light. Now defaults
+to `#1e40af` (darker blue, ~7:1 on the rgba(59,130,246,.10) light
+tint) with a `:root:not([data-theme="light"])` override restoring
+the pastel for dark mode.
+
+### Gantt cell separator
+The roadmap-gantt empty-cell separator was `1px solid
+rgba(255,255,255,.02)` — invisible in light mode. Switched to
+`var(--border)` with opacity .4 so the separator reads softly in
+both modes.
+
+### Audit notes
+The remaining `rgba(255,255,255,...)` references are all intentional:
+- CSS variable definitions in the `:root` block (theme-flipped)
+- Drawer overlay backdrops (`rgba(0,0,0,.55-.7)` — always-dim by
+  design)
+- The chart-colour helper (already theme-aware)
+- A red banner's white text (legible on red regardless of theme)
+
+The remaining `color:#fff` references are all on accent-orange or
+error-red surfaces where white-on-coloured is correct in both modes.
+
+### Files touched
+- `qualify.html` — 7 inline-style fixes + 1 CSS rule for the
+  country pill
+
 ## [1.0.0v] — 2026-05-23 — ICP + pricing chart: light-mode contrast
 
 Both Chart.js bar charts (ICP Score on Qualify view, pricing on

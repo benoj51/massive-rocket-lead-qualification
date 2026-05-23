@@ -504,8 +504,12 @@
   }
   .org-node .n-pill.overdue { background: rgba(239,68,68,.15); color: var(--red); border-color: rgba(239,68,68,.35); }
   .org-node .n-pill.territory { background: rgba(255,77,42,.10); color: var(--accent-text); border-color: rgba(255,77,42,.25); }
-  /* v1.0.0l: country pill — distinct from region (region is a tag, country is a single value). */
-  .org-node .n-pill.country { background: rgba(59,130,246,.10); color: #93c5fd; border-color: rgba(59,130,246,.30); }
+  /* v1.0.0l: country pill — distinct from region (region is a tag, country is a single value).
+     v1.0.0w: text colour was pastel blue (#93c5fd) — fine on dark, low contrast on light. Default to the darker blue
+     and override for dark mode so both modes have ~5:1 contrast on the
+     subtle blue tint. */
+  .org-node .n-pill.country { background: rgba(59,130,246,.10); color: #1e40af; border-color: rgba(59,130,246,.30); }
+  :root:not([data-theme="light"]) .org-node .n-pill.country { color: #93c5fd; }
 
   /* Document preview modal — v0.10.0u ----------------------- */
   .doc-preview-overlay {
@@ -3077,11 +3081,11 @@
         listEl.innerHTML = contacts.map(c => {
           const already = assigned.has(c.id);
           return `
-            <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:${already ? 'rgba(255,255,255,.04)' : 'var(--surface)'};border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:${already ? 'default' : 'pointer'};opacity:${already ? '.55' : '1'};">
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:${already ? 'var(--surface-2)' : 'var(--surface)'};border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:${already ? 'default' : 'pointer'};opacity:${already ? '.55' : '1'};">
               <input type="checkbox" data-pa-cid="${escapeAttr(c.id)}" ${already ? 'disabled' : ''} style="margin-top:3px;" />
               <div style="flex:1;min-width:0;">
                 <div style="font-size:13px;"><strong>${escapeHtml(c.name || '—')}</strong>
-                  ${already ? '<span style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">ALREADY ASSIGNED</span>' : ''}
+                  ${already ? '<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">ALREADY ASSIGNED</span>' : ''}
                 </div>
                 <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '—')}${_tagText(c, 'territories', 'territory') ? ' · ' + escapeHtml(_tagText(c, 'territories', 'territory')) : ''}${_tagText(c, 'regions', 'region') ? ' · ' + escapeHtml(_tagText(c, 'regions', 'region')) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
                 ${(c.industries || []).length ? `<div style="margin-top:3px;">${c.industries.map(i => `<span class="tag signal" style="font-size:9px;margin-right:3px;">${escapeHtml(i)}</span>`).join('')}</div>` : ''}
@@ -3145,7 +3149,7 @@
         return `<span class="muted" style="font-size:10px;">Touched ${ago} · cadence ${c.cadence_days}d</span>`;
       };
       const statusBadge = (c) => {
-        if (c.status === 'left') return '<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">LEFT</span>';
+        if (c.status === 'left') return '<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">LEFT</span>';
         if (c.status === 'dormant') return '<span style="background:rgba(251,191,36,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">DORMANT</span>';
         return '';
       };
@@ -3297,7 +3301,7 @@
     el.style.display = 'block';
     const roleBadge = (role) => {
       if (role === 'prospect-side') return `<span style="background:rgba(255,77,42,.12);color:var(--accent-text);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">PROSPECT</span>`;
-      return `<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">UNCLEAR</span>`;
+      return `<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">UNCLEAR</span>`;
     };
     el.innerHTML = `
       <div style="background:rgba(255,77,42,.06);border:1px solid rgba(255,77,42,.3);border-radius:8px;padding:12px;">
@@ -3632,12 +3636,12 @@
     const el = $('#ld-contacts-search-results');
     el.style.display = 'block';
     const rows = candidates.map((c, i) => `
-      <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid ${c.already_saved ? 'rgba(255,255,255,.08)' : 'var(--border)'};border-radius:6px;margin-bottom:6px;cursor:${c.already_saved ? 'default' : 'pointer'};opacity:${c.already_saved ? '.55' : '1'};">
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:${c.already_saved ? 'default' : 'pointer'};opacity:${c.already_saved ? '.55' : '1'};">
         <input type="checkbox" data-search-idx="${i}" ${c.already_saved ? 'disabled' : 'checked'} style="margin-top:3px;" />
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:var(--text);font-weight:500;">
             ${escapeHtml(c.name || '—')}
-            ${c.already_saved ? '<span style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">SAVED</span>' : ''}
+            ${c.already_saved ? '<span style="background:var(--surface);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">SAVED</span>' : ''}
           </div>
           <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
           ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
@@ -5342,7 +5346,7 @@
         if (inBar) {
           return `<div style="background:${color};opacity:.85;height:24px;border-right:1px solid var(--bg);${first ? 'border-top-left-radius:4px;border-bottom-left-radius:4px;' : ''}${last ? 'border-top-right-radius:4px;border-bottom-right-radius:4px;' : ''};display:flex;align-items:center;padding:0 6px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${first ? escapeHtml(m.title) : ''}</div>`;
         }
-        return `<div style="height:24px;border-right:1px solid rgba(255,255,255,.02);"></div>`;
+        return `<div style="height:24px;border-right:1px solid var(--border);opacity:.4;"></div>`;
       }).join('');
       return `
         <div style="font-size:11px;color:var(--text-dim);padding:4px 8px;border-right:1px solid var(--border);background:var(--surface-2);">${escapeHtml(m.workstream)}</div>
@@ -6158,7 +6162,7 @@
       const statusBadge = c.status === 'dormant'
         ? '<span style="background:rgba(251,191,36,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">DORMANT</span>'
         : c.status === 'left'
-        ? '<span style="background:rgba(255,255,255,.06);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">LEFT</span>'
+        ? '<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">LEFT</span>'
         : '';
       const meta = [
         c.surface === 'lead' ? '<span style="color:var(--accent-text);font-weight:600;">Lead</span>' : '<span style="color:var(--blue);font-weight:600;">Partner</span>',
