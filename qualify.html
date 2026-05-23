@@ -912,6 +912,19 @@
         </div>
       </div>
     </div>
+    <!-- v1.0.0bf: Morning brief — first thing the user sees. Aggregates
+         engagement drops + due todos + new assignments. Hidden when
+         empty (no signal worth interrupting for). -->
+    <div class="card" id="home-brief-card" style="display:none;margin-bottom:14px;border-color:var(--accent);background:rgba(74,222,128,.03);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Your morning brief</h3>
+          <div class="muted" id="home-brief-headline" style="font-size:11px;margin-top:2px;"></div>
+        </div>
+        <button id="home-brief-dismiss" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;" title="Hide for this session">Dismiss</button>
+      </div>
+      <div id="home-brief-body" style="margin-top:10px;"></div>
+    </div>
     <div id="home-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
       <div class="card" id="home-overdue-card">
@@ -8960,6 +8973,118 @@
     // payload stays focused on personal data. Fire-and-forget; the
     // panel updates whenever the activity API responds.
     _loadActivityFeed();
+
+    // v1.0.0bf: morning brief — separate fetch (small payload, but
+    // pulls from todos + notifications stores). Renders at the top of
+    // Home as a dismissible card.
+    _loadMorningBrief();
+  }
+
+  // v1.0.0bf: morning brief loader + renderer.
+  async function _loadMorningBrief() {
+    const card = $('#home-brief-card');
+    if (!card) return;
+    // Session-scoped dismiss: if the user clicked Dismiss in this
+    // tab, don't re-show until they reload.
+    if (sessionStorage.getItem('mr-brief-dismissed') === '1') {
+      card.style.display = 'none';
+      return;
+    }
+    const owner = _currentRecipient();
+    if (!owner) { card.style.display = 'none'; return; }
+    try {
+      const data = await jsonFetch(
+        `/api/home/morning-brief?owner=${encodeURIComponent(owner)}`);
+      if (data.is_empty) {
+        card.style.display = 'none';
+        return;
+      }
+      card.style.display = 'block';
+      $('#home-brief-headline').textContent = data.headline || '';
+      $('#home-brief-body').innerHTML = _renderMorningBriefBody(data);
+      _wireMorningBriefHandlers(data);
+    } catch (e) {
+      console.warn('morning brief fetch failed', e);
+      card.style.display = 'none';
+    }
+    const dismiss = $('#home-brief-dismiss');
+    if (dismiss && !dismiss.dataset.wired) {
+      dismiss.dataset.wired = '1';
+      dismiss.addEventListener('click', () => {
+        sessionStorage.setItem('mr-brief-dismissed', '1');
+        card.style.display = 'none';
+      });
+    }
+  }
+
+  function _renderMorningBriefBody(data) {
+    const sections = [];
+    if ((data.engagement_drops || []).length) {
+      sections.push(`
+        <div style="margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px;">Engagement drops</div>
+          ${data.engagement_drops.map(n => `
+            <div data-brief-open='${escapeAttr(JSON.stringify(n.link || {}))}'
+                 style="font-size:11px;padding:4px 8px;border-left:2px solid var(--red);margin-bottom:3px;cursor:pointer;background:rgba(239,68,68,.04);">
+              ${escapeHtml(n.title)}<br>
+              <span class="muted" style="font-size:10px;">${escapeHtml(n.body || '')}</span>
+            </div>
+          `).join('')}
+        </div>
+      `);
+    }
+    if ((data.todos_overdue || []).length) {
+      sections.push(`
+        <div style="margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px;">Overdue todos</div>
+          ${data.todos_overdue.map(t => `
+            <div style="font-size:11px;padding:4px 8px;border-left:2px solid var(--red);margin-bottom:3px;background:rgba(239,68,68,.04);">
+              ${escapeHtml(t.text)}
+              <span style="color:var(--red);font-size:10px;margin-left:6px;">${t.days_overdue}d overdue</span>
+            </div>
+          `).join('')}
+        </div>
+      `);
+    }
+    if ((data.todos_due_today || []).length) {
+      sections.push(`
+        <div style="margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:4px;">Due today</div>
+          ${data.todos_due_today.map(t => `
+            <div style="font-size:11px;padding:4px 8px;border-left:2px solid var(--yellow);margin-bottom:3px;background:rgba(251,191,36,.04);">
+              ${escapeHtml(t.text)}
+              ${t.priority ? `<span class="muted" style="font-size:10px;margin-left:6px;">${escapeHtml(t.priority)}</span>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `);
+    }
+    if ((data.new_assignments || []).length) {
+      sections.push(`
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:4px;">New assignments</div>
+          ${data.new_assignments.map(n => `
+            <div data-brief-open='${escapeAttr(JSON.stringify(n.link || {}))}'
+                 style="font-size:11px;padding:4px 8px;border-left:2px solid var(--accent);margin-bottom:3px;cursor:pointer;background:rgba(74,222,128,.04);">
+              ${escapeHtml(n.title)}
+            </div>
+          `).join('')}
+        </div>
+      `);
+    }
+    return sections.join('');
+  }
+
+  function _wireMorningBriefHandlers(_data) {
+    document.querySelectorAll('[data-brief-open]').forEach(row => {
+      row.addEventListener('click', () => {
+        let link;
+        try { link = JSON.parse(row.dataset.briefOpen); } catch (_) { link = null; }
+        if (!link || !link.kind) return;
+        // Reuse todo-link router for consistent navigation.
+        _openTodoLink(link);
+      });
+    });
   }
 
   // v1.0.0av: render the "Needs attention" card. Each row shows the

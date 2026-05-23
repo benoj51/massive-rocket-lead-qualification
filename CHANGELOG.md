@@ -5,6 +5,61 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bf] — 2026-05-23 — Morning brief on Home
+
+The first thing the user sees when they open the app: a single
+"what should I look at first" card that aggregates the day's
+notable signals. Closes the loop on every store this session has
+shipped — engagement, todos, notifications, all in one glance.
+
+### Added
+
+- **`GET /api/home/morning-brief?owner=`** — server-side aggregator.
+  Pulls every unread notification for the owner, partitions into:
+  - `engagement_drops`: notifications of kind `engagement_dropped`
+  - `new_assignments`: notifications of kind `assigned_lead` or
+    `assigned_partner_contact`
+  Pulls open todos for the owner, splits into:
+  - `todos_due_today`: due_date == today, sorted by priority
+  - `todos_overdue`: due_date < today, sorted most-overdue first
+  Plus a synthesised `headline` (e.g. *"2 accounts dropped engagement
+  · 3 overdue todos · 1 due today"*) and an `is_empty` flag so the
+  UI hides the card when there's nothing to nag about.
+- **Morning brief card** at the top of Home — first thing AE sees.
+  Header: title + headline + Dismiss button. Body: up to four
+  coloured sections (engagement drops red, overdue red, due-today
+  yellow, new assignments green). Each entry shows the title + body
+  preview + click-through to the entity. Dismiss is session-scoped
+  (sessionStorage) so it doesn't reappear during the current tab
+  visit but does come back tomorrow / on reload.
+- **Reuses the `_openTodoLink` router** so click-through routing
+  stays consistent with every other "click to open entity" surface
+  in the platform.
+
+### Tests
+
+- **`tests/test_morning_brief.py`** — 9 tests:
+  - owner-required validation
+  - empty state (no signals → is_empty=True, headline=None)
+  - engagement drops surfaced with slim shape (notification_id)
+  - read notifications excluded (don't keep nagging after the user
+    acknowledged the drop)
+  - todos split correctly by due_date (today/overdue/future/no-due),
+    only today + overdue surface
+  - completed todos excluded
+  - overdue sorted most-overdue-first
+  - new assignments (both kinds) surface
+  - headline correctly concatenates counts across signal types
+
+### Why a separate endpoint, not folded into `/api/home`
+
+`/api/home` already does dashboard rollup + Notion pipeline + per-
+lead engagement scoring for at-risk leads. Adding the brief
+aggregation would compound the latency on the most-visited
+endpoint. The brief is small and fast on its own; a parallel fetch
+keeps the Home greeting + KPIs painting immediately while the
+brief backfills.
+
 ## [1.0.0be] — 2026-05-23 — Tech stack chips in lead drawer
 
 After v1.0.0bb's auto-merge wrote new tools into the lead's

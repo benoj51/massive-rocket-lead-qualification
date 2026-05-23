@@ -3755,6 +3755,124 @@ def api_home():
     })
 
 
+# v1.0.0bf: morning brief --------------------------------------------------
+# A single endpoint that summarises today's notable signals for the user:
+# - engagement drops since yesterday (notifications of kind
+#   engagement_dropped that the user hasn't read yet)
+# - todos due today or overdue
+# - new assignments since last brief view (unread assigned_* notifications)
+#
+# Designed for a top-of-Home card that gives the AE the 30-second
+# "what should I look at first" answer when they open the app.
+
+@app.route("/api/home/morning-brief", methods=["GET"])
+def api_home_morning_brief():
+    """Return the user's morning brief — engagement drops + due todos
+    + recent assignments.
+
+    Query:
+      owner — required, the user's display name.
+
+    Returns:
+      {
+        "engagement_drops": [{notification_id, title, body, link, ts}],
+        "todos_due_today":  [{id, text, priority, due_date}],
+        "todos_overdue":    [{id, text, priority, due_date, days_overdue}],
+        "new_assignments":  [{notification_id, title, body, link, ts}],
+        "headline":         "<one-line summary or null>",
+        "is_empty":         bool,   # True iff there's literally nothing
+      }
+    """
+    owner = (request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+
+    # Pull every unread notification once; partition into the two
+    # buckets we surface here.
+    all_notifs = notifications_store.list_for(owner, limit=200)
+    unread = [n for n in all_notifs if not n.get("read_at")]
+    drops = [n for n in unread if n.get("type") == "engagement_dropped"]
+    assignments = [n for n in unread
+                   if n.get("type") in ("assigned_lead",
+                                         "assigned_partner_contact")]
+
+    # Strip notification rows to the fields the UI needs (smaller payload,
+    # less coupling to the full notification schema).
+    def _slim(n: dict) -> dict:
+        return {
+            "notification_id": n.get("id"),
+            "title":           n.get("title"),
+            "body":            n.get("body"),
+            "link":            n.get("link"),
+            "ts":              n.get("created_at"),
+        }
+
+    # Todos: split by today / overdue.
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    all_todos = todos_store.list_for(owner)
+    due_today: list[dict] = []
+    overdue: list[dict] = []
+    for t in all_todos:
+        if t.get("done"):
+            continue
+        due = t.get("due_date")
+        if not due:
+            continue
+        if due == today:
+            due_today.append({
+                "id":        t.get("id"),
+                "text":      t.get("text"),
+                "priority":  t.get("priority"),
+                "due_date":  due,
+                "link":      t.get("link"),
+            })
+        elif due < today:
+            try:
+                d_then = datetime.fromisoformat(due).date()
+                d_now  = datetime.fromisoformat(today).date()
+                days_overdue = (d_now - d_then).days
+            except (ValueError, TypeError):
+                days_overdue = 0
+            overdue.append({
+                "id":           t.get("id"),
+                "text":         t.get("text"),
+                "priority":     t.get("priority"),
+                "due_date":     due,
+                "days_overdue": days_overdue,
+                "link":         t.get("link"),
+            })
+
+    # Sort lists for predictable rendering — highest urgency first.
+    overdue.sort(key=lambda t: -(t.get("days_overdue") or 0))
+    due_today.sort(key=lambda t: 0 if t.get("priority") == "high"
+                                     else 1 if t.get("priority") == "medium"
+                                     else 2)
+
+    parts = []
+    if drops:
+        parts.append(f"{len(drops)} account{'s' if len(drops) != 1 else ''} dropped engagement")
+    if overdue:
+        parts.append(f"{len(overdue)} overdue todo{'s' if len(overdue) != 1 else ''}")
+    if due_today:
+        parts.append(f"{len(due_today)} due today")
+    if assignments:
+        parts.append(f"{len(assignments)} new assignment{'s' if len(assignments) != 1 else ''}")
+    headline = " · ".join(parts) if parts else None
+
+    is_empty = not (drops or due_today or overdue or assignments)
+
+    return jsonify({
+        "engagement_drops": [_slim(n) for n in drops[:5]],
+        "todos_due_today":  due_today[:10],
+        "todos_overdue":    overdue[:10],
+        "new_assignments":  [_slim(n) for n in assignments[:5]],
+        "headline":         headline,
+        "is_empty":         is_empty,
+        "generated_at":     datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    })
+
+
 # v1.0.0al: Notifications API ----------------------------------------------
 # Per-user notifications, fired when ownership of an entity changes.
 # Bell-icon in the nav reads `unread_count`; the dropdown reads `list`.
