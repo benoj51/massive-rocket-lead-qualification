@@ -5,6 +5,53 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ag] — 2026-05-23 — Settings panel: chip-list editor, not textareas
+
+Ben pointed out that the v1.0.0ac settings panel — seven monospace
+textareas in a grid — was bad for editing. He was right: you had to
+scroll inside each textarea to see the full list, no visual feedback
+on what was added/removed, no "what's a default vs custom" cue, and
+the monospace font felt like editing a config file.
+
+### Redesign
+
+Each enum is now a proper **tag editor**:
+- Every value is a visible **chip** in a soft-bordered list area
+- × button on each chip removes it (and immediately saves)
+- **Add input** at the bottom: type a value, press Enter (or click
+  Add). Duplicate detection is case-insensitive — pasting a value
+  that's already there toasts "already in the list" instead of
+  silently deduping
+- The Add input **re-focuses after a successful add** so power users
+  can type-Enter-type-Enter through a list without reaching for the
+  mouse
+- **Per-card immediate save** — no batch Save button. Each add /
+  remove fires a PATCH and re-renders. Reset still confirms before
+  acting since it's destructive.
+- Each card carries a **hint subtitle** ("Importance to MR", etc.)
+  + a value count ("13 values"). Less guessing about what each enum
+  means in practice.
+
+### Visual
+- Bigger card padding (12px / 18px panel padding) — breathes
+- Cards lift out from the panel surface via background contrast
+  (`--surface-2` panel → `--surface` cards)
+- Chip rows have their own inset background so the list reads as a
+  distinct element
+- Chip × buttons hover-tint red so destructive intent is signalled
+- Subtle panel drop-shadow so it visually elevates above the
+  Partners list
+- Light + dark mode both first-class (uses `var(--surface)` /
+  `var(--input-bg)` etc.)
+
+### Files touched
+- `qualify.html` — new CSS for `.enum-card` / `.enum-chip` etc.,
+  rewritten `_renderEnumSettings` + new `_enumCardHtml` /
+  `_wireEnumCards` / `_commitAdd` / `_saveEnumKey` helpers
+
+### Tests
+- 568 still passing. UI-only change.
+
 ## [1.0.0af] — 2026-05-23 — Retire the last orange hues — MR Red is the only warm
 
 v1.0.0ae replaced the old soft orange (`#ff4d2a`) with MR Red but

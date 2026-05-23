@@ -539,6 +539,92 @@
   }
   :root:not([data-theme="light"]) .source-chip { color: #93c5fd; }
 
+  /* v1.0.0ag: enum settings — chip-list editor. Replaces the cramped
+     textarea-per-enum layout with a proper tag editor: every value is
+     a visible chip with an × to remove; an Add input appends new
+     values inline. Per-card immediate save (no batch). */
+  .enum-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .enum-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .enum-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    align-content: flex-start;
+  }
+  .enum-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 3px 4px 3px 10px;
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.4;
+    transition: background .15s, border-color .15s;
+  }
+  .enum-chip:hover {
+    background: var(--surface);
+    border-color: var(--border-strong);
+  }
+  .enum-chip-label { white-space: nowrap; }
+  .enum-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px; height: 18px;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    margin-left: 2px;
+    transition: background .15s, color .15s;
+  }
+  .enum-chip-x:hover {
+    background: rgba(239,68,68,.15);
+    color: var(--red);
+  }
+  .enum-add {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .enum-add input {
+    flex: 1;
+    padding: 5px 10px;
+    font-size: 12px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    transition: border-color .15s, background .15s;
+  }
+  .enum-add input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--input-focus-bg);
+  }
+
   /* v1.0.0ab: design-system icons + RAG dots.
      Inline SVG icons (Lucide-style) replace decorative emojis across
      the platform. They adopt surrounding text colour via currentColor,
@@ -7755,69 +7841,83 @@
     }
   }
 
+  // v1.0.0ag: enum settings — chip-list editor. Each value is a
+  // removable chip; the "Add" input at the bottom appends new values.
+  // Each chip-remove and add fires an immediate PATCH (no separate
+  // Save button — actions feel direct, mistakes are one click to fix
+  // since values can be re-added). Reset confirms then resets to
+  // defaults. State is held in `cfg` and re-rendered on each action.
   function _renderEnumSettings(cfg) {
     const panel = $('#ptn-settings-panel');
     if (!panel) return;
-    // The order/labels we present to the user.
     const sections = [
-      { key: 'industries',         label: 'Industries' },
-      { key: 'territories',        label: 'Territories' },
-      { key: 'regions',            label: 'Regions' },
-      { key: 'statuses',           label: 'Contact statuses' },
-      { key: 'partner_sentiments', label: 'Partner sentiments' },
-      { key: 'tiers',              label: 'Tiers' },
-      { key: 'seniorities',        label: 'Seniorities' },
+      { key: 'industries',         label: 'Industries',
+        hint: 'Verticals you sell into' },
+      { key: 'territories',        label: 'Territories',
+        hint: 'Partner segment names (Strategic Enterprise, Mid-Market, ...)' },
+      { key: 'regions',            label: 'Regions',
+        hint: 'Geographic regions (UK, EMEA, ...)' },
+      { key: 'statuses',           label: 'Contact statuses',
+        hint: 'Lifecycle (active / dormant / left)' },
+      { key: 'partner_sentiments', label: 'Partner sentiments',
+        hint: 'How they feel about MR (Champion → Blocker)' },
+      { key: 'tiers',              label: 'Tiers',
+        hint: 'Importance to MR (Critical → Awareness)' },
+      { key: 'seniorities',        label: 'Seniorities',
+        hint: 'Escalation path (C-Suite → IC)' },
     ];
     panel.innerHTML = `
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
           <div>
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">${icon('settings', { size: 12 })} Enum settings</div>
-            <div class="muted" style="font-size:10px;margin-top:2px;">One value per line. Order is preserved. Blank lines + duplicates dropped automatically. Empty list resets to defaults.</div>
+            <h3 style="margin:0;font-size:14px;">Customise dropdowns</h3>
+            <div class="muted" style="font-size:11px;margin-top:2px;">Add or remove values used in every dropdown across the platform. Changes save immediately.</div>
           </div>
-          <button id="ptn-settings-close" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">Done</button>
+          <button id="ptn-settings-close" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">Done</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;">
-          ${sections.map(s => `
-            <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
-                <strong style="font-size:12px;">${escapeHtml(s.label)}</strong>
-                <button class="btn ghost" type="button" data-enum-reset="${escapeAttr(s.key)}" style="padding:2px 8px;font-size:10px;" title="Reset to defaults">Reset</button>
-              </div>
-              <textarea data-enum-key="${escapeAttr(s.key)}" rows="8" style="width:100%;font-family:var(--mono);font-size:12px;padding:6px 8px;">${escapeHtml((cfg[s.key] || []).join('\n'))}</textarea>
-            </div>
-          `).join('')}
-        </div>
-        <div class="btn-row" style="margin-top:12px;">
-          <button id="ptn-settings-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save changes</button>
-          <span class="muted" style="font-size:11px;">Affects every dropdown across the platform on next refresh.</span>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+          ${sections.map(s => _enumCardHtml(s, cfg[s.key] || [])).join('')}
         </div>
       </div>
     `;
     hydrateIcons(panel);
+    _wireEnumCards(panel, cfg);
     $('#ptn-settings-close').addEventListener('click', () => { panel.style.display = 'none'; });
-    $('#ptn-settings-save').addEventListener('click', async () => {
-      const updates = {};
-      panel.querySelectorAll('textarea[data-enum-key]').forEach(ta => {
-        const key = ta.dataset.enumKey;
-        const lines = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
-        updates[key] = lines;
-      });
-      try {
-        await jsonFetch('/api/settings/enums', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updates),
-        });
-        toast('Enum settings saved · refreshing dropdowns', 'success');
-        // Invalidate the cached enums so the next render pulls fresh.
-        partnersState.enums = null;
-        await initPartners();
-        panel.style.display = 'none';
-      } catch (e) {
-        toast(`Save failed: ${e.body?.error || e.message}`, 'error');
-      }
-    });
+  }
+
+  function _enumCardHtml(section, values) {
+    const chips = values.map((v, i) => `
+      <span class="enum-chip" data-enum-value="${escapeAttr(v)}">
+        <span class="enum-chip-label">${escapeHtml(v)}</span>
+        <button type="button" class="enum-chip-x" data-enum-remove="${escapeAttr(v)}" title="Remove">${icon('x', { size: 10 })}</button>
+      </span>
+    `).join('');
+    const empty = values.length === 0
+      ? '<div class="muted" style="font-size:11px;font-style:italic;padding:6px 0;">No values yet — add one below.</div>'
+      : '';
+    return `
+      <div class="enum-card" data-enum-key="${escapeAttr(section.key)}">
+        <div class="enum-card-head">
+          <div>
+            <strong style="font-size:13px;">${escapeHtml(section.label)}</strong>
+            <div class="muted" style="font-size:10px;margin-top:2px;">${escapeHtml(section.hint)} · ${values.length} ${values.length === 1 ? 'value' : 'values'}</div>
+          </div>
+          <button class="btn ghost" type="button" data-enum-reset="${escapeAttr(section.key)}" style="padding:3px 9px;font-size:10px;" title="Reset to platform defaults">Reset</button>
+        </div>
+        <div class="enum-chips">
+          ${chips}
+          ${empty}
+        </div>
+        <div class="enum-add">
+          <input type="text" data-enum-add="${escapeAttr(section.key)}" placeholder="Add a value, press Enter" />
+          <button class="btn" type="button" data-enum-add-btn="${escapeAttr(section.key)}" style="padding:5px 12px;font-size:11px;">Add</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function _wireEnumCards(panel, cfg) {
+    // Reset
     panel.querySelectorAll('[data-enum-reset]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const key = btn.dataset.enumReset;
@@ -7825,13 +7925,74 @@
         try {
           const updated = await jsonFetch(`/api/settings/enums/${encodeURIComponent(key)}/reset`,
                                             { method: 'POST' });
-          toast(`${key} reset to defaults`, 'success');
+          toast(`Reset ${key.replace(/_/g, ' ')} to defaults`, 'success');
+          // Re-render with the fresh state from the server.
+          partnersState.enums = null;
           _renderEnumSettings(updated);
         } catch (e) {
           toast(`Reset failed: ${e.body?.error || e.message}`, 'error');
         }
       });
     });
+    // Remove chip
+    panel.querySelectorAll('[data-enum-remove]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const card = btn.closest('.enum-card');
+        const key = card.dataset.enumKey;
+        const value = btn.dataset.enumRemove;
+        const next = (cfg[key] || []).filter(v => v !== value);
+        await _saveEnumKey(key, next, cfg);
+      });
+    });
+    // Add input — Enter or click
+    panel.querySelectorAll('[data-enum-add]').forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          _commitAdd(input, cfg);
+        }
+      });
+    });
+    panel.querySelectorAll('[data-enum-add-btn]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.enumAddBtn;
+        const input = panel.querySelector(`[data-enum-add="${CSS.escape(key)}"]`);
+        if (input) _commitAdd(input, cfg);
+      });
+    });
+  }
+
+  async function _commitAdd(input, cfg) {
+    const key = input.dataset.enumAdd;
+    const value = (input.value || '').trim();
+    if (!value) return;
+    const current = cfg[key] || [];
+    if (current.some(v => v.toLowerCase() === value.toLowerCase())) {
+      toast(`"${value}" is already in the list`, 'error');
+      return;
+    }
+    const next = [...current, value];
+    input.value = '';
+    await _saveEnumKey(key, next, cfg);
+    // Re-focus the same Add input so power users can keep typing.
+    const refreshedInput = $('#ptn-settings-panel')
+      ?.querySelector(`[data-enum-add="${CSS.escape(key)}"]`);
+    if (refreshedInput) refreshedInput.focus();
+  }
+
+  async function _saveEnumKey(key, values, cfg) {
+    try {
+      const updated = await jsonFetch('/api/settings/enums', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: values }),
+      });
+      // Re-render the panel with the fresh state.
+      partnersState.enums = null;
+      _renderEnumSettings(updated);
+    } catch (e) {
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   async function refreshPartners() {
