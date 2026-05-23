@@ -5,6 +5,37 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0af] — 2026-05-23 — Retire the last orange hues — MR Red is the only warm
+
+v1.0.0ae replaced the old soft orange (`#ff4d2a`) with MR Red but
+left two distinct pure-orange uses in place: the **CRM Execute**
+workstream colour and the **Cool sentiment** chip. Both sat next to
+MR Red surfaces and read as competing brand colours.
+
+### Replaced
+- **CRM Execute** workstream: `#f97316` (orange) → `#14b8a6` (teal).
+  CRM Build keeps MR Red; CRM Execute now distinct + non-competing.
+  Other workstream swatches (Strategy blue, Data green, Engineering
+  purple, Cross-cutting grey) unchanged.
+- **Cool sentiment chip**: `#f97316` (orange) → `#64748b` (slate).
+  Bonus: a literal "cool" sentiment reads more naturally in a slate-
+  grey-blue than in warm orange.
+
+### Updated
+- Forecast distribution-bar legend comment "orange=pipeline" updated
+  to "red=pipeline" since the bars are now MR Red (v1.0.0ae change).
+
+### Net effect
+No orange anywhere on the platform. MR Red is the only warm colour
+in the brand palette — anywhere you see something "warm", it's the
+brand.
+
+### Tests
+- 568 still passing. Pure colour change.
+
+### Files touched
+- `qualify.html` — 3 colour swaps + 1 comment update
+
 ## [1.0.0ae] — 2026-05-23 — Adopt the Massive Rocket brand palette
 
 Ben shared the official MR brand theme. Platform's design tokens now

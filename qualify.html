@@ -2018,8 +2018,10 @@
   const ROADMAP_PHASES = ['Understand', 'Execute', 'Accelerate'];
   const WORKSTREAM_COLOR = {
     'CRM Strategy': '#60a5fa',
-    'CRM Build': '#e82b23',
-    'CRM Execute': '#f97316',
+    'CRM Build': '#e82b23',      /* MR Red — the brand */
+    /* v1.0.0af: retired orange #f97316 — read as a competing brand
+       colour next to MR Red. Teal is distinct + doesn't compete. */
+    'CRM Execute': '#14b8a6',
     'Data': '#4ade80',
     'Engineering': '#a78bfa',
     'Cross-cutting': '#9898aa',
@@ -7482,7 +7484,7 @@
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="muted" style="font-size:10px;margin-top:6px;">All values are weighted monthly GBP (deal_value × stage_probability). Bars: green=commit, yellow=best, orange=pipeline.</div>
+      <div class="muted" style="font-size:10px;margin-top:6px;">All values are weighted monthly GBP (deal_value × stage_probability). Bars: green=commit, yellow=best, red=pipeline.</div>
     `;
   }
 
@@ -7703,15 +7705,19 @@
   }
 
   // v1.0.0ac: sentiment colour helpers. Champion = green, Warm =
-  // yellow, Neutral = grey, Cool = orange, Blocker = red. Keys are
-  // matched case-insensitively so customised sentiment labels that
-  // include the canonical word ("Warm Lead") still tint correctly.
+  // yellow, Neutral = grey, Cool = slate (cool temperature), Blocker
+  // = red. Keys are matched case-insensitively so customised sentiment
+  // labels that include the canonical word ("Warm Lead") still tint
+  // correctly.
+  // v1.0.0af: Cool was orange — retired so the platform doesn't have
+  // any orange competing with MR Red. Slate reads as "cool / neutral
+  // negative" and doesn't clash with the brand.
   function _sentimentPalette(label) {
     const s = (label || '').toLowerCase();
-    if (s.includes('champion'))  return { bg: 'rgba(34,197,94,.15)',  text: 'var(--green)',  border: 'rgba(34,197,94,.35)' };
-    if (s.includes('warm'))      return { bg: 'rgba(234,179,8,.15)',  text: 'var(--yellow)', border: 'rgba(234,179,8,.35)' };
-    if (s.includes('cool'))      return { bg: 'rgba(249,115,22,.15)', text: '#f97316',       border: 'rgba(249,115,22,.35)' };
-    if (s.includes('blocker'))   return { bg: 'rgba(239,68,68,.15)',  text: 'var(--red)',    border: 'rgba(239,68,68,.35)' };
+    if (s.includes('champion'))  return { bg: 'rgba(34,197,94,.15)',   text: 'var(--green)',  border: 'rgba(34,197,94,.35)' };
+    if (s.includes('warm'))      return { bg: 'rgba(234,179,8,.15)',   text: 'var(--yellow)', border: 'rgba(234,179,8,.35)' };
+    if (s.includes('cool'))      return { bg: 'rgba(100,116,139,.15)', text: '#64748b',       border: 'rgba(100,116,139,.40)' };
+    if (s.includes('blocker'))   return { bg: 'rgba(239,68,68,.15)',   text: 'var(--red)',    border: 'rgba(239,68,68,.35)' };
     return { bg: 'var(--surface-2)', text: 'var(--text-muted)', border: 'var(--border)' };
   }
   function _sentimentBg(label)     { return _sentimentPalette(label).bg; }
