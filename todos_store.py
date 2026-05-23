@@ -22,6 +22,13 @@ Shape
       "done":         false,
       "priority":     "high" | "medium" | "low" | None,
       "due_date":     "2026-05-30" | None,
+      "link":         None | {
+        "kind":       "lead" | "partner" | "partner_contact",
+        "lead_id":    "<page_id>"                # if kind == lead
+        "partner_id": "braze"                    # if kind == partner*
+        "contact_id": "<uuid>"                   # if kind == partner_contact
+        "label":      "Marina Klusas (Braze)"    # optional display hint
+      },
       "created_at":   "2026-05-23T19:45:00Z",
       "completed_at": None | iso8601,
     }
@@ -50,6 +57,10 @@ _DEFAULT_DIR = Path(__file__).parent / "cache" / "todos"
 _LOCK = threading.Lock()
 
 PRIORITIES = ("high", "medium", "low")
+# v1.0.0an: allowlisted link kinds. Each kind needs a different
+# secondary key (lead_id / partner_id / contact_id) — the UI uses
+# `kind` to decide where to navigate.
+LINK_KINDS = ("lead", "partner", "partner_contact")
 
 
 class TodosStoreError(RuntimeError):
@@ -104,6 +115,7 @@ def _normalise(t: dict[str, Any]) -> dict[str, Any]:
     out.setdefault("done", False)
     out.setdefault("priority", None)
     out.setdefault("due_date", None)
+    out.setdefault("link", None)  # v1.0.0an
     out.setdefault("created_at", _now())
     out.setdefault("completed_at", None)
     out.setdefault("owner", out.get("owner") or "Unknown")
@@ -117,6 +129,54 @@ def _validate_priority(p: Any) -> str | None:
     if isinstance(p, str) and p.lower() in PRIORITIES:
         return p.lower()
     raise TodosStoreError(f"priority must be one of {PRIORITIES} or None; got {p!r}")
+
+
+def _validate_link(link: Any) -> dict[str, Any] | None:
+    """v1.0.0an: validate the optional link field on a todo.
+
+    Accepts None / empty (no link), or a dict with required `kind` ∈
+    LINK_KINDS plus the entity-id keys required by that kind:
+      - lead              → lead_id
+      - partner           → partner_id
+      - partner_contact   → partner_id + contact_id
+    `label` is optional free-form text the UI uses for display.
+    Unknown extra keys are tolerated (forward-compat) but only the
+    above fields are persisted.
+    """
+    if link in (None, "", {}):
+        return None
+    if not isinstance(link, dict):
+        raise TodosStoreError(f"link must be an object or None; got {type(link).__name__}")
+    kind = (link.get("kind") or "").strip()
+    if kind not in LINK_KINDS:
+        raise TodosStoreError(f"link.kind must be one of {LINK_KINDS}; got {kind!r}")
+    out: dict[str, Any] = {"kind": kind}
+    label = link.get("label")
+    if label is not None:
+        if not isinstance(label, str):
+            raise TodosStoreError("link.label must be a string")
+        if len(label) > 200:
+            raise TodosStoreError("link.label too long (max 200 chars)")
+        out["label"] = label.strip()
+    if kind == "lead":
+        lid = (link.get("lead_id") or "").strip()
+        if not lid:
+            raise TodosStoreError("link.lead_id required for kind='lead'")
+        out["lead_id"] = lid
+    elif kind == "partner":
+        pid = (link.get("partner_id") or "").strip()
+        if not pid:
+            raise TodosStoreError("link.partner_id required for kind='partner'")
+        out["partner_id"] = pid
+    elif kind == "partner_contact":
+        pid = (link.get("partner_id") or "").strip()
+        cid = (link.get("contact_id") or "").strip()
+        if not pid or not cid:
+            raise TodosStoreError(
+                "link.partner_id and link.contact_id required for kind='partner_contact'")
+        out["partner_id"] = pid
+        out["contact_id"] = cid
+    return out
 
 
 def _validate_due(d: Any) -> str | None:
@@ -169,7 +229,8 @@ def _invert(s: str) -> str:
 
 def create(owner: str, text: str, *,
             priority: str | None = None,
-            due_date: str | None = None) -> dict[str, Any]:
+            due_date: str | None = None,
+            link: dict[str, Any] | None = None) -> dict[str, Any]:
     if not (owner or "").strip():
         raise TodosStoreError("owner required")
     text = (text or "").strip()
@@ -184,6 +245,7 @@ def create(owner: str, text: str, *,
         "done":         False,
         "priority":     _validate_priority(priority),
         "due_date":     _validate_due(due_date),
+        "link":         _validate_link(link),
         "created_at":   _now(),
         "completed_at": None,
     })
@@ -199,7 +261,7 @@ def update(owner: str, todo_id: str, **fields: Any) -> dict[str, Any] | None:
     due_date. Returns the updated todo or None if not found."""
     if not (owner and todo_id):
         return None
-    allowed = {"text", "done", "priority", "due_date"}
+    allowed = {"text", "done", "priority", "due_date", "link"}
     bad = set(fields) - allowed
     if bad:
         raise TodosStoreError(f"unknown fields: {sorted(bad)}")
@@ -223,6 +285,8 @@ def update(owner: str, todo_id: str, **fields: Any) -> dict[str, Any] | None:
             target["priority"] = _validate_priority(fields["priority"])
         if "due_date" in fields:
             target["due_date"] = _validate_due(fields["due_date"])
+        if "link" in fields:
+            target["link"] = _validate_link(fields["link"])
         if "done" in fields:
             new_done = bool(fields["done"])
             # completed_at only set on the false→true transition, cleared

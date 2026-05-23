@@ -163,6 +163,69 @@ class TodosStoreTests(unittest.TestCase):
         with self.assertRaises(self.store.TodosStoreError):
             self.store.create("", "x")
 
+    # v1.0.0an: link field tests --------------------------------------
+
+    def test_create_with_lead_link(self):
+        t = self.store.create("Ben", "follow up", link={
+            "kind": "lead", "lead_id": "page123",
+            "label": "Acme Corp",
+        })
+        self.assertEqual(t["link"]["kind"], "lead")
+        self.assertEqual(t["link"]["lead_id"], "page123")
+        self.assertEqual(t["link"]["label"], "Acme Corp")
+
+    def test_create_with_partner_contact_link(self):
+        t = self.store.create("Ben", "follow up", link={
+            "kind": "partner_contact",
+            "partner_id": "braze", "contact_id": "abc",
+            "label": "Marina Klusas (Braze)",
+        })
+        self.assertEqual(t["link"]["kind"], "partner_contact")
+        self.assertEqual(t["link"]["partner_id"], "braze")
+        self.assertEqual(t["link"]["contact_id"], "abc")
+
+    def test_create_with_partner_link(self):
+        t = self.store.create("Ben", "review hierarchy", link={
+            "kind": "partner", "partner_id": "braze",
+        })
+        self.assertEqual(t["link"]["kind"], "partner")
+        self.assertEqual(t["link"]["partner_id"], "braze")
+        # label is optional — should be absent, not None, when not supplied
+        self.assertNotIn("label", t["link"])
+
+    def test_link_validation_unknown_kind(self):
+        with self.assertRaises(self.store.TodosStoreError):
+            self.store.create("Ben", "x",
+                               link={"kind": "task", "task_id": "abc"})
+
+    def test_link_validation_missing_required_keys(self):
+        # lead without lead_id
+        with self.assertRaises(self.store.TodosStoreError):
+            self.store.create("Ben", "x", link={"kind": "lead"})
+        # partner_contact without contact_id
+        with self.assertRaises(self.store.TodosStoreError):
+            self.store.create("Ben", "x", link={
+                "kind": "partner_contact", "partner_id": "braze"})
+
+    def test_link_validation_not_a_dict(self):
+        with self.assertRaises(self.store.TodosStoreError):
+            self.store.create("Ben", "x", link="braze")
+
+    def test_link_can_be_cleared_via_update(self):
+        t = self.store.create("Ben", "x", link={
+            "kind": "lead", "lead_id": "abc"})
+        u = self.store.update("Ben", t["id"], link=None)
+        self.assertIsNone(u["link"])
+
+    def test_link_extras_are_dropped(self):
+        """Unknown extra fields on a link dict are silently ignored —
+        only the allowlisted keys persist. Future-compat for new fields."""
+        t = self.store.create("Ben", "x", link={
+            "kind": "lead", "lead_id": "abc",
+            "future_field": "should not persist",
+        })
+        self.assertNotIn("future_field", t["link"])
+
 
 class TodosEndpointTests(unittest.TestCase):
     @classmethod
@@ -271,6 +334,42 @@ class TodosEndpointTests(unittest.TestCase):
                                 json={"owner": "Ben Ojuolape",
                                       "assigned_to": "Glenn"})
         self.assertEqual(r.status_code, 400)
+
+    # v1.0.0an: link via endpoint -------------------------------------
+
+    def test_create_with_link_via_endpoint(self):
+        r = self.client.post("/api/todos", json={
+            "owner": "Ben Ojuolape",
+            "text": "follow up with Marina",
+            "link": {
+                "kind": "partner_contact",
+                "partner_id": "braze",
+                "contact_id": "marina-id",
+                "label": "Marina Klusas (Braze)",
+            },
+        })
+        self.assertEqual(r.status_code, 201)
+        body = r.get_json()
+        self.assertEqual(body["todo"]["link"]["kind"], "partner_contact")
+        self.assertEqual(body["todo"]["link"]["partner_id"], "braze")
+
+    def test_create_with_bad_link_rejected(self):
+        r = self.client.post("/api/todos", json={
+            "owner": "Ben Ojuolape",
+            "text": "x",
+            "link": {"kind": "nonsense"},
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_patch_link_via_endpoint(self):
+        r = self.client.post("/api/todos",
+                              json={"owner": "Ben Ojuolape", "text": "x"})
+        tid = r.get_json()["todo"]["id"]
+        r = self.client.patch(f"/api/todos/{tid}", json={
+            "owner": "Ben Ojuolape",
+            "link": {"kind": "lead", "lead_id": "page42"},
+        })
+        self.assertEqual(r.get_json()["todo"]["link"]["lead_id"], "page42")
 
 
 if __name__ == "__main__":

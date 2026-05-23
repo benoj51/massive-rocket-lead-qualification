@@ -3268,7 +3268,8 @@ def api_todos_create():
     try:
         todo = todos_store.create(owner, text,
                                     priority=body.get("priority"),
-                                    due_date=body.get("due_date"))
+                                    due_date=body.get("due_date"),
+                                    link=body.get("link"))
     except todos_store.TodosStoreError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"todo": todo}), 201

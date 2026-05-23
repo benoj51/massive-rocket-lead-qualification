@@ -7805,6 +7805,18 @@
       const color = overdue ? 'var(--mr-red,#e82b23)' : soon ? '#f59e0b' : 'var(--text-muted)';
       return `<span style="font-size:10px;color:${color};margin-left:6px;">due ${escapeHtml(d)}${overdue ? ' (overdue)' : ''}</span>`;
     };
+    // v1.0.0an: render a small "→ entity" chip when a todo is linked.
+    // Clicking the chip navigates to the entity; the chip styling is
+    // muted so the todo text stays primary.
+    const linkChip = (l) => {
+      if (!l || !l.kind) return '';
+      const label = l.label || (
+        l.kind === 'lead'            ? 'Lead'
+      : l.kind === 'partner'         ? 'Partner'
+      : l.kind === 'partner_contact' ? 'Contact'
+      : 'Linked');
+      return `<button type="button" data-todo-link style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:10px;cursor:pointer;color:var(--text-dim);line-height:1.3;" title="Open ${escapeAttr(l.kind)}">→ ${escapeHtml(label)}</button>`;
+    };
     list.innerHTML = todoState.items.map(t => `
       <div data-todo-id="${escapeAttr(t.id)}"
            style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;${t.done ? 'opacity:.55;' : ''}">
@@ -7815,6 +7827,7 @@
           <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${priorityBadge(t.priority)}
             ${dueBadge(t.due_date)}
+            ${linkChip(t.link)}
           </div>
         </div>
         <button class="btn ghost" type="button" data-todo-del
@@ -7834,6 +7847,33 @@
         _deleteTodo(id);
       });
     });
+    // v1.0.0an: link chip click → navigate to entity. Same routing
+    // shape as notification clicks, so the navigation logic stays
+    // consistent.
+    list.querySelectorAll('[data-todo-link]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = b.closest('[data-todo-id]').dataset.todoId;
+        const t = todoState.items.find(x => x.id === id);
+        _openTodoLink(t?.link);
+      });
+    });
+  }
+
+  function _openTodoLink(link) {
+    if (!link || !link.kind) return;
+    if (link.kind === 'lead' && link.lead_id) {
+      switchView('pipeline');
+      setTimeout(() => openLeadDrawer(link.lead_id), 50);
+    } else if (link.kind === 'partner' && link.partner_id) {
+      switchView('partners');
+      setTimeout(() => openPartnerDetail(link.partner_id), 50);
+    } else if (link.kind === 'partner_contact' && link.partner_id) {
+      switchView('partners');
+      setTimeout(() => openPartnerDetail(link.partner_id), 50);
+      // Contact-level scroll is best-effort — opens the partner detail;
+      // the contact row will be visible once contacts render.
+    }
   }
 
   function _wireHomeTodoOnce() {
@@ -7930,6 +7970,39 @@
     } catch (_) { /* leave the previous render in place */ }
   }
 
+  // v1.0.0an: quick-create a todo with a pre-filled link. Called from
+  // "Add to todos" buttons on the Home overdue + active-leads panels,
+  // and any other surface that wants to seed a follow-up. Pops a small
+  // browser prompt for the todo text so the user can phrase it.
+  async function _addLinkedTodo({ kind, partner_id, contact_id, lead_id, label, suggestedText }) {
+    const owner = _currentRecipient();
+    if (!owner) {
+      toast('Pick your profile first (Home → Switch profile)', 'error');
+      return;
+    }
+    const text = window.prompt(
+      `New todo${label ? ' for ' + label : ''}:`,
+      suggestedText || (label ? `Follow up with ${label}` : ''));
+    if (text === null) return; // cancelled
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const link = { kind, label };
+    if (partner_id) link.partner_id = partner_id;
+    if (contact_id) link.contact_id = contact_id;
+    if (lead_id)    link.lead_id    = lead_id;
+    try {
+      await jsonFetch('/api/todos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner, text: trimmed, link }),
+      });
+      toast('Added to your todos', 'success');
+      await _refreshTodos();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
   async function loadHome() {
     if (!homeState.profile) {
       await ensureProfileSelected();
@@ -7989,9 +8062,17 @@
             <div style="font-size:13px;font-weight:500;">${escapeHtml(c.name || '—')}</div>
             <div class="muted" style="font-size:10px;">${escapeHtml(c.title || '')} · ${escapeHtml(c.partner_name || '')}</div>
           </div>
-          <div style="text-align:right;flex-shrink:0;">
+          <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
             <div style="font-size:11px;color:var(--red);font-weight:600;">${c.days_overdue}d overdue</div>
-            <button class="btn ghost" type="button" data-home-open-partner="${escapeAttr(c.partner_id)}" style="padding:2px 8px;font-size:10px;margin-top:2px;">Open partner →</button>
+            <div style="display:flex;gap:4px;">
+              <!-- v1.0.0an: + todo button creates a linked todo for this contact. -->
+              <button class="btn ghost" type="button"
+                      data-home-add-todo-contact="${escapeAttr(c.id)}"
+                      data-partner-id="${escapeAttr(c.partner_id)}"
+                      data-label="${escapeAttr((c.name || '') + ' (' + (c.partner_name || '') + ')')}"
+                      style="padding:2px 8px;font-size:10px;" title="Add as a todo">+ todo</button>
+              <button class="btn ghost" type="button" data-home-open-partner="${escapeAttr(c.partner_id)}" style="padding:2px 8px;font-size:10px;">Open →</button>
+            </div>
           </div>
         </div>
       `).join('');
@@ -7999,6 +8080,18 @@
         b.addEventListener('click', () => {
           switchView('partners');
           setTimeout(() => openPartnerDetail(b.dataset.homeOpenPartner), 50);
+        });
+      });
+      // v1.0.0an: + todo handler for the overdue rows.
+      overdueList.querySelectorAll('[data-home-add-todo-contact]').forEach(b => {
+        b.addEventListener('click', () => {
+          _addLinkedTodo({
+            kind: 'partner_contact',
+            partner_id: b.dataset.partnerId,
+            contact_id: b.dataset.homeAddTodoContact,
+            label: b.dataset.label,
+            suggestedText: `Reach out to ${b.dataset.label}`,
+          });
         });
       });
     }
@@ -8015,20 +8108,37 @@
         const scoreColor = cls === 'qualify_in' ? 'var(--green)'
                           : cls === 'borderline' ? 'var(--yellow)' : 'var(--red)';
         return `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;"
-               data-home-open-lead="${escapeAttr(l.id)}">
-            <div style="min-width:0;flex:1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;"
+               data-home-lead-row="${escapeAttr(l.id)}">
+            <div data-home-open-lead="${escapeAttr(l.id)}" style="min-width:0;flex:1;cursor:pointer;">
               <div style="font-size:13px;font-weight:500;">${escapeHtml(l.company || '—')}</div>
               <div class="muted" style="font-size:10px;">${escapeHtml(l.sales_stage || l.status || '')}${l.next_steps ? ' · ' + escapeHtml(l.next_steps) : ''}</div>
             </div>
-            <div style="text-align:right;flex-shrink:0;">
+            <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
               <div style="font-size:13px;font-weight:600;color:${scoreColor};font-family:var(--mono);">${score != null ? score + '/10' : '—'}</div>
+              <!-- v1.0.0an: + todo button for active leads. -->
+              <button class="btn ghost" type="button"
+                      data-home-add-todo-lead="${escapeAttr(l.id)}"
+                      data-label="${escapeAttr(l.company || '')}"
+                      style="padding:2px 8px;font-size:10px;" title="Add as a todo">+ todo</button>
             </div>
           </div>
         `;
       }).join('');
       leadsList.querySelectorAll('[data-home-open-lead]').forEach(b => {
         b.addEventListener('click', () => openLeadDrawer(b.dataset.homeOpenLead));
+      });
+      // v1.0.0an: + todo handler for the active-leads rows.
+      leadsList.querySelectorAll('[data-home-add-todo-lead]').forEach(b => {
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          _addLinkedTodo({
+            kind: 'lead',
+            lead_id: b.dataset.homeAddTodoLead,
+            label: b.dataset.label,
+            suggestedText: `Move ${b.dataset.label} forward`,
+          });
+        });
       });
     }
 
@@ -9325,6 +9435,8 @@
               <td style="white-space:nowrap;">${touchCell(c)}</td>
               <td style="text-align:right;white-space:nowrap;">
                 <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">${icon('check', { size: 12 })}</button>
+                <!-- v1.0.0an: + todo creates a linked todo for this contact. -->
+                <button class="btn ghost" type="button" data-contact-todo="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Add as a todo">+</button>
                 <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit">${icon('edit', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Notes">${icon('note', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Remove">${icon('trash', { size: 12 })}</button>
@@ -9335,6 +9447,21 @@
       </table>
       <div class="muted" style="font-size:10px;margin-top:6px;">${filtered.length} of ${all.length} contact${all.length === 1 ? '' : 's'}${filtered.filter(c => c.overdue).length ? ` · ${filtered.filter(c => c.overdue).length} overdue` : ''}</div>
     `;
+    // v1.0.0an: + todo on a contact row.
+    wrap.querySelectorAll('[data-contact-todo]').forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.contactTodo;
+        const c = (partner.contacts || []).find(x => x.id === id);
+        if (!c) return;
+        _addLinkedTodo({
+          kind: 'partner_contact',
+          partner_id: partner.id,
+          contact_id: id,
+          label: `${c.name || '(unnamed)'} (${partner.name})`,
+          suggestedText: `Follow up with ${c.name || 'this contact'}`,
+        });
+      });
+    });
     wrap.querySelectorAll('[data-contact-touch]').forEach(b => {
       b.addEventListener('click', async () => {
         try {

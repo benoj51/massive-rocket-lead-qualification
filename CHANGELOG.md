@@ -5,6 +5,54 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0an] — 2026-05-23 — Todo↔entity linking + quick-add buttons
+
+The v1.0.0am todo list is a scratch list. This makes it operational:
+todos can now point at a lead, partner, or partner contact, and you
+can spawn linked todos from the overdue / active-leads cards on
+Home + every row in the partner contacts table.
+
+### Added
+
+- **`link` field on todos** — optional object with `kind` (one of
+  `lead`, `partner`, `partner_contact`) + the entity-id keys
+  required by that kind + an optional `label` for display. Allowlist
+  validation rejects unknown kinds and missing required ids;
+  forward-compat extra keys are silently dropped. `_validate_link`
+  in `todos_store.py` is the single source of truth.
+- **API support**: `POST /api/todos` and `PATCH /api/todos/<id>`
+  both accept `link`. Setting `link: null` clears it.
+- **UI — "→ <label>" chip** on every linked todo in the Home panel.
+  Click navigates to the entity (lead drawer / partner detail) and
+  uses the same routing helper as notification clicks for
+  consistency.
+- **Quick-add buttons** on Home:
+  - "+ todo" on every row of the overdue-contacts card — pre-fills
+    "Reach out to <name> (<partner>)" and creates a `partner_contact`
+    link.
+  - "+ todo" on every row of the active-leads card — pre-fills
+    "Move <company> forward" and creates a `lead` link.
+- **Quick-add button in the partner contacts table** — small `+`
+  button between the touch-check and edit icons. Same pre-fill
+  pattern, scoped to the row's contact.
+
+### Tests
+
+- **`tests/test_todos.py`** grew from 23 → 34 tests with 11 link
+  cases: create-with-each-kind, unknown-kind rejection, missing
+  required-keys rejection, not-a-dict rejection, clear-via-update,
+  extra-fields-dropped (forward-compat), label optionality, plus
+  3 endpoint tests (create with link, bad link rejected, PATCH link).
+
+### Why this and not "make todos available everywhere"
+
+I considered surfacing todos in the nav too. Held back: the Home
+view already pulls them into the first paint, the bell is right
+next to it, and adding a third badge to the header crowds the bar.
+The link chips give todos a path back into the entity surfaces
+without inverting which is "primary" — the entities lead, the
+todos follow.
+
 ## [1.0.0am] — 2026-05-23 — Custom todo list on Home
 
 Ben asked: "They should also be able to create a custom to do list on
