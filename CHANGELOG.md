@@ -5,6 +5,117 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ac] — 2026-05-23 — Industries + sentiment/tier/seniority + Settings panel
+
+Three requests bundled:
+1. Add Entertainment / Gaming / Sports to the industries list
+2. Add new partner-contact dimensions: Partner Sentiment, Tier, Seniority
+3. Make all of these customisable via a Settings panel
+
+### 1 · New industries (one-line change)
+`partner_contacts_store.INDUSTRIES` now includes **Entertainment**,
+**Gaming**, **Sports** alongside the existing 10. They flow into every
+industry-multi-select chip group automatically via `/api/partners/enums`.
+
+### 2 · Three new partner-contact dimensions
+Every partner contact now carries:
+- **`partner_sentiment`** — how they feel about MR right now.
+  Defaults: Champion / Warm / Neutral / Cool / Blocker. Tinted chip
+  in the table (green / yellow / grey / orange / red).
+- **`tier`** — strategic importance to the partnership.
+  Defaults: T1 — Strategic / T2 — Active / T3 — Light / T4 — Dormant.
+- **`seniority`** — escalation path shorthand.
+  Defaults: C-Suite / VP / Director / Manager / Individual Contributor.
+
+All three are:
+- Saved + restored via `partner_contacts_store._normalise` (None-safe;
+  blank strings collapse to None)
+- Editable in the contact form (three-column row, below Status)
+- Surfaced as columns in the partner contacts table (Tier, Sentiment,
+  Seniority) — sentiment column is colour-coded by value
+- Filterable from the partners filter row (three new dropdowns)
+- Included in `partner_contacts_store.list_contacts` returns + the
+  state-backup mirror (no schema changes needed — gather pulls full
+  contact dicts)
+
+### 3 · Settings panel — `enum_config_store`
+
+New module `enum_config_store.py` overlays user customisations on
+top of the in-code defaults:
+- Storage: `cache/enum_config.json` (durable via the volume mount,
+  mirrored via nothing — it's small + cosmetic, restore from defaults
+  is one click)
+- Defaults are pulled from `partner_contacts_store` constants at
+  load time, so editing the code constants remains a valid escape
+  hatch
+- Dedupe + whitespace-strip on save; empty list = "reset to default"
+- `reset_key(name)` for explicit single-key reset
+
+### Endpoints
+- `GET  /api/settings/enums` — full effective config
+- `PATCH /api/settings/enums` — body keyed by enum name, value = list
+- `POST /api/settings/enums/<key>/reset` — single-key reset to default
+
+### UI — Settings panel (Partners view header)
+
+New Settings button in the Partners view header. Click → in-page
+panel slides in with one textarea per enum (industries, territories,
+regions, statuses, sentiments, tiers, seniorities). Each textarea
+is one-value-per-line. Save → toast + dropdowns repopulate across
+the platform on next refresh. Per-section Reset button restores
+that specific enum to platform defaults.
+
+### Plumbing
+- `/api/partners/enums` now reads from `enum_config_store` instead
+  of hardcoded constants — so user edits surface immediately in
+  every dropdown that consumes it (contact form, filter row,
+  Partners view, lead-drawer assignment picker, etc.)
+- `partnersState.filter` extended with `sentiment`, `tier`,
+  `seniority` keys (default empty)
+- `_sentimentPalette()` JS helper maps sentiment label keywords to
+  consistent colour tokens (green for Champion / yellow for Warm /
+  orange for Cool / red for Blocker / grey neutral)
+
+### Tests
+- 568 total (+18). `tests/test_enum_config.py` covers:
+  - Defaults loaded when no override file exists
+  - Save overrides specific keys, leaves others as defaults
+  - Dedupe + whitespace strip on save
+  - Empty list resets to default
+  - Unknown keys + non-list values ignored
+  - Single-key reset + unknown-key reset = 400
+  - Corrupt JSON falls back to defaults silently
+  - New `partner_sentiment` / `tier` / `seniority` fields round-trip
+    on partner contacts; blank/None inputs collapse correctly
+  - `/api/partners/enums` reflects user overrides immediately
+
+### Files touched
+- `partner_contacts_store.py` — 3 new constants, 3 new fields in `_normalise`
+- `enum_config_store.py` (new) — overlay-on-defaults store
+- `server.py` — `/api/partners/enums` reads dynamic config; 3 new
+  `/api/settings/enums*` endpoints
+- `qualify.html` — contact form (3 new dropdowns), table (3 new
+  columns + sentiment tinting), filter row (3 new dropdowns),
+  partnersState.filter, settings panel + button
+- `tests/test_enum_config.py` (new, 18 tests)
+
+### What you'll see
+
+**On any partner contact edit form**: three new dropdowns under
+Status — Partner sentiment / Tier / Seniority. Defaults populated;
+you can pick `—` for unset.
+
+**In the partner contacts table**: three new columns. The Sentiment
+chip is colour-coded (Champion green / Blocker red / etc.).
+
+**Filter row**: three new dropdowns (Any sentiment / Any tier /
+Any seniority).
+
+**Top of Partners view**: a new Settings button. Click → editable
+textareas for every enum. Add a row to industries ("Esports"),
+remove a tier, reorder seniorities, hit Save → next refresh, every
+dropdown across the platform has your changes.
+
 ## [1.0.0ab] — 2026-05-23 — Design system: emojis out, monochrome SVG icons in
 
 Ben asked: "Remove emojis. Come up with a better design than that.

@@ -2064,16 +2064,62 @@ def api_lead_children(lead_id: str):
 
 @app.route("/api/partners/enums", methods=["GET"])
 def api_partners_enums():
-    """Static enum lists the UI uses to populate dropdowns. Returned in
-    one round-trip so the Partners view doesn't hard-code them in JS."""
+    """Enum lists the UI uses to populate dropdowns. v1.0.0ac: the
+    editable lists (industries / territories / regions / statuses +
+    the new sentiment/tier/seniority) now come from enum_config_store
+    so the Settings panel can edit them without a redeploy. partner_types
+    + note_types remain hardcoded — they're tightly coupled to backend
+    logic, not display-only enums.
+    """
+    import enum_config_store
+    cfg = enum_config_store.load()
     return jsonify({
-        "partner_types": partners_store.PARTNER_TYPES,
-        "territories":   partner_contacts_store.TERRITORIES,
-        "regions":       partner_contacts_store.REGIONS,
-        "industries":    partner_contacts_store.INDUSTRIES,
-        "statuses":      partner_contacts_store.STATUSES,
-        "note_types":    partner_notes_store.NOTE_TYPES,
+        "partner_types":      partners_store.PARTNER_TYPES,
+        "territories":        cfg["territories"],
+        "regions":            cfg["regions"],
+        "industries":         cfg["industries"],
+        "statuses":           cfg["statuses"],
+        "partner_sentiments": cfg["partner_sentiments"],
+        "tiers":              cfg["tiers"],
+        "seniorities":        cfg["seniorities"],
+        "note_types":         partner_notes_store.NOTE_TYPES,
     })
+
+
+# v1.0.0ac: editable enum configuration endpoint. The Settings panel
+# uses these to add/remove/reorder dropdown options across the platform.
+@app.route("/api/settings/enums", methods=["GET"])
+def api_settings_enums_get():
+    """Return the current effective enum lists (user overrides +
+    in-code defaults filling gaps)."""
+    import enum_config_store
+    return jsonify(enum_config_store.load())
+
+
+@app.route("/api/settings/enums", methods=["PATCH"])
+def api_settings_enums_update():
+    """Update one or more enum lists. Body shape:
+        { "industries": ["QSR", "Gaming", ...], "tiers": [...] }
+    Unknown keys ignored; empty list resets to in-code default."""
+    import enum_config_store
+    body = request.get_json(silent=True) or {}
+    updated = enum_config_store.save(body)
+    audit.log_event("enum_config_updated", actor=_actor(),
+                    keys=sorted(body.keys()))
+    return jsonify(updated)
+
+
+@app.route("/api/settings/enums/<key>/reset", methods=["POST"])
+def api_settings_enums_reset(key: str):
+    """Reset a single enum key to its in-code default. The "undo my mess"
+    escape hatch in the settings UI."""
+    import enum_config_store
+    try:
+        updated = enum_config_store.reset_key(key)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("enum_config_reset", actor=_actor(), key=key)
+    return jsonify(updated)
 
 
 # v1.0.0o: MR owners — single source of truth for the people the UI

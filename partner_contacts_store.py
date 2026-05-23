@@ -59,10 +59,22 @@ TERRITORIES = ["Strategic Enterprise", "Enterprise", "Emerging Enterprise",
                 "Mid-Market", "Scale", "SMB"]
 REGIONS = ["UK", "West Coast", "East Coast", "Central",
            "EMEA", "APAC", "LATAM", "ANZ", "Global"]
+# v1.0.0ac: Entertainment / Gaming / Sports added per Ben's roster.
 INDUSTRIES = ["QSR", "C-Store / Gas", "Retail", "Financial Services",
               "Travel & Hospitality", "Healthcare", "Media",
+              "Entertainment", "Gaming", "Sports",
               "Telecom", "SaaS", "Other"]
 STATUSES = ["active", "dormant", "left"]
+# v1.0.0ac: three new partnership-CRM dimensions on every partner contact.
+# - Sentiment: how this contact feels about MR right now. Drives the
+#   urgency of next touch + which deals to lean on them for.
+# - Tier: how strategically important they are to the partnership.
+# - Seniority: org-rank shorthand for who's the right escalation path.
+# All three are user-editable via the Settings panel (enum_config_store).
+PARTNER_SENTIMENTS = ["Champion", "Warm", "Neutral", "Cool", "Blocker"]
+TIERS              = ["T1 — Strategic", "T2 — Active", "T3 — Light", "T4 — Dormant"]
+SENIORITIES        = ["C-Suite", "VP", "Director", "Manager",
+                       "Individual Contributor"]
 
 
 class PartnerContactsStoreError(RuntimeError):
@@ -181,6 +193,13 @@ def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
         "mr_owner": (contact.get("mr_owner") or "").strip() or None,
         "reports_to_id": (contact.get("reports_to_id") or "").strip() or None,
         "status": (contact.get("status") or "active").strip().lower(),
+        # v1.0.0ac: three new partnership-CRM dimensions. All three are
+        # free-text-ish strings (the UI presents a dropdown from the
+        # editable enum config, but the store accepts any string so
+        # legacy / custom values aren't blocked).
+        "partner_sentiment": (contact.get("partner_sentiment") or "").strip() or None,
+        "tier":              (contact.get("tier") or "").strip() or None,
+        "seniority":         (contact.get("seniority") or "").strip() or None,
         "tags": [str(t).strip() for t in (contact.get("tags") or []) if str(t).strip()],
         "cadence_days": cadence_days,
         "last_touched_at": contact.get("last_touched_at") or None,

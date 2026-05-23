@@ -1371,10 +1371,13 @@
       <h2 style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
         <span>Partners</span>
         <div class="btn-row">
+          <button id="ptn-settings" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;"><span data-icon="settings" data-icon-size="12"></span>Settings</button>
           <button id="ptn-add-partner" class="btn" type="button" style="padding:6px 14px;font-size:12px;">+ Add partner</button>
         </div>
       </h2>
-      <p class="muted" style="margin:0 0 14px;font-size:12px;">Partner orgs we work WITH (Braze, Snowflake, mParticle, etc.) — distinct from leads we sell to. Contacts carry territory / region / country / industries metadata.</p>
+      <p class="muted" style="margin:0 0 14px;font-size:12px;">Partner orgs we work WITH (Braze, Snowflake, mParticle, etc.) — distinct from leads we sell to. Contacts carry territory / region / country / industries / tier / sentiment / seniority metadata.</p>
+      <!-- v1.0.0ac: enum settings panel — hidden by default; toggled by Settings button. -->
+      <div id="ptn-settings-panel" style="display:none;margin-bottom:14px;"></div>
       <div id="ptn-list" class="muted" style="font-size:12px;">Loading…</div>
     </div>
 
@@ -7181,6 +7184,9 @@
     // v0.10.0y: Partners view event wiring (idempotent).
     $('#nav-partners').addEventListener('click', () => switchView('partners'));
     $('#ptn-add-partner').addEventListener('click', openAddPartnerForm);
+    // v1.0.0ac: enum-settings panel toggle.
+    const settingsBtn = document.getElementById('ptn-settings');
+    if (settingsBtn) settingsBtn.addEventListener('click', openEnumSettings);
   }
 
   // =============================================================
@@ -7561,7 +7567,8 @@
     enums: null,         // {territories, regions, industries, partner_types, ...}
     partners: [],        // [partner_dict]
     selectedId: null,    // currently expanded partner
-    filter: { territory: '', region: '', country: '', industry: '', status: 'active' },
+    filter: { territory: '', region: '', country: '', industry: '', status: 'active',
+              sentiment: '', tier: '', seniority: '' },
     // v1.0.0d (Tier 3a): partner detail can render as Table OR Org chart.
     viewMode: 'table',
   };
@@ -7676,6 +7683,22 @@
     return list.includes(value);
   }
 
+  // v1.0.0ac: sentiment colour helpers. Champion = green, Warm =
+  // yellow, Neutral = grey, Cool = orange, Blocker = red. Keys are
+  // matched case-insensitively so customised sentiment labels that
+  // include the canonical word ("Warm Lead") still tint correctly.
+  function _sentimentPalette(label) {
+    const s = (label || '').toLowerCase();
+    if (s.includes('champion'))  return { bg: 'rgba(34,197,94,.15)',  text: 'var(--green)',  border: 'rgba(34,197,94,.35)' };
+    if (s.includes('warm'))      return { bg: 'rgba(234,179,8,.15)',  text: 'var(--yellow)', border: 'rgba(234,179,8,.35)' };
+    if (s.includes('cool'))      return { bg: 'rgba(249,115,22,.15)', text: '#f97316',       border: 'rgba(249,115,22,.35)' };
+    if (s.includes('blocker'))   return { bg: 'rgba(239,68,68,.15)',  text: 'var(--red)',    border: 'rgba(239,68,68,.35)' };
+    return { bg: 'var(--surface-2)', text: 'var(--text-muted)', border: 'var(--border)' };
+  }
+  function _sentimentBg(label)     { return _sentimentPalette(label).bg; }
+  function _sentimentColor(label)  { return _sentimentPalette(label).text; }
+  function _sentimentBorder(label) { return _sentimentPalette(label).border; }
+
   // Friendly relative date — "today", "1d ago", "12d ago", "3mo ago".
   function _fmtDaysAgo(days) {
     if (days == null) return 'never';
@@ -7684,6 +7707,106 @@
     if (days < 30) return `${days}d ago`;
     if (days < 365) return `${Math.floor(days/30)}mo ago`;
     return `${Math.floor(days/365)}y ago`;
+  }
+
+  // v1.0.0ac: enum settings panel. Toggled from the Partners-view
+  // header. Lets Ben add/remove/reorder values for industries,
+  // territories, regions, statuses, partner sentiments, tiers,
+  // seniorities — without a redeploy. Backed by /api/settings/enums.
+  async function openEnumSettings() {
+    const panel = $('#ptn-settings-panel');
+    if (!panel) return;
+    if (panel.style.display === 'block') {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;">Loading settings…</div>';
+    try {
+      const cfg = await jsonFetch('/api/settings/enums');
+      _renderEnumSettings(cfg);
+    } catch (e) {
+      panel.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load settings: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderEnumSettings(cfg) {
+    const panel = $('#ptn-settings-panel');
+    if (!panel) return;
+    // The order/labels we present to the user.
+    const sections = [
+      { key: 'industries',         label: 'Industries' },
+      { key: 'territories',        label: 'Territories' },
+      { key: 'regions',            label: 'Regions' },
+      { key: 'statuses',           label: 'Contact statuses' },
+      { key: 'partner_sentiments', label: 'Partner sentiments' },
+      { key: 'tiers',              label: 'Tiers' },
+      { key: 'seniorities',        label: 'Seniorities' },
+    ];
+    panel.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">${icon('settings', { size: 12 })} Enum settings</div>
+            <div class="muted" style="font-size:10px;margin-top:2px;">One value per line. Order is preserved. Blank lines + duplicates dropped automatically. Empty list resets to defaults.</div>
+          </div>
+          <button id="ptn-settings-close" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">Done</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;">
+          ${sections.map(s => `
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+                <strong style="font-size:12px;">${escapeHtml(s.label)}</strong>
+                <button class="btn ghost" type="button" data-enum-reset="${escapeAttr(s.key)}" style="padding:2px 8px;font-size:10px;" title="Reset to defaults">Reset</button>
+              </div>
+              <textarea data-enum-key="${escapeAttr(s.key)}" rows="8" style="width:100%;font-family:var(--mono);font-size:12px;padding:6px 8px;">${escapeHtml((cfg[s.key] || []).join('\n'))}</textarea>
+            </div>
+          `).join('')}
+        </div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button id="ptn-settings-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Save changes</button>
+          <span class="muted" style="font-size:11px;">Affects every dropdown across the platform on next refresh.</span>
+        </div>
+      </div>
+    `;
+    hydrateIcons(panel);
+    $('#ptn-settings-close').addEventListener('click', () => { panel.style.display = 'none'; });
+    $('#ptn-settings-save').addEventListener('click', async () => {
+      const updates = {};
+      panel.querySelectorAll('textarea[data-enum-key]').forEach(ta => {
+        const key = ta.dataset.enumKey;
+        const lines = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
+        updates[key] = lines;
+      });
+      try {
+        await jsonFetch('/api/settings/enums', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        });
+        toast('Enum settings saved · refreshing dropdowns', 'success');
+        // Invalidate the cached enums so the next render pulls fresh.
+        partnersState.enums = null;
+        await initPartners();
+        panel.style.display = 'none';
+      } catch (e) {
+        toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+      }
+    });
+    panel.querySelectorAll('[data-enum-reset]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const key = btn.dataset.enumReset;
+        if (!window.confirm(`Reset "${key}" to the platform defaults?`)) return;
+        try {
+          const updated = await jsonFetch(`/api/settings/enums/${encodeURIComponent(key)}/reset`,
+                                            { method: 'POST' });
+          toast(`${key} reset to defaults`, 'success');
+          _renderEnumSettings(updated);
+        } catch (e) {
+          toast(`Reset failed: ${e.body?.error || e.message}`, 'error');
+        }
+      });
+    });
   }
 
   async function refreshPartners() {
@@ -7843,6 +7966,10 @@
         <input id="ptn-filter-country" type="text" placeholder="Country contains…" value="${escapeAttr(f.country)}" style="padding:5px 10px;font-size:12px;width:160px;" />
         <select id="ptn-filter-industry" style="padding:5px 10px;font-size:12px;">${optEmpty('Any industry')}${optGen(enums.industries || [], f.industry)}</select>
         <select id="ptn-filter-status" style="padding:5px 10px;font-size:12px;">${optEmpty('Any status')}${optGen(enums.statuses || [], f.status)}</select>
+        <!-- v1.0.0ac: filter chips for the three new dimensions. -->
+        <select id="ptn-filter-sentiment" style="padding:5px 10px;font-size:12px;">${optEmpty('Any sentiment')}${optGen(enums.partner_sentiments || [], f.sentiment)}</select>
+        <select id="ptn-filter-tier" style="padding:5px 10px;font-size:12px;">${optEmpty('Any tier')}${optGen(enums.tiers || [], f.tier)}</select>
+        <select id="ptn-filter-seniority" style="padding:5px 10px;font-size:12px;">${optEmpty('Any seniority')}${optGen(enums.seniorities || [], f.seniority)}</select>
         <button class="btn ghost" id="ptn-add-contact" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">+ Add contact</button>
       </div>
 
@@ -7853,7 +7980,7 @@
       el.style.display = 'none'; el.innerHTML = '';
       partnersState.selectedId = null;
     });
-    ['territory','region','industry','status'].forEach(k => {
+    ['territory','region','industry','status','sentiment','tier','seniority'].forEach(k => {
       $('#ptn-filter-' + k).addEventListener('change', (e) => {
         partnersState.filter[k] = e.target.value;
         renderPartnerContactsForCurrentView(p);
@@ -7907,6 +8034,10 @@
       if (f.status && (c.status || '') !== f.status) return false;
       if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
       if (f.industry && !(c.industries || []).includes(f.industry)) return false;
+      // v1.0.0ac: filter by the three new dimensions.
+      if (f.sentiment && (c.partner_sentiment || '') !== f.sentiment) return false;
+      if (f.tier && (c.tier || '') !== f.tier) return false;
+      if (f.seniority && (c.seniority || '') !== f.seniority) return false;
       return true;
     }).map(c => c.id));
 
@@ -8008,6 +8139,10 @@
       if (f.status && (c.status || '') !== f.status) return false;
       if (f.country && !(c.country || '').toLowerCase().includes(f.country.toLowerCase())) return false;
       if (f.industry && !(c.industries || []).includes(f.industry)) return false;
+      // v1.0.0ac: filter by the three new dimensions.
+      if (f.sentiment && (c.partner_sentiment || '') !== f.sentiment) return false;
+      if (f.tier && (c.tier || '') !== f.tier) return false;
+      if (f.seniority && (c.seniority || '') !== f.seniority) return false;
       return true;
     });
     if (!filtered.length) {
@@ -8031,6 +8166,9 @@
           <tr>
             <th>Name</th>
             <th>Title</th>
+            <th>Tier</th>
+            <th>Sentiment</th>
+            <th>Seniority</th>
             <th>Territory</th>
             <th>Region</th>
             <th>Country</th>
@@ -8045,6 +8183,9 @@
             <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
               <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}<br><span style="font-size:10px;">${linkedinCell(c.linkedin_url, c.name, partner.name)}</span></td>
               <td>${escapeHtml(c.title || '—')}</td>
+              <td>${c.tier ? `<span class="tag signal" style="font-size:10px;">${escapeHtml(c.tier)}</span>` : '—'}</td>
+              <td>${c.partner_sentiment ? `<span class="tag signal" style="font-size:10px;background:${_sentimentBg(c.partner_sentiment)};color:${_sentimentColor(c.partner_sentiment)};border-color:${_sentimentBorder(c.partner_sentiment)};">${escapeHtml(c.partner_sentiment)}</span>` : '—'}</td>
+              <td>${c.seniority ? `<span class="muted" style="font-size:11px;">${escapeHtml(c.seniority)}</span>` : '—'}</td>
               <td>${(_tagList(c, 'territories', 'territory').map(t => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(t)}</span>`).join('')) || '—'}</td>
               <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}</td>
               <td>${c.country ? escapeHtml(c.country) : '—'}</td>
@@ -8170,6 +8311,32 @@
             </select>
           </div>
         </div>
+        <!-- v1.0.0ac: partnership-CRM dimensions. Sentiment + Tier
+             help Ben prioritise; Seniority captures the escalation
+             path. All three lists are editable via the Settings panel. -->
+        <div class="row row-3">
+          <div class="field">
+            <label>Partner sentiment <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— how they feel about MR</span></label>
+            <select id="ptn-c-sentiment">
+              <option value="">—</option>
+              ${(enums.partner_sentiments || []).map(s => `<option value="${escapeAttr(s)}"${s === (c.partner_sentiment || '') ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Tier <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— strategic importance</span></label>
+            <select id="ptn-c-tier">
+              <option value="">—</option>
+              ${(enums.tiers || []).map(t => `<option value="${escapeAttr(t)}"${t === (c.tier || '') ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Seniority <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— escalation path</span></label>
+            <select id="ptn-c-seniority">
+              <option value="">—</option>
+              ${(enums.seniorities || []).map(s => `<option value="${escapeAttr(s)}"${s === (c.seniority || '') ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
         <!-- v0.10.0z: touch cadence — defaults to 30 days. -->
         <div class="row row-2">
           <div class="field">
@@ -8223,6 +8390,10 @@
         mr_owner: $('#ptn-c-mr-owner').value.trim(),
         industries,
         status: $('#ptn-c-status').value,
+        // v1.0.0ac: three new partnership-CRM dimensions.
+        partner_sentiment: $('#ptn-c-sentiment').value || null,
+        tier:              $('#ptn-c-tier').value || null,
+        seniority:         $('#ptn-c-seniority').value || null,
         reports_to_id: $('#ptn-c-reports-to').value,
         cadence_days: parseInt($('#ptn-c-cadence').value, 10) || 30,
       };
