@@ -5,6 +5,63 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0am] — 2026-05-23 — Custom todo list on Home
+
+Ben asked: "They should also be able to create a custom to do list on
+their home page." Done — a personal scratch list under the existing
+KPIs that persists across sessions.
+
+### Added
+
+- **`todos_store.py`** — JSON-file-per-owner store with `list_for`,
+  `create`, `update`, `toggle_done`, `delete`, `clear_completed`.
+  Each todo: text + done flag + optional priority (high/medium/low)
+  + optional due_date (YYYY-MM-DD) + created/completed timestamps.
+  Validates priority against an allowlist; rejects empty / overlong
+  text; rejects unknown fields on update.
+- **API**:
+  - `GET /api/todos?owner=&include_done=` — list (defaults to all)
+  - `POST /api/todos` — create with `{owner, text, priority?, due_date?}`
+  - `PATCH /api/todos/<id>` — partial update (text, done, priority, due_date)
+  - `POST /api/todos/<id>/toggle` — flip done in one call
+  - `DELETE /api/todos/<id>?owner=` — hard-delete
+  - `POST /api/todos/clear-completed` — bulk-remove done items
+- **Home payload** now includes `todos: { items, open_count, total }`
+  so the panel renders with the first Home fetch.
+- **UI — "Your todos" card on Home**: inline add form (text + priority
+  dropdown + date picker + Add button, Enter submits); list with
+  checkbox + line-through-on-done + priority chip + due-date badge
+  (red if overdue, amber if within 3 days, muted otherwise) + delete
+  button; "Clear completed" button appears when there's anything to
+  clear. Sort: open before done; within bucket, priority high > med
+  > low > none, then due ascending, then newest first as tiebreak.
+
+### Tests
+
+- **`tests/test_todos.py`** — 23 tests covering store (CRUD, text
+  validation with strip + length cap, priority allowlist, due-date
+  shape, done sets/clears completed_at on transitions only, toggle,
+  delete, clear_completed, sort order with all four sort keys exercised,
+  include_done filter, per-owner isolation, owner_required) + endpoints
+  (list, create, update, toggle, delete, clear-completed, full CRUD
+  cycle, include_done query param, allowlist rejection).
+
+### Implementation notes
+
+- **`toggle_done` lock discipline**: initially called `update()` from
+  inside the `_LOCK`, which deadlocked because `threading.Lock` is
+  non-reentrant. Now reads the current `done` value under the lock,
+  then exits and delegates to `update()` (which acquires the lock once
+  for the write). Tiny TOCTOU window between read and write is fine
+  for a single-user scratch list.
+- **Sort order via composite key**: priority + due ascending + created
+  descending in one `.sort(key=...)` call by inverting created_at
+  codepoints (so newer ISO timestamps sort earlier in an ascending
+  sort). Avoids the cost of a second pass.
+- **No ring buffer**: notifications are auto-generated and capped;
+  todos are user-curated, so we trust the user to clean up. The
+  `clear-completed` endpoint exists for bulk cleanup.
+
 ## [1.0.0al] — 2026-05-23 — Notifications system (bell + Home panel)
 
 Ben asked: "Should be notifications as well. When contacts or accounts

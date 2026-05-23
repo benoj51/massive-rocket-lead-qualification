@@ -926,6 +926,31 @@
       </div>
     </div>
     <div id="home-role-extra" style="margin-top:14px;"></div>
+    <!-- v1.0.0am: per-user todo list. Always visible (even when
+         empty) because this is the primary place to capture personal
+         follow-ups. Backed by /api/todos; persists across sessions. -->
+    <div class="card" id="home-todo-card" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Your todos <span id="home-todo-count" class="muted" style="font-weight:400;font-size:11px;margin-left:6px;"></span></h3>
+          <div class="muted" style="font-size:11px;margin-top:2px;">Personal scratch list. Survives across sessions. Open ones float to the top.</div>
+        </div>
+        <button class="btn ghost" id="home-todo-clear" type="button" style="padding:6px 12px;font-size:11px;display:none;">Clear completed</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:12px;align-items:center;flex-wrap:wrap;">
+        <input id="home-todo-input" type="text" placeholder="What's on your mind? (Enter to add)"
+               style="flex:1;min-width:200px;padding:7px 10px;font-size:12px;" maxlength="500" />
+        <select id="home-todo-priority" style="padding:7px 10px;font-size:11px;">
+          <option value="">No priority</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <input id="home-todo-due" type="date" style="padding:6px 10px;font-size:11px;" />
+        <button class="btn" id="home-todo-add" type="button" style="padding:7px 14px;font-size:12px;">Add</button>
+      </div>
+      <div id="home-todo-list" style="margin-top:12px;"></div>
+    </div>
     <!-- v1.0.0al: notifications panel on Home. Rendered from
          home.notifications.recent so users see assignments without
          hunting for the bell. Hidden when there's nothing to show. -->
@@ -7739,6 +7764,172 @@
     }
   }
 
+  // =============================================================
+  //  Todos (v1.0.0am) — per-user scratch list on Home
+  // =============================================================
+  const todoState = { items: [], wired: false };
+
+  function _renderHomeTodos(todoData) {
+    todoState.items = (todoData && todoData.items) || [];
+    const list = $('#home-todo-list');
+    const count = $('#home-todo-count');
+    const clearBtn = $('#home-todo-clear');
+    if (!list) return;
+    _wireHomeTodoOnce();
+    const open = todoState.items.filter(t => !t.done).length;
+    const done = todoState.items.length - open;
+    if (count) {
+      count.textContent = todoState.items.length
+        ? `· ${open} open${done ? ` · ${done} done` : ''}`
+        : '';
+    }
+    if (clearBtn) clearBtn.style.display = done > 0 ? 'inline-flex' : 'none';
+    if (!todoState.items.length) {
+      list.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">Nothing on the list yet. Add your first todo above.</div>`;
+      return;
+    }
+    const priorityBadge = (p) => {
+      if (!p) return '';
+      const colors = {
+        high:   `background:rgba(232,43,35,.12);color:var(--mr-red,#e82b23);border:1px solid rgba(232,43,35,.3);`,
+        medium: `background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.3);`,
+        low:    `background:rgba(100,116,139,.12);color:var(--text-muted);border:1px solid var(--border);`,
+      };
+      return `<span style="font-size:9px;padding:2px 6px;border-radius:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;${colors[p] || ''}">${escapeHtml(p)}</span>`;
+    };
+    const dueBadge = (d) => {
+      if (!d) return '';
+      const today = new Date().toISOString().slice(0, 10);
+      const overdue = d < today;
+      const soon = !overdue && d <= new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
+      const color = overdue ? 'var(--mr-red,#e82b23)' : soon ? '#f59e0b' : 'var(--text-muted)';
+      return `<span style="font-size:10px;color:${color};margin-left:6px;">due ${escapeHtml(d)}${overdue ? ' (overdue)' : ''}</span>`;
+    };
+    list.innerHTML = todoState.items.map(t => `
+      <div data-todo-id="${escapeAttr(t.id)}"
+           style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;${t.done ? 'opacity:.55;' : ''}">
+        <input type="checkbox" data-todo-toggle ${t.done ? 'checked' : ''}
+               style="margin-top:2px;cursor:pointer;" />
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;${t.done ? 'text-decoration:line-through;' : ''}">${escapeHtml(t.text)}</div>
+          <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            ${priorityBadge(t.priority)}
+            ${dueBadge(t.due_date)}
+          </div>
+        </div>
+        <button class="btn ghost" type="button" data-todo-del
+                style="padding:3px 8px;font-size:10px;color:var(--mr-red,#e82b23);border-color:rgba(232,43,35,.3);"
+                title="Delete">×</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-todo-toggle]').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        const id = cb.closest('[data-todo-id]').dataset.todoId;
+        _toggleTodo(id);
+      });
+    });
+    list.querySelectorAll('[data-todo-del]').forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.closest('[data-todo-id]').dataset.todoId;
+        _deleteTodo(id);
+      });
+    });
+  }
+
+  function _wireHomeTodoOnce() {
+    if (todoState.wired) return;
+    todoState.wired = true;
+    const input = $('#home-todo-input');
+    const add = $('#home-todo-add');
+    const clear = $('#home-todo-clear');
+    if (add) add.addEventListener('click', _addTodoFromInput);
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); _addTodoFromInput(); }
+      });
+    }
+    if (clear) clear.addEventListener('click', _clearCompletedTodos);
+  }
+
+  async function _addTodoFromInput() {
+    const owner = _currentRecipient();
+    if (!owner) { toast('Pick your profile first (Home → Switch profile)', 'error'); return; }
+    const input = $('#home-todo-input');
+    const priority = $('#home-todo-priority').value || null;
+    const due = $('#home-todo-due').value || null;
+    const text = (input?.value || '').trim();
+    if (!text) return;
+    try {
+      const data = await jsonFetch('/api/todos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner, text, priority, due_date: due }),
+      });
+      // Reset the form and re-fetch so sort order is the server's
+      // authoritative one (priority + due + created tiebreaks).
+      input.value = '';
+      $('#home-todo-priority').value = '';
+      $('#home-todo-due').value = '';
+      await _refreshTodos();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _toggleTodo(id) {
+    const owner = _currentRecipient();
+    if (!owner) return;
+    try {
+      await jsonFetch(`/api/todos/${encodeURIComponent(id)}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner }),
+      });
+      await _refreshTodos();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _deleteTodo(id) {
+    const owner = _currentRecipient();
+    if (!owner) return;
+    try {
+      await jsonFetch(
+        `/api/todos/${encodeURIComponent(id)}?owner=${encodeURIComponent(owner)}`,
+        { method: 'DELETE' });
+      await _refreshTodos();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _clearCompletedTodos() {
+    const owner = _currentRecipient();
+    if (!owner) return;
+    if (!window.confirm('Clear all completed todos?')) return;
+    try {
+      await jsonFetch('/api/todos/clear-completed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner }),
+      });
+      await _refreshTodos();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _refreshTodos() {
+    const owner = _currentRecipient();
+    if (!owner) return;
+    try {
+      const data = await jsonFetch(
+        `/api/todos?owner=${encodeURIComponent(owner)}`);
+      _renderHomeTodos({ items: data.items || [] });
+    } catch (_) { /* leave the previous render in place */ }
+  }
+
   async function loadHome() {
     if (!homeState.profile) {
       await ensureProfileSelected();
@@ -7889,6 +8080,10 @@
     // which the /api/home endpoint includes. Hidden when there are no
     // notifications so the card doesn't add chrome for nothing.
     _renderHomeNotifications(data.notifications || {});
+
+    // v1.0.0am: Home todos panel — fed by data.todos. Always rendered
+    // (even when empty) so the input is always discoverable.
+    _renderHomeTodos(data.todos || { items: [] });
   }
 
   function _renderHomeNotifications(notifData) {

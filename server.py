@@ -52,6 +52,7 @@ import hubspot_sync
 import lead_summary_store
 import notifications_store
 import packages
+import todos_store
 import pricing
 import pricing_store
 import project_store
@@ -3137,6 +3138,16 @@ def api_home():
     notifs_recent = notifications_store.list_for(owner_name, limit=5)
     notifs_unread = notifications_store.unread_count(owner_name)
 
+    # v1.0.0am: surface the user's own todos on Home. We send the full
+    # list (cheap — typical user has <20) so the UI can render +
+    # filter without a second round-trip.
+    todos_all = todos_store.list_for(owner_name)
+    todos_summary = {
+        "items":      todos_all,
+        "open_count": sum(1 for t in todos_all if not t.get("done")),
+        "total":      len(todos_all),
+    }
+
     return jsonify({
         "owner": {
             "name":   owner["name"],
@@ -3159,6 +3170,7 @@ def api_home():
             "recent":        notifs_recent,
             "unread_count":  notifs_unread,
         },
+        "todos":            todos_summary,
         "generated_at":     team["generated_at"],
     })
 
@@ -3224,6 +3236,90 @@ def api_notifications_mark_all_read():
         "marked":       n,
         "unread_count": notifications_store.unread_count(recipient),
     })
+
+
+# v1.0.0am: Todos API ------------------------------------------------------
+# Per-user scratch list, surfaced on the Home page. Not a delegation
+# tool — these are your own todos, not assignable.
+
+@app.route("/api/todos", methods=["GET"])
+def api_todos_list():
+    """List todos for an owner. Query:
+      owner — required, display name
+      include_done — '0' to hide completed (default include)
+    """
+    owner = (request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    include_done = (request.args.get("include_done") or "1").lower() not in {"0", "false", "no"}
+    items = todos_store.list_for(owner, include_done=include_done)
+    return jsonify({"items": items})
+
+
+@app.route("/api/todos", methods=["POST"])
+def api_todos_create():
+    body = request.get_json(silent=True) or {}
+    owner = (body.get("owner") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    try:
+        todo = todos_store.create(owner, text,
+                                    priority=body.get("priority"),
+                                    due_date=body.get("due_date"))
+    except todos_store.TodosStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"todo": todo}), 201
+
+
+@app.route("/api/todos/<todo_id>", methods=["PATCH"])
+def api_todos_update(todo_id: str):
+    body = request.get_json(silent=True) or {}
+    owner = (body.pop("owner", None) or request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    try:
+        todo = todos_store.update(owner, todo_id, **body)
+    except todos_store.TodosStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if todo is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"todo": todo})
+
+
+@app.route("/api/todos/<todo_id>/toggle", methods=["POST"])
+def api_todos_toggle(todo_id: str):
+    body = request.get_json(silent=True) or {}
+    owner = (body.get("owner") or request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    todo = todos_store.toggle_done(owner, todo_id)
+    if todo is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"todo": todo})
+
+
+@app.route("/api/todos/<todo_id>", methods=["DELETE"])
+def api_todos_delete(todo_id: str):
+    owner = (request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    ok = todos_store.delete(owner, todo_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/todos/clear-completed", methods=["POST"])
+def api_todos_clear_completed():
+    body = request.get_json(silent=True) or {}
+    owner = (body.get("owner") or request.args.get("owner") or "").strip()
+    if not owner:
+        return jsonify({"error": "owner required"}), 400
+    n = todos_store.clear_completed(owner)
+    return jsonify({"removed": n})
 
 
 # v1.0.0t: Dashboard endpoint ----------------------------------------------
