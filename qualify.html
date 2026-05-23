@@ -17,21 +17,36 @@
      translucent accent overlays that work on both backdrops.
   ============================================================ */
   :root {
+    /* v1.0.0ae: Massive Rocket brand palette. Single source of truth
+       for the brand colours; functional tokens below map to these so
+       you can re-skin the platform by editing one block.
+       Brand swatches: DARK GRAY #212227 · LIGHT GREY #f6f6f6 ·
+       MR RED #e82b23 · LIGHT MR RED #ffdad8 · YELLOW #fbbc04 ·
+       GREEN #34a853 · NEW HOME DARK BLUE #355881 · POST-IT #fff2cc. */
+    --mr-red:        #e82b23;
+    --mr-red-light:  #ffdad8;
+    --mr-dark-gray:  #212227;
+    --mr-light-gray: #f6f6f6;
+    --mr-yellow:     #fbbc04;
+    --mr-green:      #34a853;
+    --mr-blue:       #355881;
+    --mr-postit:     #fff2cc;
+
     /* Dark theme (default) */
     --bg: #0a0a0f;
-    --surface: #13131a;
-    --surface-2: #1a1a24;
+    --surface: var(--mr-dark-gray);        /* was #13131a — now MR Dark Gray */
+    --surface-2: #2a2b32;                   /* derived: surface +12% lightness */
     --border: #2a2a3a;
     --border-strong: #3a3a4d;
     --text: #e8e8f0;
     --text-dim: #9898aa;
     --text-muted: #6a6a80;
-    --accent: #ff4d2a;
-    --accent-dim: #b3361d;
-    --green: #4ade80;
-    --yellow: #fbbf24;
-    --red: #ef4444;
-    --blue: #60a5fa;
+    --accent: var(--mr-red);                /* was #e82b23 — MR Red brand */
+    --accent-dim: #b8211b;                  /* slightly darker MR Red */
+    --green: var(--mr-green);               /* was #4ade80 — MR Green */
+    --yellow: var(--mr-yellow);             /* was #fbbf24 — MR Yellow */
+    --red: #ef4444;                         /* kept as semantic alert red */
+    --blue: #6e94c5;                        /* lighter shade of MR blue for dark-mode legibility */
     --shadow: 0 8px 24px rgba(0,0,0,.32);
     --radius: 12px;
     --pad: 20px;
@@ -39,47 +54,51 @@
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
     /* Theme-derived effects (separated so light can override) */
     --bg-glass: rgba(10,10,15,.85);
-    --bg-drawer-glass: rgba(19,19,26,.85);
-    --bg-radial-1: rgba(255,77,42,.08);
-    --bg-radial-2: rgba(96,165,250,.04);
+    --bg-drawer-glass: rgba(33,34,39,.85);  /* MR Dark Gray translucent */
+    --bg-radial-1: rgba(232,43,35,.08);     /* MR Red glow */
+    --bg-radial-2: rgba(53,88,129,.06);     /* MR Blue glow */
     --bg-fade-from: #0e0e16;
     --surface-tint: rgba(255,255,255,.025);
     --tile-tint:    rgba(255,255,255,.018);
     --input-bg: var(--surface-2);
-    --input-focus-bg: #1f1f2b;
-    --focus-ring: rgba(255,77,42,.12);
+    --input-focus-bg: #2a2b32;
+    --focus-ring: rgba(232,43,35,.14);
     --num-base: var(--text);  /* gradient end-stop for the score number */
     --num-base-2: var(--text-dim);
   }
 
   :root[data-theme="light"] {
-    --bg: #f7f7f2;
+    /* MR brand on white surfaces. Note: --green and --yellow swap to
+       darker AA-compliant variants when used as TEXT (the brand-bright
+       values #34a853 / #fbbc04 fail contrast on white). For tints +
+       backgrounds we use rgba() over the brand hex elsewhere. */
+    --bg: var(--mr-light-gray);    /* was #f7f7f2 — MR Light Grey #f6f6f6 */
     --surface: #ffffff;
     --surface-2: #f1f1ec;
     --border: #e3e3dc;
     --border-strong: #c8c8c0;
-    --text: #1a1a24;
-    --text-dim: #4a4a52;           /* was #56565f — slightly darker for ~8:1 on white */
-    --text-muted: #5a5a62;         /* v0.10.0x contrast pass: was #8a8a92 — failed AA on white. ~7:1 now. */
-    --accent: #ff4d2a;             /* brand orange stays for buttons + brand surfaces */
-    --accent-dim: #b3361d;
-    --accent-text: #c8391f;        /* v0.10.0x: for accent-coloured TEXT on light — ~5.4:1 on white (was using --accent at 3.4:1) */
-    --green: #15803d;              /* was #16a34a — bumped for ~5.4:1 on white pill bg */
-    --yellow: #a16207;             /* was #d97706 — ~5.7:1 on white */
-    --red: #b91c1c;                /* was #dc2626 — ~6.0:1 on white */
-    --blue: #1d4ed8;               /* was #2563eb — ~6.4:1 on white */
-    --shadow: 0 4px 14px rgba(20,20,30,.06);
-    --bg-glass: rgba(247,247,242,.85);
+    --text: var(--mr-dark-gray);   /* was #1a1a24 — MR Dark Gray #212227 */
+    --text-dim: #4a4a52;           /* ~8:1 on white */
+    --text-muted: #5a5a62;         /* ~7:1 on white — passes AA */
+    --accent: var(--mr-red);       /* MR Red — 5.0:1 on white, passes AA */
+    --accent-dim: #b8211b;
+    --accent-text: #c4231c;        /* slightly darker for AA when used as text */
+    --green: #1f7a3f;              /* dark green for AA text on white (MR Green #34a853 fails) */
+    --yellow: #8b6914;             /* dark amber for AA (MR Yellow #fbbc04 fails badly on white) */
+    --red: #b91c1c;                /* alert red — passes AA */
+    --blue: var(--mr-blue);        /* MR Blue #355881 — ~6.8:1 on white */
+    --shadow: 0 4px 14px rgba(33,34,39,.06);   /* MR Dark Gray-tinted */
+    --bg-glass: rgba(246,246,246,.85);
     --bg-drawer-glass: rgba(255,255,255,.85);
-    --bg-radial-1: rgba(255,77,42,.05);
-    --bg-radial-2: rgba(37,99,235,.03);
+    --bg-radial-1: rgba(232,43,35,.05);
+    --bg-radial-2: rgba(53,88,129,.03);
     --bg-fade-from: #efefe8;
     --surface-tint: rgba(0,0,0,.018);
     --tile-tint:    rgba(0,0,0,.014);
     --input-bg: #ffffff;
     --input-focus-bg: #ffffff;
-    --focus-ring: rgba(255,77,42,.18);
-    --num-base: #1a1a24;
+    --focus-ring: rgba(232,43,35,.18);
+    --num-base: var(--mr-dark-gray);
     --num-base-2: #4a4a52;
   }
   /* Default --accent-text falls back to --accent in dark mode (same colour,
@@ -187,7 +206,7 @@
     padding: 10px 18px; border-radius: 8px; font-weight: 600;
     cursor: pointer; font-size: 14px; transition: filter .15s, transform .05s;
   }
-  button.btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255,77,42,.25); }
+  button.btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(232,43,35,.25); }
   button.btn:active { transform: translateY(0); }
   button.btn.ghost:hover { box-shadow: none; }
   button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; }
@@ -205,11 +224,11 @@
     padding: 12px 14px; position: relative;
   }
   .tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-  .tile.manual { border-color: rgba(255,77,42,.4); background-color: rgba(255,77,42,.04); }
+  .tile.manual { border-color: rgba(232,43,35,.4); background-color: rgba(232,43,35,.04); }
   .tile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
   .tile .val { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--text); }
   .tile input { background: transparent; border: 0; padding: 0; margin-top: 4px; font-size: 14px; color: var(--text); font-weight: 500; }
-  .tile input:focus { background: rgba(255,77,42,.08); border-radius: 4px; padding: 2px 4px; margin: 2px -4px 0; }
+  .tile input:focus { background: rgba(232,43,35,.08); border-radius: 4px; padding: 2px 4px; margin: 2px -4px 0; }
   .tile .badge {
     position: absolute; top: 8px; right: 10px; font-size: 9px; font-family: var(--mono);
     color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
@@ -238,7 +257,7 @@
   }
   .score-big::before {
     content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(circle at 50% 30%, rgba(255,77,42,.08) 0%, transparent 60%);
+    background: radial-gradient(circle at 50% 30%, rgba(232,43,35,.08) 0%, transparent 60%);
   }
   .score-big .num {
     font-size: 72px; font-weight: 800; line-height: 1;
@@ -283,7 +302,7 @@
   }
   .meddicc-row .key small .role-driver-hint {
     display: inline-block; margin-top: 4px; padding: 2px 8px;
-    background: rgba(255,77,42,.10); color: var(--accent-text);
+    background: rgba(232,43,35,.10); color: var(--accent-text);
     border-radius: 999px; font-size: 10px; letter-spacing: .02em;
   }
   .meddicc-row input { background: var(--surface); border: 1px solid var(--border);
@@ -503,7 +522,7 @@
     background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
   }
   .org-node .n-pill.overdue { background: rgba(239,68,68,.15); color: var(--red); border-color: rgba(239,68,68,.35); }
-  .org-node .n-pill.territory { background: rgba(255,77,42,.10); color: var(--accent-text); border-color: rgba(255,77,42,.25); }
+  .org-node .n-pill.territory { background: rgba(232,43,35,.10); color: var(--accent-text); border-color: rgba(232,43,35,.25); }
   /* v1.0.0l: country pill — distinct from region (region is a tag, country is a single value).
      v1.0.0w: text colour was pastel blue (#93c5fd) — fine on dark, low contrast on light. Default to the darker blue
      and override for dark mode so both modes have ~5:1 contrast on the
@@ -646,9 +665,9 @@
   .drawer header #ld-save.dirty {
     background: var(--accent); border-color: var(--accent-text); color: white;
     /* v0.10.0p: soft glow when there are pending changes — draws the eye. */
-    box-shadow: 0 0 0 3px rgba(255,77,42,.15), 0 4px 14px rgba(255,77,42,.35);
+    box-shadow: 0 0 0 3px rgba(232,43,35,.15), 0 4px 14px rgba(232,43,35,.35);
   }
-  .drawer header #ld-save.dirty:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px rgba(255,77,42,.2), 0 6px 18px rgba(255,77,42,.45); }
+  .drawer header #ld-save.dirty:hover { filter: brightness(1.1); box-shadow: 0 0 0 3px rgba(232,43,35,.2), 0 6px 18px rgba(232,43,35,.45); }
   .drawer header #ld-save .dirty-count {
     display: none; margin-left: 6px; font-size: 10px;
     background: rgba(255,255,255,.25); padding: 1px 6px; border-radius: 8px;
@@ -659,7 +678,7 @@
 
   /* Hero block — Lead Summary at the top, accent-coloured. */
   .drawer .hero {
-    border: 1px solid rgba(255,77,42,.25); background: rgba(255,77,42,.04);
+    border: 1px solid rgba(232,43,35,.25); background: rgba(232,43,35,.04);
     border-radius: 10px; padding: 14px; margin-bottom: 16px;
   }
   .drawer .hero .hero-head {
@@ -1999,7 +2018,7 @@
   const ROADMAP_PHASES = ['Understand', 'Execute', 'Accelerate'];
   const WORKSTREAM_COLOR = {
     'CRM Strategy': '#60a5fa',
-    'CRM Build': '#ff4d2a',
+    'CRM Build': '#e82b23',
     'CRM Execute': '#f97316',
     'Data': '#4ade80',
     'Engineering': '#a78bfa',
@@ -2221,7 +2240,7 @@
       </a>
     `).join('');
     const createRow = exact ? '' : `
-      <a href="#" data-qf-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(255,77,42,.08);border:1px dashed rgba(255,77,42,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
+      <a href="#" data-qf-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(232,43,35,.08);border:1px dashed rgba(232,43,35,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
         + Use "${escapeHtml(q.trim())}" as parent group (created on save)
       </a>
     `;
@@ -2360,7 +2379,7 @@
 
     el.style.display = 'block';
     el.innerHTML = `
-      <div style="background:rgba(255,77,42,.08);border:1px solid rgba(255,77,42,.35);border-radius:8px;padding:12px;margin:12px 0;">
+      <div style="background:rgba(232,43,35,.08);border:1px solid rgba(232,43,35,.35);border-radius:8px;padding:12px;margin:12px 0;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${confidenceColour};">
             Possible parent group · ${escapeHtml(sp.confidence)} confidence
@@ -2483,7 +2502,7 @@
           {
             label: 'Scored',
             data,
-            backgroundColor: '#ff4d2a',
+            backgroundColor: '#e82b23',
             borderRadius: 4,
           },
           {
@@ -3035,10 +3054,10 @@
       const isIncumbent = r.type === 'incumbent';
       const window_ = [r.since, r.until].filter(Boolean).join(' → ') ||
                        (isIncumbent ? 'ongoing' : '');
-      const bg = isIncumbent ? 'rgba(255,77,42,.06)' : 'var(--surface)';
-      const borderColor = isIncumbent ? 'rgba(255,77,42,.30)' : 'var(--border)';
+      const bg = isIncumbent ? 'rgba(232,43,35,.06)' : 'var(--surface)';
+      const borderColor = isIncumbent ? 'rgba(232,43,35,.30)' : 'var(--border)';
       const badge = isIncumbent
-        ? '<span class="tag signal" style="background:rgba(255,77,42,.18);color:var(--accent-text);font-size:9px;">INCUMBENT</span>'
+        ? '<span class="tag signal" style="background:rgba(232,43,35,.18);color:var(--accent-text);font-size:9px;">INCUMBENT</span>'
         : '<span class="tag signal" style="background:var(--surface-2);color:var(--text-muted);font-size:9px;">PREVIOUS</span>';
       return `
         <div style="background:${bg};border:1px solid ${borderColor};border-radius:8px;padding:10px 12px;margin-bottom:6px;">
@@ -3498,11 +3517,11 @@
     }
     el.style.display = 'block';
     const roleBadge = (role) => {
-      if (role === 'prospect-side') return `<span style="background:rgba(255,77,42,.12);color:var(--accent-text);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">PROSPECT</span>`;
+      if (role === 'prospect-side') return `<span style="background:rgba(232,43,35,.12);color:var(--accent-text);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">PROSPECT</span>`;
       return `<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">UNCLEAR</span>`;
     };
     el.innerHTML = `
-      <div style="background:rgba(255,77,42,.06);border:1px solid rgba(255,77,42,.3);border-radius:8px;padding:12px;">
+      <div style="background:rgba(232,43,35,.06);border:1px solid rgba(232,43,35,.3);border-radius:8px;padding:12px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
           <div style="min-width:0;flex:1;">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">${icon('sparkles', { size: 12 })} AI spotted ${suggestions.length} new contact${suggestions.length === 1 ? '' : 's'} in this note</div>
@@ -4490,7 +4509,7 @@
     if (group.parent) {
       const p = group.parent;
       chip.style.display = 'inline-block';
-      chip.innerHTML = `<a href="#" id="ld-parent-link" class="chip" style="font-size:11px;background:rgba(255,77,42,.12);border:1px solid rgba(255,77,42,.35);color:var(--accent);text-decoration:none;padding:3px 10px;border-radius:12px;">Part of: ${escapeHtml(p.company || p.id)} →</a>`;
+      chip.innerHTML = `<a href="#" id="ld-parent-link" class="chip" style="font-size:11px;background:rgba(232,43,35,.12);border:1px solid rgba(232,43,35,.35);color:var(--accent);text-decoration:none;padding:3px 10px;border-radius:12px;">Part of: ${escapeHtml(p.company || p.id)} →</a>`;
       const link = document.getElementById('ld-parent-link');
       if (link && p.id) {
         link.addEventListener('click', (e) => {
@@ -4597,7 +4616,7 @@
       </a>
     `).join('');
     const createRow = exact ? '' : `
-      <a href="#" data-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(255,77,42,.08);border:1px dashed rgba(255,77,42,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
+      <a href="#" data-parent-create="${escapeAttr(q.trim())}" style="display:block;padding:6px 10px;background:rgba(232,43,35,.08);border:1px dashed rgba(232,43,35,.4);border-radius:6px;font-size:12px;color:var(--accent);text-decoration:none;">
         + Use "${escapeHtml(q.trim())}" as parent group (will be created on first qualify)
       </a>
     `;
@@ -5946,7 +5965,7 @@
       data: {
         labels: q.monthly.map(m => `M${m.month}`),
         datasets: [
-          { label: 'Net', data: q.monthly.map(m => m.net_usd), backgroundColor: '#ff4d2a', borderRadius: 4 },
+          { label: 'Net', data: q.monthly.map(m => m.net_usd), backgroundColor: '#e82b23', borderRadius: 4 },
           { label: 'Discount', data: q.monthly.map(m => m.discount_usd), backgroundColor: pcTheme.barRemain, borderRadius: 4 },
         ],
       },
@@ -6496,7 +6515,7 @@
       sections.push(`
         <div style="margin-bottom:18px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">
-            Lead contacts <span style="background:rgba(255,77,42,.12);color:var(--accent-text);font-size:10px;padding:1px 8px;border-radius:10px;margin-left:4px;">${lead.length}</span>
+            Lead contacts <span style="background:rgba(232,43,35,.12);color:var(--accent-text);font-size:10px;padding:1px 8px;border-radius:10px;margin-left:4px;">${lead.length}</span>
           </div>
           ${lead.map(_row).join('')}
         </div>`);
@@ -7441,7 +7460,7 @@
           <td style="padding:8px 10px;font-size:12px;text-align:right;color:var(--accent);white-space:nowrap;font-weight:500;">${escapeHtml(fmtGbp(b.pipeline_gbp))}</td>
           <td style="padding:8px 10px;width:35%;">
             <div style="position:relative;height:18px;background:var(--surface);border-radius:4px;overflow:hidden;border:1px solid var(--border);">
-              <div style="position:absolute;left:0;top:0;height:100%;width:${widthPipe.toFixed(1)}%;background:rgba(255,77,42,.18);"></div>
+              <div style="position:absolute;left:0;top:0;height:100%;width:${widthPipe.toFixed(1)}%;background:rgba(232,43,35,.18);"></div>
               <div style="position:absolute;left:0;top:0;height:100%;width:${widthBest.toFixed(1)}%;background:rgba(234,179,8,.30);"></div>
               <div style="position:absolute;left:0;top:0;height:100%;width:${widthCommit.toFixed(1)}%;background:rgba(34,197,94,.45);"></div>
             </div>
@@ -8255,7 +8274,7 @@
     // so it's obvious the form just opened.
     setTimeout(() => {
       detailEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      detailEl.style.boxShadow = '0 0 0 3px rgba(255,77,42,.4)';
+      detailEl.style.boxShadow = '0 0 0 3px rgba(232,43,35,.4)';
       detailEl.style.transition = 'box-shadow .4s ease-out';
       setTimeout(() => { detailEl.style.boxShadow = ''; }, 1000);
     }, 30);
@@ -8496,7 +8515,7 @@
         `;
       };
       el.innerHTML = `
-        <div style="background:rgba(255,77,42,.04);border:1px solid rgba(255,77,42,.25);border-radius:8px;padding:12px;">
+        <div style="background:rgba(232,43,35,.04);border:1px solid rgba(232,43,35,.25);border-radius:8px;padding:12px;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">${icon('sparkles', { size: 11 })} Conversation summary</div>
             ${lastNoteLabel ? `

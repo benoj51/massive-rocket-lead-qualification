@@ -37,7 +37,7 @@ _HTML_HEAD = """<!doctype html>
   }}
   h1 {{ font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; }}
   h2 {{ font-size: 14px; margin: 24px 0 8px; text-transform: uppercase;
-       letter-spacing: .08em; color: #ff4d2a; border-bottom: 1px solid #f0e0db;
+       letter-spacing: .08em; color: #e82b23; border-bottom: 1px solid #f0e0db;
        padding-bottom: 4px; }}
   h3 {{ font-size: 13px; margin: 14px 0 6px; color: #2a2a3a; }}
   p {{ margin: 6px 0; }}
@@ -87,7 +87,7 @@ _HTML_HEAD = """<!doctype html>
     display: flex; justify-content: space-between; align-items: center;
   }}
   .toolbar button {{
-    background: #ff4d2a; color: #fff; border: 0; padding: 6px 14px;
+    background: #e82b23; color: #fff; border: 0; padding: 6px 14px;
     border-radius: 6px; font-size: 13px; cursor: pointer; margin-left: 8px;
   }}
   .toolbar .meta {{ color: #c9c9d4; font-size: 11px; }}

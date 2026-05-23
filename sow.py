@@ -246,7 +246,7 @@ _HTML_HEAD = """<!doctype html>
     display: flex; justify-content: space-between; align-items: center;
   }}
   .toolbar a, .toolbar button {{
-    background: #ff4d2a; color: #fff; border: 0; padding: 6px 14px;
+    background: #e82b23; color: #fff; border: 0; padding: 6px 14px;
     border-radius: 6px; font-size: 13px; cursor: pointer; text-decoration: none;
     margin-left: 8px;
   }}

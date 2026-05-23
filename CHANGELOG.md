@@ -5,6 +5,84 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ae] — 2026-05-23 — Adopt the Massive Rocket brand palette
+
+Ben shared the official MR brand theme. Platform's design tokens now
+map to it directly.
+
+### Two-layer design system
+
+**Layer 1 — brand swatches** (single source of truth, in `:root`):
+```css
+--mr-red:        #e82b23;   /* MR RED  */
+--mr-red-light:  #ffdad8;   /* LIGHT MR RED */
+--mr-dark-gray:  #212227;   /* DARK GRAY */
+--mr-light-gray: #f6f6f6;   /* LIGHT GREY */
+--mr-yellow:     #fbbc04;   /* YELLOW */
+--mr-green:      #34a853;   /* GREEN */
+--mr-blue:       #355881;   /* NEW HOME DARK BLUE */
+--mr-postit:     #fff2cc;   /* POST-IT */
+```
+
+**Layer 2 — functional tokens** map to the brand layer:
+- `--accent` → `var(--mr-red)` everywhere (was `#ff4d2a`)
+- `--green` → `var(--mr-green)` in dark mode; AA-darker variant on
+  light (`#1f7a3f`) for text contrast — MR Green fails AA on white
+- `--yellow` → `var(--mr-yellow)` in dark mode; AA-darker amber
+  (`#8b6914`) on light — MR Yellow fails AA badly on white at 1.6:1
+- `--blue` → `var(--mr-blue)` on light (~6.8:1 contrast on white);
+  lighter shade (`#6e94c5`) in dark mode for legibility
+- `--surface` (dark mode) → `var(--mr-dark-gray)` — was `#13131a`
+- `--bg` (light mode) → `var(--mr-light-gray)` — was `#f7f7f2`
+- `--text` (light mode) → `var(--mr-dark-gray)` — was `#1a1a24`
+- All radial gradients, focus rings, drop shadows recoloured to MR
+  Red + MR Blue tints
+
+### Mass-changed everywhere
+
+Every hardcoded `rgba(255,77,42,...)` (43 sites) and bare `#ff4d2a`
+(across `qualify.html`, `project_preview.py`, `sow.py`) replaced
+with the MR Red equivalent in one sweep — the brand-orange platform
+becomes brand-MR-red without component-level edits.
+
+### Why two layers?
+- Component CSS keeps using semantic tokens (`var(--accent)`) — no
+  component knows or cares about brand colour values
+- If MR's brand evolves (or for a future fork / white-label), edit
+  the `--mr-*` block once and every surface inherits
+- The brand swatches stay exposed for any future need that
+  references them by name (e.g. an export to a brand-coloured PDF
+  in pricing.py)
+
+### Notes
+- **Brand red doubles as accent**, not as error. `--red` stays as
+  the standard alert red (`#ef4444` dark / `#b91c1c` light) so error
+  states keep semantic separation from brand surfaces.
+- **Brand green + yellow fail AA on white**. For backgrounds + tints
+  we still use the MR brand hex with translucency (rgba); for TEXT
+  contrast on white we swap to darker variants in light mode.
+- **MR Blue is too dark for dark-mode legibility** as a foreground
+  colour, so dark mode uses a derived lighter shade (`#6e94c5`).
+- The 13 Chart.js fills + the per-criterion chart colours (revenue
+  blue, employees purple, etc.) intentionally stay as-is — they're
+  functional differentiators, not brand colours.
+
+### Files touched
+- `qualify.html` — token reorganisation + 43 rgba replacements
+- `project_preview.py` + `sow.py` — accent hex replacement
+
+### Tests
+- 568 still passing. Change is colour-only; no logic touched.
+
+### What you'll see
+Refresh the app — every brand surface (Save button, accent links,
+hover glow, focus rings, ICP pill, the "Part of: ..." chip, the
+incumbent agency tint, the source chip, etc.) now uses MR Red
+`#e82b23` instead of the old soft orange `#ff4d2a`. Light mode
+background is the brand's Light Grey. Dark-mode card surface uses
+MR Dark Gray. The whole platform looks like it was built for MR,
+not adapted to MR.
+
 ## [1.0.0ad] — 2026-05-23 — Tier defaults reframed around importance to MR
 
 Ben pointed out that "Active" and "Dormant" describe engagement
