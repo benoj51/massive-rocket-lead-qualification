@@ -5,6 +5,34 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0u] — 2026-05-23 — Search modal: light-mode contrast fix
+
+Ben reported the global search modal (⌘K) had near-invisible header
+text in light mode. Root cause: `.doc-preview-header` had a hardcoded
+`background: rgba(19,19,26,.95)` (dark) while the title text used
+`var(--text)` which flips to dark in light mode → dark text on dark
+band, unreadable.
+
+### Fix
+- `.doc-preview-header` background → `var(--surface-2)` (theme-aware:
+  cream in light mode, dark in dark mode; subtly recessed against the
+  modal surface in both)
+- `.doc-preview-body` background → `var(--surface)` instead of
+  hardcoded `#fff` (also fixed a parallel dark-mode bug where doc
+  iframes were forced white inside an otherwise-dark modal — the
+  iframe itself still renders the document on white via its own
+  inline background, so doc rendering is unchanged)
+
+### Audit
+Other hardcoded color values verified intentional:
+- `--bg-drawer-glass: rgba(19,19,26,.85)` — translucent backdrop only
+- `color: #fff` on accent (orange) buttons — brand-on-accent always
+- `#dc2626 / #fff` on error banners — universally legible
+- `background: #fff` on doc iframes — keeps doc rendering consistent
+
+### Files touched
+- `qualify.html` — 2 CSS rules + comments documenting the why
+
 ## [1.0.0t] — 2026-05-21 — 📊 Team Activity Dashboard
 
 Ben asked for a manager surface — "looking over the team, see number

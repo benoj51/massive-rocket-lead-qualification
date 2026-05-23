@@ -527,9 +527,14 @@
   }
   .doc-preview-overlay.open .doc-preview-modal { transform: translateY(0); }
   .doc-preview-header {
+    /* v1.0.0u: theme-aware background. Previously hardcoded
+       rgba(19,19,26,.95) which left light-mode users with dark text on
+       a dark band — title + subtitle disappeared. var(--surface-2)
+       gives us a subtly recessed band in both modes that contrasts
+       against the modal body. */
     padding: 14px 20px; border-bottom: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
-    background: rgba(19,19,26,.95);
+    background: var(--surface-2);
   }
   .doc-preview-title {
     font-size: 15px; font-weight: 600; color: var(--text);
@@ -539,7 +544,12 @@
     font-size: 11px; color: var(--text-muted); margin-top: 2px;
   }
   .doc-preview-body {
-    flex: 1; overflow: hidden; background: #fff;
+    /* v1.0.0u: was hardcoded white for the doc-iframe use case, which
+       broke the body of the global-search modal in dark mode (white
+       inside a dark modal). Use the theme surface so both modes look
+       right; iframes inside still render the doc on white via their
+       own backgrounds. */
+    flex: 1; overflow: hidden; background: var(--surface);
   }
   .doc-preview-body iframe {
     width: 100%; height: 100%; border: 0; background: #fff;
