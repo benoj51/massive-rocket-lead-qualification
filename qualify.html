@@ -2102,14 +2102,26 @@
           <span id="ld-contacts-search-status" class="muted" style="font-size:11px;"></span>
         </div>
         <div id="ld-contacts-search-results" style="display:none;margin-bottom:12px;"></div>
-        <!-- v1.0.0ar: Account view toolbar. Table/Org chart toggle +
-             engagement summary (how many contacts have been touched,
-             how many are overdue). Hidden until contacts load. -->
-        <div id="ld-account-toolbar" style="display:none;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;flex-wrap:wrap;">
-          <div id="ld-account-engagement" class="muted" style="font-size:11px;"></div>
-          <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-            <button class="chip active" data-ld-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Table</button>
-            <button class="chip" data-ld-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Org chart</button>
+        <!-- v1.0.0ar/as: Account view toolbar. Engagement summary,
+             scope filter chips (v1.0.0as), and Table / Org chart /
+             Timeline view-mode toggle. Hidden until contacts load. -->
+        <div id="ld-account-toolbar" style="display:none;flex-direction:column;gap:8px;margin-bottom:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div id="ld-account-engagement" class="muted" style="font-size:11px;"></div>
+            <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+              <button class="chip active" data-ld-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Table</button>
+              <button class="chip" data-ld-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Org chart</button>
+              <button class="chip" data-ld-view="timeline" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Timeline</button>
+            </div>
+          </div>
+          <!-- v1.0.0as: contact-scope filter. Applies to Table + Org
+               chart views; the Timeline shows everything regardless. -->
+          <div id="ld-account-filters" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-right:2px;">Show:</span>
+            <button class="chip active" data-ld-filter="all" type="button" style="font-size:10px;padding:3px 9px;">All</button>
+            <button class="chip" data-ld-filter="engaged" type="button" style="font-size:10px;padding:3px 9px;">Engaged</button>
+            <button class="chip" data-ld-filter="overdue" type="button" style="font-size:10px;padding:3px 9px;">Overdue</button>
+            <button class="chip" data-ld-filter="key" type="button" style="font-size:10px;padding:3px 9px;">Key</button>
           </div>
         </div>
         <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
@@ -3596,10 +3608,26 @@
     });
   }
 
-  // v1.0.0ar: cached state for the Account view inside the lead drawer.
-  // viewMode drives Table vs Org chart toggle; cached contacts are re-
-  // rendered without a fetch when the user flips views.
-  const accountViewState = { viewMode: 'table', cachedByLeadId: {} };
+  // v1.0.0ar/as: cached state for the Account view inside the lead
+  // drawer. viewMode drives Table / Org chart / Timeline toggle;
+  // scopeFilter (v1.0.0as) is the All/Engaged/Overdue/Key chip group;
+  // cached contacts are re-rendered without a fetch when the user
+  // flips views.
+  const accountViewState = {
+    viewMode:    'table',
+    scopeFilter: 'all',
+    cachedByLeadId: {},
+  };
+
+  // v1.0.0as: apply the current scope filter to a contacts list.
+  // Returns a new array; doesn't mutate the cache.
+  function _filterContactsByScope(contacts) {
+    const f = accountViewState.scopeFilter;
+    if (f === 'engaged')  return contacts.filter(c => !!c.last_touched_at);
+    if (f === 'overdue')  return contacts.filter(c => !!c.overdue);
+    if (f === 'key')      return contacts.filter(c => !!c.is_primary);
+    return contacts;
+  }
 
   async function loadLeadContacts(leadId) {
     if (!leadId) return;
@@ -3621,11 +3649,33 @@
         return;
       }
       // Route to the right renderer based on the toggle. Default Table.
+      // v1.0.0as: Org chart + Table get the scope-filtered subset;
+      // Timeline always shows the full engagement history.
+      const scoped = _filterContactsByScope(contacts);
       if (accountViewState.viewMode === 'orgchart') {
-        _renderLeadOrgChart(leadId, contacts);
+        _renderLeadOrgChart(leadId, scoped);
         return;
       }
-      // Fall through to the Table view rendering below.
+      if (accountViewState.viewMode === 'timeline') {
+        _renderLeadEngagementTimeline(leadId, contacts);
+        return;
+      }
+      // Fall through to the Table view rendering below — use the
+      // scoped list so the filter chip actually does something.
+      // (The downstream `contacts.map(...)` references close over the
+      // local `contacts` variable; reassigning here keeps the render
+      // honest to the user's chip selection.)
+      // eslint-disable-next-line no-param-reassign
+      contacts = scoped;
+      if (!contacts.length) {
+        el.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No contacts match the "${accountViewState.scopeFilter}" filter. <button class="btn ghost" type="button" data-ld-clear-scope style="padding:2px 8px;font-size:10px;margin-left:6px;">Show all</button></div>`;
+        const clear = el.querySelector('[data-ld-clear-scope]');
+        if (clear) clear.addEventListener('click', () => {
+          accountViewState.scopeFilter = 'all';
+          loadLeadContacts(leadId);
+        });
+        return;
+      }
       // v1.0.0a: render touch state per contact — last touched, overdue.
       const touchLabel = (c) => {
         if (!c.last_touched_at) return `<span class="muted" style="font-size:10px;">never touched · cadence ${c.cadence_days || 30}d</span>`;
@@ -3728,29 +3778,121 @@
     if (overdue) parts.push(`<span style="color:var(--red);">${overdue} overdue</span>`);
     if (primary) parts.push(`${primary} key`);
     sum.innerHTML = parts.join(' · ');
-    // Sync toggle button active state to current viewMode.
+    // Sync toggle + filter button active state to current selection.
     bar.querySelectorAll('[data-ld-view]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.ldView === accountViewState.viewMode);
     });
+    bar.querySelectorAll('[data-ld-filter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.ldFilter === accountViewState.scopeFilter);
+    });
+    // v1.0.0as: Timeline view ignores the scope filter (it's not
+    // contact-keyed in the same way) — dim the filter row so the
+    // user knows.
+    const filters = $('#ld-account-filters');
+    if (filters) {
+      filters.style.opacity = accountViewState.viewMode === 'timeline' ? '0.4' : '1';
+      filters.style.pointerEvents = accountViewState.viewMode === 'timeline' ? 'none' : 'auto';
+    }
     if (!bar.dataset.wired) {
       bar.dataset.wired = '1';
       bar.querySelectorAll('[data-ld-view]').forEach(btn => {
         btn.addEventListener('click', () => {
           accountViewState.viewMode = btn.dataset.ldView;
-          // Re-render from cache (no fetch needed).
           const cached = accountViewState.cachedByLeadId[drawerState.id] || [];
           _renderAccountToolbar(drawerState.id, cached);
           if (accountViewState.viewMode === 'orgchart') {
-            _renderLeadOrgChart(drawerState.id, cached);
+            _renderLeadOrgChart(drawerState.id, _filterContactsByScope(cached));
+          } else if (accountViewState.viewMode === 'timeline') {
+            _renderLeadEngagementTimeline(drawerState.id, cached);
           } else {
-            // Easiest path back to Table view: re-fire the loader. It
-            // re-reads from the cache below (no double fetch — the
-            // network call returns instantly from Notion's response
-            // cache during a quick toggle).
+            // Easiest path back to Table view: re-fire the loader.
             loadLeadContacts(drawerState.id);
           }
         });
       });
+      // v1.0.0as: filter-chip wiring. Re-renders against the cache.
+      bar.querySelectorAll('[data-ld-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          accountViewState.scopeFilter = btn.dataset.ldFilter;
+          const cached = accountViewState.cachedByLeadId[drawerState.id] || [];
+          _renderAccountToolbar(drawerState.id, cached);
+          if (accountViewState.viewMode === 'orgchart') {
+            _renderLeadOrgChart(drawerState.id, _filterContactsByScope(cached));
+          } else if (accountViewState.viewMode === 'timeline') {
+            // No-op — timeline ignores scope.
+          } else {
+            loadLeadContacts(drawerState.id);
+          }
+        });
+      });
+    }
+  }
+
+  // v1.0.0as: engagement timeline view — unified reverse-chronological
+  // feed of notes, calls, and last-touch events across every contact
+  // on the account. Fetched fresh on each render so the user always
+  // sees the latest activity (cheap — one server call, small payload).
+  async function _renderLeadEngagementTimeline(leadId, contacts) {
+    const el = $('#ld-contacts-list');
+    if (!el) return;
+    el.innerHTML = '<div class="muted" style="font-size:12px;padding:12px;text-align:center;">Loading timeline…</div>';
+    try {
+      const data = await jsonFetch(
+        `/api/lead/${encodeURIComponent(leadId)}/engagement-timeline?limit=100`);
+      const items = data.items || [];
+      const stats = data.stats || {};
+      if (!items.length) {
+        el.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No engagement yet on this account. Log a call or add a stakeholder note to start the timeline.</div>`;
+        return;
+      }
+      const kindIcon = (k) =>
+        k === 'note'  ? icon('note',  { size: 12 }) :
+        k === 'call'  ? icon('phone', { size: 12 }) :
+                        icon('check', { size: 12 });
+      const kindColor = (k) =>
+        k === 'note'  ? 'var(--accent)' :
+        k === 'call'  ? 'var(--blue)' :
+                        'var(--green)';
+      const header = `
+        <div class="muted" style="font-size:11px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;">
+          <span><strong>${stats.total || 0}</strong> events</span>
+          ${stats.notes ? `<span>${stats.notes} notes</span>` : ''}
+          ${stats.calls ? `<span>${stats.calls} calls</span>` : ''}
+          ${stats.touches ? `<span>${stats.touches} touches</span>` : ''}
+          <span>${stats.contacts_with_engagement || 0} of ${stats.contacts_total || 0} contacts engaged</span>
+        </div>
+      `;
+      el.innerHTML = header + items.map(i => {
+        const ago = _fmtAgoShort(i.ts);
+        const contactLabel = i.contact_name
+          ? `<button class="btn ghost" type="button" data-ld-tl-contact="${escapeAttr(i.contact_id)}" style="padding:1px 6px;font-size:10px;">${escapeHtml(i.contact_name)}</button>`
+          : '<span class="muted" style="font-size:10px;">(account-level)</span>';
+        const actor = i.actor ? `<span class="muted" style="font-size:10px;">· ${escapeHtml(i.actor)}</span>` : '';
+        return `
+          <div style="display:flex;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--surface);">
+            <div style="color:${kindColor(i.kind)};flex-shrink:0;line-height:1;margin-top:1px;">${kindIcon(i.kind)}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <strong>${escapeHtml(i.title || i.kind)}</strong>
+                ${contactLabel}
+                ${actor}
+              </div>
+              ${i.preview ? `<div style="font-size:11px;color:var(--text-dim);margin-top:3px;white-space:pre-wrap;">${escapeHtml(i.preview)}</div>` : ''}
+              <div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(ago)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+      // Click contact chip → open stakeholder notes for that contact.
+      el.querySelectorAll('[data-ld-tl-contact]').forEach(b => {
+        b.addEventListener('click', () => {
+          const cid = b.dataset.ldTlContact;
+          const c = (contacts || []).find(x => x.id === cid);
+          if (c) openLeadContactNotes(leadId, c);
+        });
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;">Failed to load timeline: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 
@@ -5522,6 +5664,8 @@
     // Discovery / status
     search:         ['M11 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', 'M21 21l-4.35-4.35'],
     bell:           ['M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
+    // v1.0.0as: phone glyph for the engagement-timeline "call" rows.
+    phone:          ['M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'],
     eye:            ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
     alert:          ['M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', 'M12 9v4', 'M12 17h.01'],
     info:           ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z', 'M12 16v-4', 'M12 8h.01'],

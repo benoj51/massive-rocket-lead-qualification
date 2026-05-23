@@ -5,6 +5,68 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0as] — 2026-05-23 — Account engagement timeline + filter chips
+
+v1.0.0ar gave the Account view a structure (org chart) and a
+summary; v1.0.0as gives it a history (timeline) and a focus
+(filter chips). The Table shows who; the Org chart shows where they
+fit; the Timeline shows what's actually happened.
+
+### Added
+
+- **`GET /api/lead/<id>/engagement-timeline?limit=N`** — unified
+  reverse-chronological feed merging three sources:
+  - per-contact stakeholder notes (`lead_contact_notes_store`)
+  - lead-level calls (`calls_store`)
+  - last-touched timestamps from `contacts_store` (one per contact,
+    de-duped against same-second note events)
+  Each row carries `ts`, `kind` ("note" | "call" | "touch"),
+  `title`, `actor`, `contact_id`/`contact_name` (best-effort match
+  by attendee name for calls), `preview` (first 240 chars + ellipsis),
+  `raw_id`. Plus a stats block: total + per-kind counts + how many
+  contacts have any engagement at all.
+- **Timeline view-mode** in the Account toolbar (third button after
+  Table / Org chart). Renders the feed with per-row kind icon,
+  contact-name button (click → open stakeholder notes for that
+  contact), preview text, time-ago. Top-of-list summary: "12 events
+  · 5 notes · 3 calls · 4 of 7 contacts engaged".
+- **Filter chips** in the toolbar: All / Engaged / Overdue / Key.
+  Apply to the Table and Org chart; greyed out + non-interactive on
+  Timeline (which is account-wide by nature). Filter to "engaged"
+  shows only contacts with `last_touched_at`; "overdue" uses the
+  existing touch-state annotation; "key" filters to `is_primary`.
+- **`phone` icon** added to the icon set for call rows in the
+  timeline.
+
+### Tests
+
+- **`tests/test_engagement_timeline.py`** — 12 tests:
+  - empty account (zero contacts) returns empty items + stats
+  - contacts-without-engagement reports 0 engaged / N total
+  - mixed sources sorted newest first (note/call/note interleaved
+    with 1.1s sleeps for deterministic timestamps)
+  - long content truncated to 240 chars + ellipsis
+  - contact attribution: notes carry contact_id + name
+  - calls with matching attendee attribute to the contact
+  - calls with no matching attendee land as account-level (no contact)
+  - touch-event dedup: note-add fires an auto-touch; the touch
+    shouldn't appear separately (second-level timestamp compare
+    because notes use microseconds, contacts use seconds)
+  - limit clamping (default 100, explicit 5, bad value falls back)
+  - stats count contacts-with-engagement correctly
+
+### Implementation notes
+
+- **Per-second timestamp dedup**: `lead_contact_notes` writes
+  microsecond precision; `contacts_store` writes second precision.
+  The naïve `n["ts"] in touch_iso_set` never matched. Fixed by
+  truncating at `"."` for the comparison key — production already
+  produces this exact pattern, the test confirms it.
+- **Call → contact match via attendee**: cheap heuristic. If the
+  first attendee on a call matches a contact's name (case-
+  insensitive), the call clusters under that contact in the
+  timeline. Misses are fine — they just render as account-level.
+
 ## [1.0.0ar] — 2026-05-23 — Account view: engagement summary + org chart + stakeholder notes
 
 Ben asked: "There also needs to be an account view in which you can

@@ -410,6 +410,155 @@ def api_lead_contact_notes_delete(lead_id: str, contact_id: str, note_id: str):
     return jsonify({"deleted": True})
 
 
+# v1.0.0as: account engagement timeline -----------------------------------
+# Unified reverse-chronological feed of every touchpoint on an account:
+# per-contact stakeholder notes, lead-level calls, and the last-touched
+# timestamp on each contact. Powers the new Timeline view in the lead
+# drawer's Account section.
+
+@app.route("/api/lead/<lead_id>/engagement-timeline", methods=["GET"])
+def api_lead_engagement_timeline(lead_id: str):
+    """Return a unified timeline of engagement events for an account.
+
+    Sources merged:
+      - lead_contact_notes (per-contact stakeholder notes)
+      - calls_store (lead-level call/meeting notes)
+      - contacts_store.last_touched_at (one entry per contact)
+
+    Query:
+      limit (default 100, clamped 1..500)
+
+    Returned shape (each item):
+      {
+        "ts":            "2026-05-23T..."  # iso8601
+        "kind":          "note" | "call" | "touch"
+        "title":         "<short label, e.g. 'Discovery #2' or 'Note'>"
+        "actor":         "<author/MR owner if known>"
+        "contact_id":    str | None
+        "contact_name":  str | None
+        "preview":       "<first 240 chars of content>"
+        "raw_id":        original row id (so the UI can link back)
+      }
+    """
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", "100"))))
+    except ValueError:
+        limit = 100
+
+    contacts = contacts_store.list_contacts(lead_id)
+    contact_by_id = {c["id"]: c for c in contacts}
+
+    items: list[dict] = []
+
+    # 1) Per-contact notes — pulled per contact (cheap, files are small).
+    for c in contacts:
+        try:
+            notes = lead_contact_notes_store.list_notes(lead_id, c["id"])
+        except Exception:
+            notes = []
+        for n in notes:
+            content = (n.get("content") or "").strip()
+            items.append({
+                "ts":           n.get("created_at"),
+                "kind":         "note",
+                "title":        (n.get("type") or "note").title(),
+                "actor":        n.get("author"),
+                "contact_id":   c["id"],
+                "contact_name": c.get("name"),
+                "preview":      content[:240] + ("…" if len(content) > 240 else ""),
+                "raw_id":       n.get("id"),
+            })
+
+    # 2) Lead-level calls. Map any `partner_source` to a hint, but the
+    #    main attribution is the call author. partner_source links to
+    #    a partner contact, not a lead contact, so it doesn't tie to
+    #    contact_by_id here — left as None.
+    try:
+        calls = calls_store.list_calls(lead_id)
+    except Exception:
+        calls = []
+    for k in calls:
+        content = (k.get("content") or "").strip()
+        # Some calls reference an attendee from the contacts roster.
+        # Best-effort match by name so the timeline cluster groups
+        # calls under the contact they were with.
+        attendees = k.get("attendees") or []
+        match_id = None
+        match_name = None
+        if attendees:
+            first = (attendees[0] or "").strip().lower()
+            for c in contacts:
+                if (c.get("name") or "").strip().lower() == first:
+                    match_id = c["id"]
+                    match_name = c.get("name")
+                    break
+        items.append({
+            "ts":           k.get("created_at"),
+            "kind":         "call",
+            "title":        k.get("title") or (k.get("type") or "call").title(),
+            "actor":        (k.get("attendees") or [None])[0] if attendees else None,
+            "contact_id":   match_id,
+            "contact_name": match_name,
+            "preview":      content[:240] + ("…" if len(content) > 240 else ""),
+            "raw_id":       k.get("id"),
+        })
+
+    # 3) Last-touch timestamps. One entry per contact whose
+    #    last_touched_at differs from its note timestamps (cheap
+    #    de-dup: a touch fired from "add note" already shows up as
+    #    a note; we only surface the touch if it's the only signal).
+    #    Notes use microsecond precision, contacts use second precision —
+    #    compare at second-level so the dedup actually catches the
+    #    auto-touch fired by the note-add endpoint.
+    def _to_second(ts: str) -> str:
+        # "2026-05-23T19:45:00.123456Z" → "2026-05-23T19:45:00"
+        return (ts or "").split(".")[0].rstrip("Z")
+    note_ts_by_contact: dict[str | None, set[str]] = {}
+    for n in items:
+        if n["kind"] != "note":
+            continue
+        cid = n.get("contact_id")
+        note_ts_by_contact.setdefault(cid, set()).add(_to_second(n["ts"]))
+    for c in contacts:
+        ts = c.get("last_touched_at")
+        if not ts:
+            continue
+        # Skip when this contact already has a note at the same second
+        # (the note-add endpoint auto-fires a touch — they're the same
+        # event from the user's perspective).
+        if _to_second(ts) in note_ts_by_contact.get(c["id"], set()):
+            continue
+        items.append({
+            "ts":           ts,
+            "kind":         "touch",
+            "title":        "Touched",
+            "actor":        None,
+            "contact_id":   c["id"],
+            "contact_name": c.get("name"),
+            "preview":      "",
+            "raw_id":       None,
+        })
+
+    # Sort newest first, drop entries with no timestamp (can't place them).
+    items = [i for i in items if i.get("ts")]
+    items.sort(key=lambda i: i["ts"], reverse=True)
+    items = items[:limit]
+
+    return jsonify({
+        "items": items,
+        "stats": {
+            "total":   len(items),
+            "notes":   sum(1 for i in items if i["kind"] == "note"),
+            "calls":   sum(1 for i in items if i["kind"] == "call"),
+            "touches": sum(1 for i in items if i["kind"] == "touch"),
+            "contacts_with_engagement": len(
+                {i["contact_id"] for i in items if i.get("contact_id")}
+            ),
+            "contacts_total": len(contacts),
+        },
+    })
+
+
 # v1.0.0p: incumbent + previous agencies per lead -----------------------------
 
 @app.route("/api/leads/<lead_id>/agencies", methods=["GET"])
