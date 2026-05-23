@@ -5,6 +5,50 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0y] — 2026-05-23 — LinkedIn cell — direct link, or pre-filled search
+
+Apollo doesn't always return a `linkedin_url` for the people it finds.
+Previously the LinkedIn column on every contact surface just showed
+"—" when the URL was missing, leaving the AE to copy the name + go
+to LinkedIn manually.
+
+### Fix
+New JS helper `linkedinCell(linkedinUrl, name, company, opts)`:
+- **URL present** → renders the existing direct profile link
+  ("view" in the Stakeholders table, "LinkedIn ↗" elsewhere)
+- **URL missing** → renders a `🔍 LinkedIn search` link that opens
+  `linkedin.com/search/results/people/?keywords=<name>+<company>` in
+  a new tab. Pre-fills the name + company so the AE clicks once and
+  lands on a sensible search page.
+- **Name also missing** → fallback `—` (truly nothing to render).
+
+The search-link variant is rendered in `class="muted"` with a
+tooltip ("No profile URL on file — opens LinkedIn search pre-filled
+with name + company") so it's visually distinct from a direct
+profile link.
+
+### Applied to all 5 LinkedIn render sites
+1. Stakeholder Targets table (Qualify view)
+2. Lead drawer — partner contacts assigned to this lead
+3. Lead drawer — lead-side contacts list
+4. Apollo contact-search results (in the lead drawer)
+5. Partner contacts table (Partners view)
+
+Each call site passes the relevant "company" string:
+- Stakeholder + lead-side contacts → `result.company.name` /
+  `drawerState.original.company`
+- Partner contact lookup → `r.partner_name` (e.g. "Braze")
+- Partner contacts table → `partner.name`
+
+### Files touched
+- `qualify.html` — `linkedinCell` helper + 5 render-site upgrades
+
+### What you'll see
+Open any lead with stakeholders — the "—" in the LinkedIn column
+becomes "🔍 LinkedIn search". Click → LinkedIn opens with the name
++ company already in the search box. One click to a real profile
+instead of three.
+
 ## [1.0.0x] — 2026-05-23 — Stakeholder names: first + last, not first only
 
 Ben reported the Stakeholder Targets table showed only first names

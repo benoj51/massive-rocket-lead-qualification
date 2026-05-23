@@ -2539,10 +2539,34 @@
     $('#next-steps').innerHTML = (result.next_steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
   }
 
+  // v1.0.0y: LinkedIn cell — if Apollo gave us a profile URL, render
+  // the direct "view" link. If not (most rows), render a "🔍 search"
+  // fallback that opens LinkedIn's people search pre-filled with the
+  // name + company. Saves the AE from copying the name + typing it
+  // into LinkedIn manually.
+  function _linkedinSearchUrl(name, company) {
+    const q = encodeURIComponent(`${name || ''} ${company || ''}`.trim());
+    return `https://www.linkedin.com/search/results/people/?keywords=${q}`;
+  }
+
+  function linkedinCell(linkedinUrl, name, company, opts) {
+    opts = opts || {};
+    const directLabel = opts.short ? 'view' : 'LinkedIn ↗';
+    const searchLabel = opts.short ? '🔍 search' : '🔍 LinkedIn search';
+    if (linkedinUrl) {
+      return `<a href="${escapeAttr(linkedinUrl)}" target="_blank" rel="noopener">${directLabel}</a>`;
+    }
+    if (!name) return '<span class="muted">—</span>';
+    return `<a href="${escapeAttr(_linkedinSearchUrl(name, company))}"
+              target="_blank" rel="noopener" class="muted"
+              title="No profile URL on file — opens LinkedIn search pre-filled with name + company">${searchLabel}</a>`;
+  }
+
   function renderStakeholders(result) {
     const tbody = $('#stakeholders-table tbody');
     const rows = result.stakeholders || [];
     const savedId = state.lastSavedPageId;
+    const companyName = result.company?.name || '';
     if (rows.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" class="muted">No stakeholders returned by Apollo. Run a manual LinkedIn search.</td></tr>`;
       return;
@@ -2557,7 +2581,7 @@
           <td>${escapeHtml(s.title || '—')}</td>
           <td><span class="priority-${(s.priority||'').toLowerCase()}">${escapeHtml(s.priority || '—')}</span></td>
           <td>${escapeHtml(s.why || '')}</td>
-          <td>${s.linkedin_url ? `<a href="${escapeAttr(s.linkedin_url)}" target="_blank" rel="noopener">view</a>` : '—'}</td>
+          <td>${linkedinCell(s.linkedin_url, s.name, companyName, { short: true })}</td>
           <td>${saveBtn}</td>
         </tr>
       `;
@@ -2972,7 +2996,7 @@
               <div class="muted" style="font-size:11px;margin-top:2px;">
                 <strong style="color:var(--accent-text);">${escapeHtml(r.partner_name || '—')}</strong>${territory}${region}
                 ${c.email ? ` · ${escapeHtml(c.email)}` : ''}
-                ${c.linkedin_url ? ` · <a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a>` : ''}
+                · ${linkedinCell(c.linkedin_url, c.name, r.partner_name)}
               </div>
               ${inds ? `<div style="margin-top:4px;">${inds}</div>` : ''}
               ${r.note ? `<div class="muted" style="font-size:10px;margin-top:4px;font-style:italic;">Note: ${escapeHtml(r.note)}</div>` : ''}
@@ -3168,7 +3192,7 @@
                 ${statusBadge(c)}
               </div>
               <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
-              ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+              <div style="font-size:11px;">${linkedinCell(c.linkedin_url, c.name, drawerState.original?.company)}</div>
               <div style="margin-top:3px;">${touchLabel(c)}</div>
             </div>
             <div class="btn-row" style="flex-shrink:0;">
@@ -3644,7 +3668,7 @@
             ${c.already_saved ? '<span style="background:var(--surface);color:var(--text-muted);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--border);">SAVED</span>' : ''}
           </div>
           <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}${c.country ? ' · ' + escapeHtml(c.country) : ''}</div>
-          ${c.linkedin_url ? `<div style="font-size:11px;"><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a></div>` : ''}
+          <div style="font-size:11px;">${linkedinCell(c.linkedin_url, c.name, drawerState.original?.company)}</div>
         </div>
       </label>
     `).join('');
@@ -7638,7 +7662,7 @@
         <tbody>
           ${filtered.map(c => `
             <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
-              <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}${c.linkedin_url ? `<br><a href="${escapeAttr(c.linkedin_url)}" target="_blank" rel="noopener" style="font-size:10px;">LinkedIn ↗</a>` : ''}</td>
+              <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}<br><span style="font-size:10px;">${linkedinCell(c.linkedin_url, c.name, partner.name)}</span></td>
               <td>${escapeHtml(c.title || '—')}</td>
               <td>${(_tagList(c, 'territories', 'territory').map(t => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(t)}</span>`).join('')) || '—'}</td>
               <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}</td>
