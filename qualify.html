@@ -520,6 +520,38 @@
   }
   :root:not([data-theme="light"]) .source-chip { color: #93c5fd; }
 
+  /* v1.0.0ab: design-system icons + RAG dots.
+     Inline SVG icons (Lucide-style) replace decorative emojis across
+     the platform. They adopt surrounding text colour via currentColor,
+     scale cleanly, and read as a single typographic unit with their
+     label. RAG dots replace coloured-circle emojis on MEDDICC. */
+  .icon {
+    width: 14px; height: 14px;
+    vertical-align: -2px;
+    display: inline-block;
+    flex-shrink: 0;
+    stroke-width: 1.75;
+  }
+  .icon.lg { width: 18px; height: 18px; vertical-align: -3px; }
+  .icon.sm { width: 12px; height: 12px; vertical-align: -1px; stroke-width: 2; }
+  /* Sit nicely beside text labels in buttons + chips */
+  .btn .icon, .chip .icon, nav button .icon, summary .icon, h2 .icon, h3 .icon, h4 .icon { margin-right: 6px; }
+  .btn .icon:last-child, .chip .icon:last-child { margin-right: 0; margin-left: 6px; }
+  .btn .icon:only-child, .chip .icon:only-child { margin: 0; }
+
+  /* RAG status dots — for MEDDICC + any other red/amber/green signal */
+  .rag-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    vertical-align: -1px;
+    background: var(--text-muted);
+  }
+  .rag-dot.red    { background: var(--red); }
+  .rag-dot.amber  { background: var(--yellow); }
+  .rag-dot.green  { background: var(--green); }
+  .rag-dot.dim    { opacity: .25; }   /* unselected state in toggles */
+
   /* Document preview modal — v0.10.0u ----------------------- */
   .doc-preview-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.7);
@@ -716,19 +748,19 @@
   <nav>
     <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
-    <button id="nav-forecast" type="button">📈 Forecast</button>
-    <button id="nav-dashboard" type="button">📊 Dashboard</button>
+    <button id="nav-forecast" type="button"><span data-icon="chart-line"></span>Forecast</button>
+    <button id="nav-dashboard" type="button"><span data-icon="chart-bar"></span>Dashboard</button>
     <button id="nav-build" type="button">Project Build</button>
     <button id="nav-partners" type="button">Partners</button>
   </nav>
   <button id="global-search-open" type="button" title="Search all contacts (⌘K)"
           aria-label="Search contacts"
           style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;gap:6px;">
-    🔍 <span style="font-family:var(--mono);font-size:10px;color:var(--text-muted);">⌘K</span>
+    <span data-icon="search" data-icon-size="14"></span><span style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-left:6px;">⌘K</span>
   </button>
   <button id="theme-toggle" type="button" title="Toggle light / dark theme"
           aria-label="Toggle light / dark theme"
-          style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;">🌙</button>
+          style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;"><span data-icon="moon" data-icon-size="14"></span></button>
   <div class="health" id="health-bar"></div>
 </header>
 
@@ -868,10 +900,10 @@
 
       <div class="card">
         <h2>5 · Notes &amp; Transcripts</h2>
-        <p class="muted" style="margin: 0 0 10px;">Paste call notes, Gong/Fathom transcripts, or any context. Click ✨ to extract MEDDPICC entries and a project scope summary from the text.</p>
+        <p class="muted" style="margin: 0 0 10px;">Paste call notes, Gong/Fathom transcripts, or any context. Click <strong>Extract</strong> to pull MEDDPICC entries and a project scope summary from the text.</p>
         <textarea id="notes-text" rows="6" placeholder="Paste your raw notes here…" style="font-family: var(--mono); font-size: 12px;"></textarea>
         <div class="btn-row" style="margin-top: 10px;">
-          <button id="btn-extract-notes" class="btn ghost" type="button">✨ Extract MEDDPICC + scope from notes</button>
+          <button id="btn-extract-notes" class="btn ghost" type="button"><span data-icon="sparkles"></span>Extract MEDDPICC + scope from notes</button>
           <span id="extract-status" class="muted"></span>
         </div>
       </div>
@@ -1064,7 +1096,7 @@
         <tbody></tbody>
       </table>
       <div id="pipeline-empty" class="empty" style="display:none;">
-        <div class="big">⌁</div>
+        <div class="big" style="color:var(--text-muted);"><span data-icon="info" data-icon-size="32"></span></div>
         <div>No leads loaded yet.</div>
         <div class="muted" style="margin-top: 4px;">Click ↻ Refresh once Notion is configured.</div>
       </div>
@@ -1076,13 +1108,13 @@
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
         <div>
-          <h2 style="margin:0;">📈 Pipeline Forecast</h2>
+          <h2 style="margin:0;">Pipeline Forecast</h2>
           <p class="muted" style="margin:4px 0 0;">Weighted quarterly bookings across every active lead.
             Commit = Verbal+Signed · Best = Negotiation+ · Pipeline = Discovery+.</p>
         </div>
         <div class="btn-row" style="flex-shrink:0;">
           <button id="fc-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
-          <button id="fc-settings" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">⚙ Settings</button>
+          <button id="fc-settings" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;"><span data-icon="settings" data-icon-size="12"></span>Settings</button>
         </div>
       </div>
       <!-- Top KPI row -->
@@ -1113,7 +1145,7 @@
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
         <div>
-          <h2 style="margin:0;">📊 Team Activity Dashboard</h2>
+          <h2 style="margin:0;">Team Activity Dashboard</h2>
           <p class="muted" style="margin:4px 0 0;">Touches + calls + coverage across MR owners and partners. Attribution by the current <code style="font-family:var(--mono);">mr_owner</code> on each contact — when ownership reassigns, the activity follows the contact.</p>
         </div>
         <div class="btn-row" style="flex-shrink:0;">
@@ -1255,7 +1287,7 @@
       <div class="btn-row" style="margin-bottom: 14px;">
         <select id="pb-roadmap-pkg" style="min-width: 220px;"><option value="">— seed from package —</option></select>
         <button class="btn ghost" id="pb-roadmap-seed" type="button">Seed milestones</button>
-        <button class="btn ghost" id="pb-roadmap-refine" type="button">✨ Refine from notes</button>
+        <button class="btn ghost" id="pb-roadmap-refine" type="button"><span data-icon="sparkles"></span>Refine from notes</button>
         <button class="btn" id="pb-roadmap-save" type="button">Save roadmap</button>
         <span class="muted" id="pb-roadmap-status" style="font-size:11px;"></span>
       </div>
@@ -1273,7 +1305,7 @@
       <h3 style="margin-top: 22px;">Beyond Year 1 — Extended Engagement</h3>
       <p class="muted" style="margin: 0 0 12px;">What else MR could deliver in an ongoing relationship.</p>
       <div class="btn-row" style="margin-bottom: 10px;">
-        <button class="btn ghost" id="pb-extended-suggest" type="button">✨ Suggest based on notes</button>
+        <button class="btn ghost" id="pb-extended-suggest" type="button"><span data-icon="sparkles"></span>Suggest based on notes</button>
         <button class="btn ghost" id="pb-extended-add" type="button">+ Add idea</button>
       </div>
       <div id="pb-extended-list"></div>
@@ -1286,8 +1318,8 @@
         <strong>SOW</strong> — formal statement of work, snapshotted as a versioned artifact.
       </p>
       <div class="btn-row">
-        <button id="pb-preview-project" class="btn ghost" type="button">👁 Preview project briefing</button>
-        <button id="pb-draft-sow" class="btn" type="button">📝 Draft SOW</button>
+        <button id="pb-preview-project" class="btn ghost" type="button"><span data-icon="eye" data-icon-size="12"></span>Preview project briefing</button>
+        <button id="pb-draft-sow" class="btn" type="button"><span data-icon="note" data-icon-size="12"></span>Draft SOW</button>
         <span id="pb-sow-status" class="muted"></span>
       </div>
       <div id="pb-sow-versions" style="margin-top: 14px;"></div>
@@ -1305,7 +1337,7 @@
           <label>Action</label>
           <div class="btn-row">
             <button id="pb-validate" class="btn" type="button">✓ Validate</button>
-            <button id="pb-reject" class="btn ghost" type="button">✗ Reject</button>
+            <button id="pb-reject" class="btn ghost" type="button"><span data-icon="x" data-icon-size="12"></span>Reject</button>
             <button id="pb-reopen" class="btn ghost" type="button">↻ Reopen</button>
           </div>
         </div>
@@ -1364,7 +1396,7 @@
         <div class="doc-preview-subtitle" id="doc-preview-subtitle"></div>
       </div>
       <div class="btn-row" style="flex-shrink:0;">
-        <button id="doc-preview-print" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">🖨 Print</button>
+        <button id="doc-preview-print" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;"><span data-icon="printer" data-icon-size="12"></span>Print</button>
         <button id="doc-preview-download" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">⇣ Download HTML</button>
         <button id="doc-preview-newtab" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↗ Open in new tab</button>
         <button id="doc-preview-close" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">✕ Close</button>
@@ -1378,14 +1410,14 @@
 
 <!-- GLOBAL SEARCH MODAL ===================================== -->
 <!-- v1.0.0c (Tier 2a/2b): cross-surface contact picker. Opens via
-     🔍 button or ⌘K. Filters by territory/region/industry/owner
+     Search button or ⌘K. Filters by territory/region/industry/owner
      and searches across both lead + partner contacts. -->
 <div id="global-search-overlay" class="doc-preview-overlay" aria-hidden="true">
   <div class="doc-preview-modal" role="dialog" aria-modal="true"
        style="height:min(80vh, 720px);">
     <header class="doc-preview-header">
       <div style="min-width:0;flex:1;">
-        <div class="doc-preview-title">🔍 Search contacts</div>
+        <div class="doc-preview-title">Search contacts</div>
         <div class="doc-preview-subtitle">Across leads + partners · ⌘K to reopen · Esc to close</div>
       </div>
       <div class="btn-row" style="flex-shrink:0;">
@@ -1459,8 +1491,8 @@
       <div class="hero-head">
         <span class="hero-title" id="ld-summary-heading">Lead Summary</span>
         <div class="btn-row">
-          <button class="btn ghost" id="ld-summary-copy" type="button" style="padding:4px 10px;font-size:11px;" title="Copy summary for Slack / email / Notion">📋 Copy</button>
-          <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;">✨ Refresh</button>
+          <button class="btn ghost" id="ld-summary-copy" type="button" style="padding:4px 10px;font-size:11px;" title="Copy summary for Slack / email / Notion"><span data-icon="copy" data-icon-size="12"></span>Copy</button>
+          <button class="btn ghost" id="ld-summary-refresh" type="button" style="padding:4px 10px;font-size:11px;"><span data-icon="sparkles" data-icon-size="12"></span>Refresh</button>
         </div>
       </div>
       <div class="muted" id="ld-summary-subheading" style="font-size:10px;margin-bottom:8px;">— AI synthesis across notes + qualification</div>
@@ -1759,7 +1791,7 @@
              the lead's URL/domain; AE picks which to save in bulk.
              v0.10.0t: country picker scopes the search per-pull. -->
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-          <button id="ld-contacts-search" class="btn" type="button" style="padding:7px 14px;font-size:12px;">🔍 Search Apollo for contacts</button>
+          <button id="ld-contacts-search" class="btn" type="button" style="padding:7px 14px;font-size:12px;"><span data-icon="search" data-icon-size="12"></span>Search Apollo for contacts</button>
           <select id="ld-contacts-search-country" style="padding:6px 10px;font-size:12px;min-width:180px;">
             <option value="">Any country</option>
             <optgroup label="Core ICP">
@@ -2532,9 +2564,9 @@
         <div class="key">${row.label}<small>${row.hint}</small></div>
         <input type="text" placeholder="Capture finding…" value="${escapeAttr(entry.value || '')}" data-meddicc-value="${row.key}" />
         <div class="rag-toggle" title="Qualification health — red / amber / green">
-          <button type="button" data-meddicc-rag="${row.key}" data-val="red"    title="Concern — actively blocking or missing">🔴</button>
-          <button type="button" data-meddicc-rag="${row.key}" data-val="amber"  title="Partial — needs work">🟡</button>
-          <button type="button" data-meddicc-rag="${row.key}" data-val="green"  title="Confirmed — strong">🟢</button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val="red"    title="Concern — actively blocking or missing"><span class="rag-dot red"></span></button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val="amber"  title="Partial — needs work"><span class="rag-dot amber"></span></button>
+          <button type="button" data-meddicc-rag="${row.key}" data-val="green"  title="Confirmed — strong"><span class="rag-dot green"></span></button>
           <button type="button" data-meddicc-rag="${row.key}" data-val=""       class="clear" title="Clear health">×</button>
         </div>
       `;
@@ -2649,7 +2681,7 @@
   }
 
   // v1.0.0y: LinkedIn cell — if Apollo gave us a profile URL, render
-  // the direct "view" link. If not (most rows), render a "🔍 search"
+  // the direct "view" link. If not (most rows), render a "search"
   // fallback that opens LinkedIn's people search pre-filled with the
   // name + company. Saves the AE from copying the name + typing it
   // into LinkedIn manually.
@@ -2661,7 +2693,10 @@
   function linkedinCell(linkedinUrl, name, company, opts) {
     opts = opts || {};
     const directLabel = opts.short ? 'view' : 'LinkedIn ↗';
-    const searchLabel = opts.short ? '🔍 search' : '🔍 LinkedIn search';
+    // SVG icon prefixed inline so the fallback link visually matches
+    // every other "search" affordance in the platform.
+    const searchIcon = icon('search', { size: 11 });
+    const searchLabel = opts.short ? `${searchIcon} search` : `${searchIcon} LinkedIn search`;
     if (linkedinUrl) {
       return `<a href="${escapeAttr(linkedinUrl)}" target="_blank" rel="noopener">${directLabel}</a>`;
     }
@@ -2842,7 +2877,7 @@
       console.error(e);
       $('#pipeline-table tbody').innerHTML = '';
       $('#pipeline-empty').style.display = 'block';
-      $('#pipeline-empty').innerHTML = `<div class="big">⚠</div><div>${escapeHtml(e.body?.error || e.message)}</div>`;
+      $('#pipeline-empty').innerHTML = `<div class="big" style="color:var(--red);">${icon('alert', { size: 32 })}</div><div>${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 
@@ -2925,7 +2960,7 @@
         el.innerHTML = `
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center;">
             <div class="muted" style="font-size:12px;margin-bottom:10px;">No project scope captured yet. Create one to start scoping the work + forecasting price.</div>
-            <button class="btn" type="button" id="ld-create-project" style="padding:6px 14px;font-size:12px;">✨ Create Project</button>
+            <button class="btn" type="button" id="ld-create-project" style="padding:6px 14px;font-size:12px;"><span data-icon="sparkles" data-icon-size="12"></span>Create Project</button>
           </div>
         `;
         $('#ld-create-project').addEventListener('click', () => createProjectFromLead(leadId, companyName));
@@ -3013,7 +3048,7 @@
               ${r.notes ? `<div style="font-size:12px;color:var(--text-dim);margin-top:6px;white-space:pre-wrap;">${escapeHtml(r.notes)}</div>` : ''}
             </div>
             <div style="display:flex;gap:4px;flex-shrink:0;">
-              <button class="btn ghost" type="button" data-ag-edit="${escapeAttr(r.id)}" style="padding:2px 8px;font-size:10px;" title="Edit">✎</button>
+              <button class="btn ghost" type="button" data-ag-edit="${escapeAttr(r.id)}" style="padding:2px 8px;font-size:10px;" title="Edit">${icon('edit', { size: 12 })}</button>
               <button class="btn ghost" type="button" data-ag-del="${escapeAttr(r.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Delete">×</button>
             </div>
           </div>
@@ -3332,11 +3367,11 @@
               <div style="margin-top:3px;">${touchLabel(c)}</div>
             </div>
             <div class="btn-row" style="flex-shrink:0;">
-              <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">✓</button>
-              <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Engagement timeline">📝</button>
-              <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit contact">✎</button>
-              ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">★</button>`}
-              <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">${icon('check', { size: 12 })}</button>
+              <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Engagement timeline">${icon('note', { size: 12 })}</button>
+              <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit contact">${icon('edit', { size: 12 })}</button>
+              ${c.is_primary ? '' : `<button class="btn ghost" type="button" data-contact-primary="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as key contact">${icon('check', { size: 12 })}</button>`}
+              <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Remove contact">${icon('trash', { size: 12 })}</button>
             </div>
           </div>
         `;
@@ -3467,7 +3502,7 @@
       <div style="background:rgba(255,77,42,.06);border:1px solid rgba(255,77,42,.3);border-radius:8px;padding:12px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
           <div style="min-width:0;flex:1;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">✨ AI spotted ${suggestions.length} new contact${suggestions.length === 1 ? '' : 's'} in this note</div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">${icon('sparkles', { size: 12 })} AI spotted ${suggestions.length} new contact${suggestions.length === 1 ? '' : 's'} in this note</div>
             <div class="muted" style="font-size:11px;margin-top:2px;">Pick the ones to add to this lead. MR-side and partner-side names were filtered out.</div>
           </div>
           <button id="ld-cs-dismiss" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Dismiss</button>
@@ -3542,7 +3577,7 @@
       <div style="background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
           <div style="min-width:0;flex:1;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">📝 Engagement timeline — ${escapeHtml(contact.name || '—')}</div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">${icon('note', { size: 11 })} Engagement timeline — ${escapeHtml(contact.name || '—')}</div>
             <div class="muted" style="font-size:11px;margin-top:2px;">${escapeHtml(contact.title || '')}${contact.email ? ' · ' + escapeHtml(contact.email) : ''}</div>
           </div>
           <button id="lcnt-close" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Close</button>
@@ -3634,7 +3669,7 @@
     panel.innerHTML = `
       <div style="background:rgba(96,165,250,.05);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">✎ Edit contact</div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:600;">${icon('edit', { size: 11 })} Edit contact</div>
           <button id="lcef-cancel" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Close</button>
         </div>
         <div class="row row-2">
@@ -3788,7 +3823,7 @@
       status.textContent = 'Failed';
     } finally {
       btn.disabled = false;
-      btn.innerHTML = '🔍 Search Apollo for contacts';
+      btn.innerHTML = icon('search', { size: 12 }) + 'Search Apollo for contacts';
     }
   }
 
@@ -3915,7 +3950,7 @@
         const when = c.created_at ? new Date(c.created_at).toLocaleString() : '';
         const meddpiccFills = c.extracted?.meddpicc ? Object.keys(c.extracted.meddpicc).length : 0;
         const scopeFilled = !!c.extracted?.project_scope;
-        const aiTag = (meddpiccFills || scopeFilled) ? `<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">AI ✦ ${meddpiccFills} MEDDPICC${scopeFilled ? ' + scope' : ''}</span>` : '';
+        const aiTag = (meddpiccFills || scopeFilled) ? `<span style="background:rgba(74,222,128,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">AI · ${meddpiccFills} MEDDPICC${scopeFilled ? ' + scope' : ''}</span>` : '';
         const synthesised = c.extracted?.synthesised_note || '';
         const aeNote = (c.note && c.note !== synthesised) ? c.note : '';
         const displayNote = aeNote || synthesised || '';
@@ -3923,8 +3958,8 @@
         const noteRendered = hasDisplayNote
           ? renderCallNote(displayNote)
           : (aiOff
-              ? `<span class="muted" style="font-style:italic;">No synthesised note — AI is off. Click <strong>✎ Edit note</strong> to write one manually, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> to enable auto-summarisation.</span>`
-              : `<span class="muted" style="font-style:italic;">No synthesised note yet. Click <strong>✎ Edit note</strong> to write one, or re-save the call to retry AI extraction.</span>`);
+              ? `<span class="muted" style="font-style:italic;">No synthesised note — AI is off. Click <strong>Edit note</strong> to write one manually, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> to enable auto-summarisation.</span>`
+              : `<span class="muted" style="font-style:italic;">No synthesised note yet. Click <strong>Edit note</strong> to write one, or re-save the call to retry AI extraction.</span>`);
         const editedBadge = (aeNote && synthesised)
           ? `<span style="font-size:9px;color:var(--text-muted);margin-left:4px;">(edited)</span>` : '';
         // v1.0.0z: attribution chip. Shows when the note was sourced
@@ -3935,7 +3970,7 @@
           const who = src.contact_name
             ? `${src.contact_name} · ${src.partner_name || src.partner_id}`
             : (src.partner_name || src.partner_id);
-          return `<span class="source-chip" title="Sourced from this partner">🔗 ${escapeHtml(who)}</span>`;
+          return `<span class="source-chip" title="Sourced from this partner">${icon('link', { size: 10 })} ${escapeHtml(who)}</span>`;
         })() : '';
         return `
           <div style="background:var(--surface-2);border:1px solid var(--border);padding:14px;border-radius:8px;margin-bottom:12px;" data-call-id="${escapeAttr(c.id)}">
@@ -3946,8 +3981,8 @@
                 ${aiTag}${editedBadge}${srcChip}
               </div>
               <div class="btn-row" style="flex-shrink:0;">
-                <button class="btn ghost" type="button" data-call-copy="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;" title="Copy synthesised note">📋 Copy</button>
-                <button class="btn ghost" type="button" data-call-edit="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;">✎ Edit note</button>
+                <button class="btn ghost" type="button" data-call-copy="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;" title="Copy synthesised note">${icon('copy', { size: 12 })}Copy</button>
+                <button class="btn ghost" type="button" data-call-edit="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;">${icon('edit', { size: 12 })}Edit note</button>
                 <button class="btn ghost" type="button" data-call-del="${escapeAttr(c.id)}" style="padding:4px 10px;font-size:11px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
               </div>
             </div>
@@ -4016,9 +4051,9 @@
     const aiOff = !aiIsOn();
     const headerMsg = aiOff
       ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);color:var(--yellow);font-size:11px;padding:8px 10px;border-radius:6px;margin-bottom:10px;line-height:1.45;">
-           <strong>AI is off.</strong> Lead summary needs Claude. Set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> in Railway → Variables, redeploy, then click <strong>✨ Refresh</strong>.
+           <strong>AI is off.</strong> Lead summary needs Claude. Set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> in Railway → Variables, redeploy, then click <strong>Refresh</strong>.
          </div>`
-      : `<div class="muted" style="font-size:11px;margin-bottom:8px;">No AI summary yet. Click <strong>✨ Refresh</strong> to generate one from the call history + qualification.</div>`;
+      : `<div class="muted" style="font-size:11px;margin-bottom:8px;">No AI summary yet. Click <strong>Refresh</strong> to generate one from the call history + qualification.</div>`;
     el.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
         ${headerMsg}
@@ -4084,7 +4119,7 @@
           <ul style="margin:0 0 8px 18px;padding:0;font-size:12px;">${risksHtml}</ul>
         ` : ''}
         <div class="muted" style="font-size:10px;border-top:1px solid var(--border);padding-top:6px;margin-top:8px;">
-          ✨ AI synthesis from ${calls.length} call${calls.length === 1 ? '' : 's'} · generated ${when}
+          ${icon('sparkles', { size: 11 })} AI synthesis from ${calls.length} call${calls.length === 1 ? '' : 's'} · generated ${when}
         </div>
       </div>
     `;
@@ -4118,7 +4153,7 @@
   function renderCallNote(md) {
     // Lightweight markdown → HTML for the synthesised note format. Supports:
     //   ## heading, **bold**, bullet lines (- or •), and paragraph breaks.
-    if (!md) return '<div class="muted">No synthesised note yet. Click ✎ Edit to add one.</div>';
+    if (!md) return '<div class="muted">No synthesised note yet. Click <strong>Edit note</strong> to add one.</div>';
     const escaped = escapeHtml(md);
     const lines = escaped.split('\n');
     const out = [];
@@ -4236,7 +4271,7 @@
       }
       // v0.10.0p: server auto-refreshes the lead summary on call add.
       // Render it immediately so the AE sees the new state-of-play without
-      // a manual ✨ Refresh.
+      // a manual Refresh.
       if (data.summary) {
         renderAiLeadSummary(data.summary, _callsCache[leadId] || []);
         toast('Note saved · summary updated', 'success');
@@ -4251,7 +4286,7 @@
         prefilled.forEach(p => { byType[p.project_type] = (byType[p.project_type] || 0) + 1; });
         const summary = Object.entries(byType)
           .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
-        toast(`✨ AI pre-filled ${prefilled.length} project criteria (${summary})`, 'success');
+        toast(`AI pre-filled ${prefilled.length} project criteria (${summary})`, 'success');
       }
       // v1.0.0f: render contact suggestions panel if AI spotted new people.
       renderContactSuggestions(leadId, data.contact_suggestions || []);
@@ -4718,7 +4753,7 @@
           prefilled.forEach(p => { byType[p.project_type] = (byType[p.project_type] || 0) + 1; });
           const tally = Object.entries(byType)
             .map(([pt, n]) => `${n} in ${pt.replace(/_/g, ' ')}`).join(', ');
-          toast(`✨ AI pre-filled ${prefilled.length} project criteria (${tally})`, 'success');
+          toast(`AI pre-filled ${prefilled.length} project criteria (${tally})`, 'success');
         }
         // v1.0.0f: contact suggestions panel (same path).
         renderContactSuggestions(drawerState.id, callRes?.contact_suggestions || []);
@@ -5011,6 +5046,78 @@
     return lines.join('\n').trim();
   }
   function escapeAttr(s) { return escapeHtml(s); }
+
+  // v1.0.0ab: design-system icon helper. Inline SVG paths (Lucide-style,
+  // Apache-licensed shapes). Returns an SVG string ready to drop into
+  // template literals. Use `icon('name', { size:18 })` for inline use,
+  // or set `data-icon="name"` on a static element and call
+  // `hydrateIcons(root)` to inject after render.
+  const ICON_PATHS = {
+    // Common actions
+    refresh:        ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5'],
+    edit:           ['M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7', 'M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z'],
+    trash:          ['M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6', 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'],
+    plus:           ['M12 5v14', 'M5 12h14'],
+    x:              ['M18 6 6 18', 'M6 6l12 12'],
+    check:          ['M20 6 9 17l-5-5'],
+    copy:           ['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z'],
+    save:           ['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z', 'M17 21v-8H7v8', 'M7 3v5h8'],
+    // Discovery / status
+    search:         ['M11 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', 'M21 21l-4.35-4.35'],
+    bell:           ['M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
+    eye:            ['M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
+    alert:          ['M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', 'M12 9v4', 'M12 17h.01'],
+    info:           ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z', 'M12 16v-4', 'M12 8h.01'],
+    // Content
+    note:           ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
+    link:           ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72'],
+    folder:         ['M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'],
+    building:       ['M3 21h18', 'M5 21V7l8-4v18', 'M19 21V11l-6-4', 'M9 9v.01', 'M9 12v.01', 'M9 15v.01', 'M9 18v.01'],
+    package:        ['M16.5 9.4 7.55 4.24', 'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z', 'M3.27 6.96 12 12.01l8.73-5.05', 'M12 22.08V12'],
+    printer:        ['M6 9V2h12v7', 'M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2', 'M6 14h12v8H6z'],
+    // Analytics
+    'chart-line':   ['M3 3v18h18', 'M7 12l4-4 4 4 5-5'],
+    'chart-bar':    ['M3 3v18h18', 'M7 16v-4', 'M12 16v-7', 'M17 16v-2'],
+    // Settings + AI
+    settings:       ['M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15 1.65 1.65 0 0 0 3.09 14H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9 1.65 1.65 0 0 0 20.91 10H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
+    sparkles:       ['M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z', 'M19 3v4', 'M21 5h-4', 'M5 17v3', 'M6.5 18.5h-3'],
+    rotate:         ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5'],   // restore / undo
+    // Theme
+    sun:            ['M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z', 'M12 1v2', 'M12 21v2', 'M4.22 4.22l1.42 1.42', 'M18.36 18.36l1.42 1.42', 'M1 12h2', 'M21 12h2', 'M4.22 19.78l1.42-1.42', 'M18.36 5.64l1.42-1.42'],
+    moon:           ['M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'],
+    // Navigation
+    'arrow-right':  ['M5 12h14', 'M12 5l7 7-7 7'],
+  };
+
+  function icon(name, opts) {
+    opts = opts || {};
+    const paths = ICON_PATHS[name];
+    if (!paths) return '';
+    const size = opts.size || 14;
+    const strokeWidth = opts.stroke || 1.75;
+    const cls = 'icon' + (opts.cls ? ' ' + opts.cls : '');
+    const ps = paths.map(p => `<path d="${p}"/>`).join('');
+    return `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ps}</svg>`;
+  }
+
+  // Hydrate static elements with a `data-icon="<name>"` attribute by
+  // REPLACING them with the SVG. This way the SVG sits directly inside
+  // its parent (button, heading, etc.) so the `.btn .icon` margin +
+  // alignment CSS applies. Used for static HTML; JS-rendered surfaces
+  // call `icon()` directly inside template literals.
+  function hydrateIcons(root) {
+    const placeholders = Array.from(
+      (root || document).querySelectorAll('[data-icon]')
+    );
+    placeholders.forEach(el => {
+      const name = el.dataset.icon;
+      if (!name || !ICON_PATHS[name]) return;
+      const size = parseInt(el.dataset.iconSize, 10) || 14;
+      const cls = el.dataset.iconCls || '';
+      el.outerHTML = icon(name, { size, cls });
+    });
+  }
+
   const CURRENCY_SYMBOL = { USD: '$', GBP: '£', EUR: '€' };
   function fmtUSD(n) { return '$' + Math.round(n).toLocaleString(); }
   function fmtMoney(n, ccy) {
@@ -5157,7 +5264,7 @@
                     <button type="button" data-scope-status="qualified">Qualified</button>
                   </div>
                   <div style="text-align:right;display:flex;gap:4px;justify-content:flex-end;">
-                    <button class="btn ghost" type="button" style="padding:6px 10px;font-size:12px;" data-pb-edit-crit data-stream="${streamKey}" data-key="${c.key}" title="Edit criterion">✎</button>
+                    <button class="btn ghost" type="button" style="padding:6px 10px;font-size:12px;" data-pb-edit-crit data-stream="${streamKey}" data-key="${c.key}" title="Edit criterion">${icon('edit', { size: 12 })}</button>
                     <button class="btn ghost" type="button" style="padding:6px 10px;font-size:12px;color:var(--red);border-color:rgba(239,68,68,.3);" data-pb-del-crit data-stream="${streamKey}" data-key="${c.key}" title="Delete criterion">×</button>
                   </div>
                 </div>
@@ -5424,7 +5531,7 @@
       }
     } catch (e) {
       const indicator = $('#pb-pricing-saved');
-      if (indicator) indicator.innerHTML = `<span style="color:var(--red);">⚠ Save failed</span>`;
+      if (indicator) indicator.innerHTML = `<span style="color:var(--red);">${icon('alert', { size: 12 })} Save failed</span>`;
     }
   }
   function schedulePricingSave() {
@@ -5597,7 +5704,7 @@
   function renderExtendedEngagement(r) {
     const list = $('#pb-extended-list');
     if (!r.extended_engagement.length) {
-      list.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">No extended ideas yet. Click ✨ Suggest to let AI propose what year 2+ could look like.</div>';
+      list.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">No extended ideas yet. Click <strong>Suggest based on notes</strong> to let AI propose what year 2+ could look like.</div>';
       return;
     }
     // Group by year
@@ -5616,7 +5723,7 @@
               <input type="text" data-ext-field="title" data-idx="${item._idx}" value="${escapeAttr(item.title || '')}" style="font-size:13px;font-weight:600;width:calc(100% - 30px);padding:2px 4px;background:transparent;border:0;color:var(--text);margin-bottom:6px;" placeholder="Idea title" />
               <textarea data-ext-field="description" data-idx="${item._idx}" rows="2" style="font-size:11px;width:100%;padding:4px 6px;background:var(--surface);" placeholder="Why this fits…">${escapeHtml(item.description || '')}</textarea>
               <div class="muted" style="font-size:10px;margin-top:6px;display:flex;justify-content:space-between;">
-                <span>${item.package_key ? '📦 ' + escapeHtml(item.package_key) : 'Custom'}</span>
+                <span>${item.package_key ? icon('package', { size: 11 }) + ' ' + escapeHtml(item.package_key) : 'Custom'}</span>
                 <span>${item.estimated_hours ? item.estimated_hours + 'h' : ''}${item.estimated_price_usd ? ' · ' + fmtUSD(item.estimated_price_usd) : ''}</span>
               </div>
             </div>
@@ -5714,7 +5821,7 @@
       renderRoadmap();
       toast(`AI refined → ${pbState.roadmap.milestones.length} milestones`, 'success');
     } catch (e) { toast(`Refine failed: ${e.body?.error || e.message}`, 'error');
-    } finally { btn.disabled = false; btn.innerHTML = '✨ Refine from notes'; }
+    } finally { btn.disabled = false; btn.innerHTML = icon('sparkles') + 'Refine from notes'; }
   }
 
   async function rmAiSuggestExtended() {
@@ -5736,7 +5843,7 @@
       renderExtendedEngagement(pbState.roadmap);
       toast(`Suggested ${items.length} idea${items.length === 1 ? '' : 's'}`, 'success');
     } catch (e) { toast(`Suggest failed: ${e.body?.error || e.message}`, 'error');
-    } finally { btn.disabled = false; btn.innerHTML = '✨ Suggest based on notes'; }
+    } finally { btn.disabled = false; btn.innerHTML = icon('sparkles') + 'Suggest based on notes'; }
   }
 
   function applySelectedPackage() {
@@ -5983,7 +6090,7 @@
     const bandColor = { green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)' }[m.band] || 'var(--text-muted)';
     const placeholderBanner = m.is_placeholder
       ? `<div style="margin-top: 10px; padding: 8px 12px; background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.3); border-radius: 6px; color: var(--yellow); font-size: 11px;">
-           ⚠ Internal costs are <strong>placeholder estimates</strong> (45% of sales rate). Margin shown is indicative only — replace with Finance's Internal Rate Card before relying on these numbers.
+           <span data-icon="alert" data-icon-size="12"></span> Internal costs are <strong>placeholder estimates</strong> (45% of sales rate). Margin shown is indicative only — replace with Finance's Internal Rate Card before relying on these numbers.
          </div>`
       : '';
     return `
@@ -6060,7 +6167,7 @@
     } catch (e) {
       toast(`Draft SOW failed: ${e.body?.error || e.message}`, 'error');
     } finally {
-      btn.disabled = false; btn.innerHTML = '📝 Draft SOW';
+      btn.disabled = false; btn.innerHTML = icon('note', { size: 12 }) + 'Draft SOW';
     }
   }
 
@@ -6085,7 +6192,7 @@
                 <td>${v.net_usd != null ? '$' + Math.round(v.net_usd).toLocaleString() : '—'}</td>
                 <td>${escapeHtml(v.validation_status_at_generation || '—')}</td>
                 <td style="text-align:right;">
-                  <button class="btn" type="button" data-sow-preview="${v.version}" style="padding:4px 10px;font-size:11px;">👁 Preview</button>
+                  <button class="btn" type="button" data-sow-preview="${v.version}" style="padding:4px 10px;font-size:11px;">${icon('eye', { size: 12 })}Preview</button>
                   <button class="btn ghost" type="button" data-sow-open="${v.version}" style="padding:4px 10px;font-size:11px;" title="Open in new tab">↗</button>
                 </td>
               </tr>
@@ -6265,7 +6372,7 @@
   // Global contact search (v1.0.0c, Tier 2a + 2b)
   // ====================================================================
   // Lightweight cross-surface picker. Lives in its own overlay (same
-  // CSS as the doc preview modal). Opens via 🔍 button or ⌘K.
+  // CSS as the doc preview modal). Opens via Search button or ⌘K.
 
   let _searchDebounce = null;
   let _searchEnumsLoaded = false;
@@ -6478,7 +6585,7 @@
       // Strong signal: cache wipe suspected + volume NOT mounted.
       if (wipeSuspected && !mounted) {
         _showCacheWipeBanner({
-          headline: '⚠ Cache wipe detected — your notes are at risk',
+          headline: 'Cache wipe detected — your notes are at risk',
           body: 'Railway redeployed and the persistent volume isn\'t mounted, so this container started with an empty cache. Mount /app/cache on the Railway dashboard (5-minute fix — see RAILWAY_VOLUME_MOUNT.md). Until then, every redeploy will wipe new data.',
           action: 'Open mount guide',
           actionHref: '/RAILWAY_VOLUME_MOUNT.md',
@@ -6489,7 +6596,7 @@
         // first import (lazy retry handles next save) or creds are
         // wrong / DB swapped (needs human attention).
         _showCacheWipeBanner({
-          headline: '⚠ Notion backup is offline — schema check failed',
+          headline: 'Notion backup is offline — schema check failed',
           body: `The "State Backup" property couldn't be confirmed on the Notion DB. Error: ${propError}. Backups won't persist until this resolves. Check NOTION_API_KEY + that the database is reachable.`,
           action: 'View diagnostics',
           actionHref: '/api/diagnostics/health',
@@ -6498,7 +6605,7 @@
         // Less severe but still worth surfacing — a recent backup
         // mirror failed. The user should know.
         _showCacheWipeBanner({
-          headline: '⚠ Notion backup mirror failed on a recent save',
+          headline: 'Notion backup mirror failed on a recent save',
           body: `Latest error: ${lastErr}. Open /api/diagnostics/health for the full picture, or restart the container after checking Notion creds + that the "State Backup" property exists on the database.`,
           action: 'View diagnostics',
           actionHref: '/api/diagnostics/health',
@@ -6751,6 +6858,10 @@
     // ones (partner-add-form, partner-contact-form) call hydrateOwnerSelects
     // themselves after their template renders.
     hydrateOwnerSelects();
+    // v1.0.0ab: hydrate static-HTML icons. JS-rendered surfaces call
+    // icon() directly inside their template literals; static markup
+    // marked with data-icon="<name>" gets the SVG injected here.
+    hydrateIcons();
     // v1.0.0z: populate the qualify-form note-source dropdown (the
     // lead-drawer one populates on drawer open). Wire the buffer button.
     populatePartnerSourceSelect('#qf-new-note-source');
@@ -6761,7 +6872,8 @@
     const _themeBtn = $('#theme-toggle');
     const _syncThemeIcon = () => {
       const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-      if (_themeBtn) _themeBtn.textContent = isLight ? '☀️' : '🌙';
+      // v1.0.0ab: swap to the appropriate icon based on the active theme.
+      if (_themeBtn) _themeBtn.innerHTML = isLight ? icon('sun', { size: 14 }) : icon('moon', { size: 14 });
     };
     _syncThemeIcon();
     if (_themeBtn) {
@@ -6901,7 +7013,7 @@
     $('#ld-summary-copy').addEventListener('click', (e) => {
       const ai = _summaryCache[drawerState.id];
       if (!ai || !ai.state_of_play) {
-        toast('No AI summary yet — click ✨ Refresh to generate one', 'error');
+        toast('No AI summary yet — click Refresh to generate one', 'error');
         return;
       }
       const company = drawerState.original?.company || '';
@@ -7357,7 +7469,7 @@
     if (!missing.length) { el.innerHTML = ''; return; }
     el.innerHTML = `
       <div style="background:rgba(234,179,8,.06);border:1px solid rgba(234,179,8,.30);border-radius:8px;padding:12px;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);font-weight:600;margin-bottom:6px;">⚠ ${missing.length} lead${missing.length === 1 ? '' : 's'} excluded — deal value missing</div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--yellow);font-weight:600;margin-bottom:6px;">${icon('alert', { size: 12 })} ${missing.length} lead${missing.length === 1 ? '' : 's'} excluded — deal value missing</div>
         <div class="muted" style="font-size:11px;margin-bottom:8px;">Open each lead and fill in either <strong>Deal value (monthly GBP)</strong> or update <strong>Deal Size</strong> to a parseable value like "£40k/month".</div>
         <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text-dim);">
           ${missing.map(m => `
@@ -7400,7 +7512,7 @@
         `;
       }).join('');
       panel.innerHTML = `
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">⚙ Forecast settings</div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;margin-bottom:8px;">${icon('settings', { size: 12 })} Forecast settings</div>
         <div class="muted" style="font-size:11px;margin-bottom:10px;">Stage → probability mapping. Tune these to match your historical conversion. Changes apply immediately on save. <strong>Intro Call</strong> is excluded by design — leads only enter the forecast at Discovery.</div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;">
           ${stageRows}
@@ -7509,7 +7621,7 @@
       `).join('');
       card.innerHTML = `
         <h2 style="display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--red);">
-          <span>🔔 Overdue contacts <span style="background:rgba(239,68,68,.18);color:var(--red);font-size:11px;padding:2px 10px;border-radius:12px;margin-left:6px;">${rows.length}</span></span>
+          <span>${icon('bell', { size: 16 })} Overdue contacts <span style="background:rgba(239,68,68,.18);color:var(--red);font-size:11px;padding:2px 10px;border-radius:12px;margin-left:6px;">${rows.length}</span></span>
           <button id="ptn-overdue-collapse" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">Collapse</button>
         </h2>
         <p class="muted" style="font-size:12px;margin:0 0 12px;">These contacts haven't been touched within their cadence. Log a touch (✓) when you reach out, or open the partner to add a note.</p>
@@ -7717,8 +7829,8 @@
         <div class="btn-row" style="flex-shrink:0;">
           <!-- v1.0.0d (Tier 3a): table / org-chart view toggle -->
           <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-right:6px;">
-            <button class="chip ${partnersState.viewMode === 'table' ? 'active' : ''}" data-ptn-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">📋 Table</button>
-            <button class="chip ${partnersState.viewMode === 'orgchart' ? 'active' : ''}" data-ptn-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">🗂 Org chart</button>
+            <button class="chip ${partnersState.viewMode === 'table' ? 'active' : ''}" data-ptn-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Table</button>
+            <button class="chip ${partnersState.viewMode === 'orgchart' ? 'active' : ''}" data-ptn-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Org chart</button>
           </div>
           <button class="btn ghost" id="ptn-close" type="button" style="padding:4px 10px;font-size:11px;">✕ Close</button>
         </div>
@@ -7940,10 +8052,10 @@
               <td>${renderInlineOwnerCell(c.mr_owner, 'partner_contact', { partner: partner.id, contact: c.id }, 'mr_owner')}</td>
               <td>${touchCell(c)}</td>
               <td style="text-align:right;white-space:nowrap;">
-                <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">✓</button>
-                <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">✎</button>
-                <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;">📝</button>
-                <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+                <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">${icon('check', { size: 12 })}</button>
+                <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit">${icon('edit', { size: 12 })}</button>
+                <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Notes">${icon('note', { size: 12 })}</button>
+                <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Remove">${icon('trash', { size: 12 })}</button>
               </td>
             </tr>
           `).join('')}
@@ -8011,7 +8123,7 @@
       (list || []).map(v => `<option value="${escapeAttr(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
     detailEl.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
-        <h4 style="margin:0 0 10px;">${existing ? '✎ Edit contact' : '+ New contact'}</h4>
+        <h4 style="margin:0 0 10px;">${existing ? icon('edit', { size: 13 }) + ' Edit contact' : icon('plus', { size: 13 }) + ' New contact'}</h4>
         <div class="row row-2">
           <div class="field"><label>Name *</label><input id="ptn-c-name" type="text" value="${escapeAttr(c.name || '')}" /></div>
           <div class="field"><label>Title</label><input id="ptn-c-title" type="text" value="${escapeAttr(c.title || '')}" /></div>
@@ -8152,10 +8264,10 @@
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
           <div style="min-width:0;flex:1;">
-            <h4 style="margin:0 0 4px;">📝 Notes — ${escapeHtml(c.name)}</h4>
+            <h4 style="margin:0 0 4px;">${icon('note', { size: 14 })} Notes — ${escapeHtml(c.name)}</h4>
             <div class="muted" style="font-size:11px;">${escapeHtml(c.title || '')}${c.email ? ' · ' + escapeHtml(c.email) : ''}</div>
           </div>
-          <button id="ptn-n-refresh" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;flex-shrink:0;" title="Re-synthesise from all notes">✨ Refresh summary</button>
+          <button id="ptn-n-refresh" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;flex-shrink:0;" title="Re-synthesise from all notes">${icon('sparkles', { size: 12 })}Refresh summary</button>
         </div>
         <!-- v1.0.0m: AI-synthesised conversation summary. Mirrors the
              lead-side call summary pattern but with the partner-contact
@@ -8184,7 +8296,7 @@
       if (!el) return;
       if (!s) {
         if (notesCount > 0) {
-          el.innerHTML = '<div class="muted" style="font-size:11px;font-style:italic;background:var(--surface);border:1px dashed var(--border);border-radius:6px;padding:10px;">No synthesised summary yet. Click <strong>✨ Refresh summary</strong> to generate one, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> if AI is off.</div>';
+          el.innerHTML = '<div class="muted" style="font-size:11px;font-style:italic;background:var(--surface);border:1px dashed var(--border);border-radius:6px;padding:10px;">No synthesised summary yet. Click <strong>Refresh summary</strong> to generate one, or set <code style="font-family:var(--mono);">ANTHROPIC_API_KEY</code> if AI is off.</div>';
         } else {
           el.innerHTML = '';
         }
@@ -8215,7 +8327,7 @@
       el.innerHTML = `
         <div style="background:rgba(255,77,42,.04);border:1px solid rgba(255,77,42,.25);border-radius:8px;padding:12px;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">✨ Conversation summary</div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">${icon('sparkles', { size: 11 })} Conversation summary</div>
             ${lastNoteLabel ? `
               <div style="font-size:11px;color:var(--text);font-weight:500;">
                 Last ${escapeHtml(lastNoteType)} · <span style="color:var(--accent-text);">${escapeHtml(lastNoteLabel)}</span>
@@ -8233,7 +8345,7 @@
             <div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;">${escapeHtml(s.additional_info)}</div>
           ` : ''}
           <div class="muted" style="font-size:10px;border-top:1px solid var(--border);padding-top:6px;margin-top:10px;">
-            ✨ Synthesised from ${notesCount} note${notesCount === 1 ? '' : 's'} · generated ${when}
+            ${icon('sparkles', { size: 11 })} Synthesised from ${notesCount} note${notesCount === 1 ? '' : 's'} · generated ${when}
           </div>
         </div>
       `;

@@ -5,6 +5,95 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ab] — 2026-05-23 — Design system: emojis out, monochrome SVG icons in
+
+Ben asked: "Remove emojis. Come up with a better design than that.
+Need to support mass changes."
+
+Full sweep of `qualify.html` — every decorative emoji replaced with a
+purpose-built design system. The UI now reads as a professional sales
+tool, not a chat app.
+
+### Design system foundation
+
+- **`.icon` CSS class** — inline SVG icons inherit `currentColor` so
+  they always match the surrounding text colour (works in both light
+  and dark mode automatically). Default 14px with `.lg` (18px) and
+  `.sm` (12px) modifiers. Stroke-width 1.75 for a refined feel.
+- **`.rag-dot` CSS class** — red/amber/green status dots replace
+  the coloured-circle emojis (🔴🟡🟢) in MEDDICC. Theme-aware.
+- **`ICON_PATHS` JS dictionary** — 25 Lucide-style monochrome
+  icons (Apache-licensed shapes): refresh, edit, trash, plus, x,
+  check, copy, save, search, bell, eye, alert, info, note, link,
+  folder, building, package, printer, chart-line, chart-bar,
+  settings, sparkles, sun, moon, arrow-right.
+- **`icon(name, opts)`** helper — returns inline SVG ready to drop
+  into template literals: `${icon('edit', { size: 12 })}`.
+- **`hydrateIcons(root)`** helper — replaces `<span data-icon="...">`
+  placeholders with their SVG. Used for static HTML where template
+  literals don't run.
+
+### What was replaced
+
+| Old | New | Sites |
+|---|---|---|
+| `📈` `📊` in nav | Inline SVG chart-line / chart-bar icons | 2 |
+| `📈 Pipeline Forecast`, `📊 Team Activity Dashboard`, `🔍 Search contacts`, `🔔 Overdue contacts` page headers | Plain text (the section IS the chart/list) | 4 |
+| `✎` edit buttons | `icon('edit')` | 10 |
+| `✨` sparkle on AI buttons / indicators | `icon('sparkles')` (kept only where it earns its keep — buttons that trigger AI; stripped from toast strings + help text where redundant) | 21 |
+| `📝` note buttons | `icon('note')` | 6 |
+| `📋` copy buttons | `icon('copy')` | 3 |
+| `🔍` search buttons + LinkedIn fallback link | `icon('search')` | 8 |
+| `⚙` settings | `icon('settings')` | 2 |
+| `⚠` warnings | `icon('alert')` where useful; stripped from red-banner headlines (background already signals) | 7 |
+| `🔗` source chip | `icon('link')` | 1 |
+| `🌙` `☀️` theme toggle | `icon('moon')` / `icon('sun')` swapped on theme change | 3 |
+| `🔴` `🟡` `🟢` MEDDICC RAG | `<span class="rag-dot red/amber/green">` | 3 |
+| `👁` preview | `icon('eye')` | 2 |
+| `🖨` print | `icon('printer')` | 1 |
+| `🗂` org chart | Plain text label | 1 |
+| `📦` package | `icon('package')` | 1 |
+| `✗` reject | `icon('x')` | 1 |
+| `⌁` empty-state placeholder | `icon('info')` | 1 |
+| `✦` decorative | `·` (typographic middle dot) | 1 |
+
+### What was kept
+
+Typographic glyphs that read as text in every font, not emojis:
+- `⌘` — Mac command key (universal keyboard symbol)
+- `×` — multiplication sign (for close buttons, not the emoji ✕)
+- `→` `←` — navigation arrows
+- `·` — middle-dot separator
+- `▸` `▾` — disclosure carets
+- `✓` `✕` — minimal Unicode check/cross (only where they're
+  inside coloured buttons that already signal action)
+
+### Toasts + help text
+
+Stripped redundant emoji prefixes from toast strings (e.g.
+`"✨ AI pre-filled N project criteria"` → `"AI pre-filled N project
+criteria"`) — toasts have their own coloured borders for type, so
+the icon was visual noise. Same for inline help text that
+referenced button labels.
+
+### Files touched
+- `qualify.html` — ~80 surgical edits across CSS, HTML, and JS
+  templates. Net: 0 decorative emojis remaining.
+
+### Tests
+- 550 passing — change is JS/CSS only, no Python contracts touched.
+
+### What you'll see
+Open the app. The nav reads "Forecast" + "Dashboard" with small
+chart icons rendered in the same colour as the text. Hit any partner
+contact's edit pencil — it's now an SVG pencil that scales cleanly
+and adopts whatever colour the parent button uses. The dashboard's
+"Cache wipe detected" banner no longer starts with `⚠` (the red
+background already signals warning). MEDDICC's three RAG buttons are
+now solid coloured dots, not emoji circles. The whole UI reads as
+one coherent design language rather than a mix of fonts and emoji
+sets that render differently on every OS.
+
 ## [1.0.0aa] — 2026-05-23 — Editable company name actually reflects after save
 
 Ben reported the company name couldn't be edited. Investigation: the
