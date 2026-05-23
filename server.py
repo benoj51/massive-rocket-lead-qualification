@@ -3148,6 +3148,40 @@ def api_home():
         "total":      len(todos_all),
     }
 
+    # v1.0.0ao: sweep newly-overdue todos and fire bell notifications
+    # for each. Runs on every Home load — cheap (single file scan +
+    # in-place mark), idempotent (overdue_notified_at gate), and means
+    # the user finds out about slipped due-dates the next time they
+    # open the app.
+    try:
+        newly_overdue = todos_store.sweep_overdue_and_mark(owner_name)
+        for t in newly_overdue:
+            link = t.get("link") or None
+            # Don't auto-link to an entity if the todo's link isn't of
+            # a navigable kind — the notification's deep-link goes to
+            # the linked entity (so the user can act on it) or
+            # nowhere (so clicking just marks-read).
+            notifications_store.notify_assignment(
+                owner_name,
+                kind="todo_overdue",
+                title=f"Todo overdue: {t.get('text') or '(no text)'}",
+                body=(f"Due {t.get('due_date')} — flagged as overdue."),
+                link=link if isinstance(link, dict) and link.get("kind") else None,
+                actor=None,
+            )
+        # Refresh todos summary so the just-marked `overdue_notified_at`
+        # values land in the payload (UI doesn't read this field today
+        # but a future "already-notified" indicator could).
+        if newly_overdue:
+            todos_all = todos_store.list_for(owner_name)
+            todos_summary = {
+                "items":      todos_all,
+                "open_count": sum(1 for t in todos_all if not t.get("done")),
+                "total":      len(todos_all),
+            }
+    except Exception as e:
+        log.warning("Overdue-todo sweep failed (continuing): %s", e)
+
     return jsonify({
         "owner": {
             "name":   owner["name"],

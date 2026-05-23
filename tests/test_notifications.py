@@ -241,6 +241,56 @@ class NotificationsEndpointTests(unittest.TestCase):
             "/api/notifications?recipient=Ben%20Ojuolape").get_json()["items"]
         self.assertEqual(items, [])
 
+    # v1.0.0ao: cover the lead-PATCH notify path -----------------------
+    # The lead endpoint relies on NotionSync which we can't reach in
+    # tests, so we patch the two methods it uses (get_page for the
+    # owner peek, update_page for the write) and confirm a reassignment
+    # fires a bell notification.
+
+    def test_lead_reassignment_fires_notification(self):
+        import notifications_store
+        from unittest.mock import patch
+        # Server module's NotionSync is what server.api_lead_update
+        # instantiates — patch it there.
+        with patch.object(self.server, "NotionSync") as MockSync:
+            instance = MockSync.return_value
+            instance.get_page.return_value = {
+                "id": "page123", "owner": "Glenn Bonforte",
+                "company": "Acme Corp",
+            }
+            instance.update_page.return_value = {
+                "lead": {
+                    "id": "page123", "owner": "Ben Ojuolape",
+                    "company": "Acme Corp",
+                },
+            }
+            r = self.client.patch("/api/lead/page123",
+                                    json={"owner": "Ben Ojuolape"})
+            self.assertEqual(r.status_code, 200)
+        items = notifications_store.list_for("Ben Ojuolape")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["type"], "assigned_lead")
+        self.assertIn("Acme Corp", items[0]["title"])
+        self.assertEqual(items[0]["link"]["lead_id"], "page123")
+        self.assertIn("Reassigned from Glenn Bonforte", items[0]["body"])
+
+    def test_lead_no_owner_change_no_notification(self):
+        import notifications_store
+        from unittest.mock import patch
+        with patch.object(self.server, "NotionSync") as MockSync:
+            instance = MockSync.return_value
+            instance.get_page.return_value = {
+                "id": "page123", "owner": "Ben Ojuolape",
+                "company": "Acme",
+            }
+            instance.update_page.return_value = {
+                "lead": {"id": "page123", "owner": "Ben Ojuolape",
+                          "company": "Acme"},
+            }
+            self.client.patch("/api/lead/page123",
+                                json={"owner": "Ben Ojuolape"})
+        self.assertEqual(notifications_store.list_for("Ben Ojuolape"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

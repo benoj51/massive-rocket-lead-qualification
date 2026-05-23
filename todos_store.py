@@ -115,7 +115,11 @@ def _normalise(t: dict[str, Any]) -> dict[str, Any]:
     out.setdefault("done", False)
     out.setdefault("priority", None)
     out.setdefault("due_date", None)
-    out.setdefault("link", None)  # v1.0.0an
+    out.setdefault("link", None)              # v1.0.0an
+    # v1.0.0ao: tracks whether we've already fired an overdue-notice
+    # for this todo. Set when sweep_overdue_and_mark() marks it, so the
+    # next sweep doesn't re-notify on every Home load.
+    out.setdefault("overdue_notified_at", None)
     out.setdefault("created_at", _now())
     out.setdefault("completed_at", None)
     out.setdefault("owner", out.get("owner") or "Unknown")
@@ -284,7 +288,14 @@ def update(owner: str, todo_id: str, **fields: Any) -> dict[str, Any] | None:
         if "priority" in fields:
             target["priority"] = _validate_priority(fields["priority"])
         if "due_date" in fields:
-            target["due_date"] = _validate_due(fields["due_date"])
+            new_due = _validate_due(fields["due_date"])
+            # v1.0.0ao: when the due_date changes, clear the
+            # overdue-notification flag so the next sweep can fire a
+            # fresh notice if the new date is also past. Without this,
+            # pushing the due forward and back never re-notifies.
+            if new_due != target.get("due_date"):
+                target["overdue_notified_at"] = None
+            target["due_date"] = new_due
         if "link" in fields:
             target["link"] = _validate_link(fields["link"])
         if "done" in fields:
@@ -347,3 +358,44 @@ def clear_completed(owner: str) -> int:
         if n:
             _save_raw(owner, new)
     return n
+
+
+def sweep_overdue_and_mark(owner: str, *,
+                             today_iso: str | None = None) -> list[dict[str, Any]]:
+    """v1.0.0ao: find open todos whose due_date is strictly before
+    `today_iso` (default: today UTC) AND have never been overdue-
+    notified, mark them as notified, and return the list of marked
+    todos. Caller uses the returned list to fire notifications.
+
+    The notified_at timestamp prevents the bell from being spammed
+    every time the user opens Home — each todo is announced at most
+    once per due-date cycle. If the user clears the due_date and sets
+    a new one, the field is left in place (next overdue happens, no
+    re-notify); if they un-check and re-check `done`, completed_at
+    handles that case separately.
+
+    today_iso is injectable so tests can simulate the calendar.
+    """
+    if not owner:
+        return []
+    if today_iso is None:
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    newly_marked: list[dict[str, Any]] = []
+    with _LOCK:
+        rows = _load_raw(owner)
+        ts = _now()
+        changed = False
+        for r in rows:
+            if r.get("done"):
+                continue
+            due = r.get("due_date")
+            if not due or due >= today_iso:
+                continue
+            if r.get("overdue_notified_at"):
+                continue
+            r["overdue_notified_at"] = ts
+            changed = True
+            newly_marked.append(_normalise(r))
+        if changed:
+            _save_raw(owner, rows)
+    return newly_marked

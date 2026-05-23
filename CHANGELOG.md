@@ -5,6 +5,64 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ao] — 2026-05-23 — Overdue todo notifications + lead-PATCH test coverage
+
+Closing the loop on todos + notifications: a todo with a `due_date`
+that slips past today now fires a bell notification the next time
+the user opens Home. Plus fills in the missing test coverage for
+the lead-PATCH notification path that v1.0.0al added without tests.
+
+### Added
+
+- **`todos_store.sweep_overdue_and_mark(owner, today_iso=None)`** —
+  finds open todos with `due_date < today` that haven't been
+  overdue-notified yet, marks them with `overdue_notified_at`, and
+  returns the list so the caller can fire bell notifications.
+  Idempotent: the second sweep with the same date returns `[]`.
+  `today_iso` is injectable so tests can drive the calendar.
+- **`overdue_notified_at` field** on every todo, normalised to `None`
+  by default. Cleared automatically when the user changes the
+  `due_date` (so pushing a date forward then back re-arms the
+  notification); preserved on unrelated edits.
+- **Home endpoint integration** — `/api/home` calls the sweep on
+  every load and fires a `todo_overdue` bell notification for each
+  newly-marked todo. The notification's link mirrors the todo's
+  link (so clicking goes to the underlying lead/contact if there
+  was one), or is null (so clicking just marks-read). Wrapped in
+  try/except — sweep failures never block the Home payload.
+
+### Fixed (test coverage gap)
+
+- **Lead-PATCH notification path** — v1.0.0al added the trigger
+  but the test class (`NotificationsEndpointTests`) only covered
+  the partner-contact path because the lead path needs `NotionSync`,
+  which we can't reach in-test. Two new tests use `unittest.mock`
+  to patch `server.NotionSync` and confirm:
+  - reassigning a lead's owner fires `assigned_lead` with the
+    correct title, body, and link
+  - PATCHing without changing the owner doesn't fire
+
+### Tests
+
+- **`tests/test_todos.py`** grew 34 → 42 (+8 sweep tests):
+  empty-when-no-overdue, picks-up-overdue + persists notified_at,
+  idempotent (second sweep returns nothing), skips done, skips
+  no-due-date, today != overdue (strict `<` comparison), changing
+  due_date clears notified_at, same due_date update preserves it.
+- **`tests/test_notifications.py`** grew 18 → 20 (+2 lead-PATCH
+  tests as above).
+
+### Implementation notes
+
+- **No background scheduler** — Railway's web tier is stateless,
+  and a per-user worker would be overkill for what's essentially
+  a "check on app open" check. The sweep is cheap (single file
+  scan + per-row date string compare), runs on every Home load
+  (typically 1–4× per user per day), and the `overdue_notified_at`
+  flag means each todo notifies at most once per due-date cycle.
+- **Strict `<` not `<=`** — a todo due today is "due today" in
+  the UI badge, not overdue. Only past dates fire the sweep.
+
 ## [1.0.0an] — 2026-05-23 — Todo↔entity linking + quick-add buttons
 
 The v1.0.0am todo list is a scratch list. This makes it operational:

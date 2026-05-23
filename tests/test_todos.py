@@ -226,6 +226,78 @@ class TodosStoreTests(unittest.TestCase):
         })
         self.assertNotIn("future_field", t["link"])
 
+    # v1.0.0ao: overdue sweep tests ----------------------------------
+
+    def test_sweep_returns_empty_when_no_overdue(self):
+        self.store.create("Ben", "future", due_date="2099-12-31")
+        marked = self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        self.assertEqual(marked, [])
+
+    def test_sweep_picks_up_overdue_todo(self):
+        t = self.store.create("Ben", "follow up",
+                                due_date="2026-05-20")
+        marked = self.store.sweep_overdue_and_mark("Ben",
+                                                     today_iso="2026-05-23")
+        self.assertEqual(len(marked), 1)
+        self.assertEqual(marked[0]["id"], t["id"])
+        # Persisted: subsequent reads carry the notified_at timestamp.
+        items = self.store.list_for("Ben")
+        self.assertIsNotNone(items[0]["overdue_notified_at"])
+
+    def test_sweep_is_idempotent(self):
+        self.store.create("Ben", "x", due_date="2026-05-20")
+        first = self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        second = self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        self.assertEqual(len(first), 1)
+        # Second sweep returns nothing — already notified.
+        self.assertEqual(second, [])
+
+    def test_sweep_skips_done_todos(self):
+        t = self.store.create("Ben", "done-overdue", due_date="2026-05-20")
+        self.store.update("Ben", t["id"], done=True)
+        marked = self.store.sweep_overdue_and_mark("Ben",
+                                                     today_iso="2026-05-23")
+        self.assertEqual(marked, [])
+
+    def test_sweep_skips_no_due_date(self):
+        self.store.create("Ben", "no-due")
+        marked = self.store.sweep_overdue_and_mark("Ben",
+                                                     today_iso="2026-05-23")
+        self.assertEqual(marked, [])
+
+    def test_sweep_today_is_not_overdue(self):
+        """Strict comparison: due == today is "due today", not overdue."""
+        self.store.create("Ben", "due today", due_date="2026-05-23")
+        marked = self.store.sweep_overdue_and_mark("Ben",
+                                                     today_iso="2026-05-23")
+        self.assertEqual(marked, [])
+
+    def test_changing_due_date_clears_notified_flag(self):
+        """User pushes the due forward and back; next sweep should
+        re-fire because the date moved between marks."""
+        t = self.store.create("Ben", "x", due_date="2026-05-20")
+        self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        # Push due forward — clears the flag
+        self.store.update("Ben", t["id"], due_date="2026-06-01")
+        items = self.store.list_for("Ben")
+        self.assertIsNone(items[0]["overdue_notified_at"])
+        # Push back into the past
+        self.store.update("Ben", t["id"], due_date="2026-05-19")
+        marked = self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        self.assertEqual(len(marked), 1)
+
+    def test_same_due_date_update_does_not_clear_flag(self):
+        """Updating with the SAME due_date shouldn't reset the flag —
+        otherwise unrelated edits would re-trigger notifications."""
+        t = self.store.create("Ben", "x", due_date="2026-05-20")
+        self.store.sweep_overdue_and_mark("Ben", today_iso="2026-05-23")
+        before = self.store.list_for("Ben")[0]["overdue_notified_at"]
+        # Same due_date, different text
+        self.store.update("Ben", t["id"], text="updated text",
+                            due_date="2026-05-20")
+        after = self.store.list_for("Ben")[0]["overdue_notified_at"]
+        self.assertEqual(before, after)
+
 
 class TodosEndpointTests(unittest.TestCase):
     @classmethod
