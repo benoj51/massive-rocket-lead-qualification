@@ -51,6 +51,7 @@ import contacts_store
 import criteria_store
 import engagement
 import hubspot_sync
+import filter_presets_store
 import lead_summary_store
 import notifications_store
 import packages
@@ -3796,6 +3797,77 @@ def api_todos_clear_completed():
         return jsonify({"error": "owner required"}), 400
     n = todos_store.clear_completed(owner)
     return jsonify({"removed": n})
+
+
+# v1.0.0ay: Filter presets API --------------------------------------------
+# Per-user saved filter combinations. Scoped today to partner_contacts;
+# the store accepts a `scope` field so other surfaces (pipeline,
+# global search) can opt in later.
+
+@app.route("/api/filter-presets", methods=["GET"])
+def api_filter_presets_list():
+    """List presets for a user. Query:
+      user  — required, display name
+      scope — optional, defaults to listing all scopes
+    """
+    user = (request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    scope = (request.args.get("scope") or "").strip() or None
+    return jsonify({
+        "items": filter_presets_store.list_for(user, scope=scope),
+    })
+
+
+@app.route("/api/filter-presets", methods=["POST"])
+def api_filter_presets_create():
+    """Save a new preset. Body:
+      user, name, filters, scope (optional, default partner_contacts)
+    """
+    body = request.get_json(silent=True) or {}
+    user = (body.get("user") or "").strip()
+    name = (body.get("name") or "").strip()
+    filters = body.get("filters") or {}
+    scope = (body.get("scope") or "partner_contacts").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        preset = filter_presets_store.create(user, name, filters, scope=scope)
+    except filter_presets_store.PresetExists as e:
+        return jsonify({"error": str(e)}), 409
+    except filter_presets_store.FilterPresetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"preset": preset}), 201
+
+
+@app.route("/api/filter-presets/<preset_id>", methods=["PATCH"])
+def api_filter_presets_update(preset_id: str):
+    body = request.get_json(silent=True) or {}
+    user = (body.pop("user", None) or request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    try:
+        preset = filter_presets_store.update(user, preset_id, **body)
+    except filter_presets_store.PresetExists as e:
+        return jsonify({"error": str(e)}), 409
+    except filter_presets_store.FilterPresetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if preset is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"preset": preset})
+
+
+@app.route("/api/filter-presets/<preset_id>", methods=["DELETE"])
+def api_filter_presets_delete(preset_id: str):
+    user = (request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    ok = filter_presets_store.delete(user, preset_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
 
 
 # v1.0.0t: Dashboard endpoint ----------------------------------------------

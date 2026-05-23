@@ -9392,6 +9392,12 @@
     partnerId: null,      // scope-guard so a stale render doesn't cross partners
   };
 
+  // v1.0.0ay: saved-filter-preset state.
+  const presetsState = {
+    items: [],            // [{id, name, filters, ...}]
+    selectedId: null,     // currently-applied preset, or null
+  };
+
   async function initPartners() {
     if (!partnersState.enums) {
       try {
@@ -10009,6 +10015,123 @@
     return options[n - 1];
   }
 
+  // =============================================================
+  //  Partner contacts saved filter presets (v1.0.0ay)
+  // =============================================================
+  async function _initPartnerPresets(partner) {
+    const row = $('#ptn-preset-row');
+    if (!row) return;
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) { row.style.display = 'none'; return; }
+    row.style.display = 'flex';
+    // Fetch the user's presets for this scope.
+    try {
+      const data = await jsonFetch(
+        `/api/filter-presets?user=${encodeURIComponent(profile.name)}&scope=partner_contacts`);
+      presetsState.items = data.items || [];
+    } catch (e) {
+      console.warn('preset fetch failed', e);
+      presetsState.items = [];
+    }
+    _renderPresetPicker(partner);
+    // Wire the controls (once per render).
+    $('#ptn-preset-picker').addEventListener('change', (e) => {
+      _applyPreset(partner, e.target.value || null);
+    });
+    $('#ptn-preset-save').addEventListener('click', () => {
+      _saveCurrentAsPreset(partner);
+    });
+    $('#ptn-preset-delete').addEventListener('click', () => {
+      _deleteSelectedPreset(partner);
+    });
+  }
+
+  function _renderPresetPicker(_partner) {
+    const sel = $('#ptn-preset-picker');
+    const del = $('#ptn-preset-delete');
+    if (!sel) return;
+    const cur = presetsState.selectedId || '';
+    sel.innerHTML = '<option value="">— pick a saved view —</option>' +
+      presetsState.items.map(p =>
+        `<option value="${escapeAttr(p.id)}"${p.id === cur ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+      ).join('');
+    if (del) del.style.display = cur ? 'inline-flex' : 'none';
+  }
+
+  function _applyPreset(partner, presetId) {
+    presetsState.selectedId = presetId || null;
+    if (presetId) {
+      const preset = presetsState.items.find(p => p.id === presetId);
+      if (preset && preset.filters) {
+        // Hydrate the filter state from the saved payload. We use
+        // Object.assign so any keys the preset doesn't carry keep their
+        // current value (forward-compat if we add a new filter dim).
+        Object.assign(partnersState.filter, preset.filters);
+      }
+    }
+    // Re-render the detail so the dropdowns + chips + table reflect
+    // the applied filters.
+    openPartnerDetail(partner.id);
+  }
+
+  async function _saveCurrentAsPreset(partner) {
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) {
+      toast('Pick your profile first (Home → Switch profile)', 'error');
+      return;
+    }
+    const name = window.prompt(
+      'Name this preset (e.g. "Champions in QSR"):', '');
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    // Snapshot the current filter state. Copy so future edits don't
+    // mutate the saved payload.
+    const filters = { ...partnersState.filter };
+    try {
+      const data = await jsonFetch('/api/filter-presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: profile.name,
+          name: trimmed,
+          scope: 'partner_contacts',
+          filters,
+        }),
+      });
+      presetsState.items.push(data.preset);
+      // Keep dropdown sorted alphabetically (matches server order).
+      presetsState.items.sort((a, b) =>
+        (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
+      presetsState.selectedId = data.preset.id;
+      _renderPresetPicker(partner);
+      toast(`Saved "${trimmed}"`, 'success');
+    } catch (e) {
+      const msg = e.body?.error || e.message;
+      toast(`Save failed: ${msg}`, 'error');
+    }
+  }
+
+  async function _deleteSelectedPreset(partner) {
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) return;
+    const id = presetsState.selectedId;
+    if (!id) return;
+    const preset = presetsState.items.find(p => p.id === id);
+    if (!window.confirm(`Delete preset "${preset?.name || id}"?`)) return;
+    try {
+      await jsonFetch(
+        `/api/filter-presets/${encodeURIComponent(id)}?user=${encodeURIComponent(profile.name)}`,
+        { method: 'DELETE' });
+      presetsState.items = presetsState.items.filter(p => p.id !== id);
+      presetsState.selectedId = null;
+      _renderPresetPicker(partner);
+      toast('Preset deleted', 'success');
+    } catch (e) {
+      toast(`Delete failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
   // v1.0.0ak: Inline partner-rename. Mirrors the v1.0.0aa lead-drawer
   // pattern but for the partner header. Replaces the title span with
   // an input + Save/Cancel; on save, PATCH /api/partners/<id> and
@@ -10095,6 +10218,17 @@
       </div>
 
       <h4 style="margin:16px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Filter contacts</h4>
+      <!-- v1.0.0ay: saved preset picker row. Hydrated after render
+           because we need the current profile name to fetch presets.
+           Hidden until a profile is set. -->
+      <div id="ptn-preset-row" style="display:none;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;">Preset:</span>
+        <select id="ptn-preset-picker" style="padding:5px 10px;font-size:12px;min-width:200px;">
+          <option value="">— pick a saved view —</option>
+        </select>
+        <button class="btn ghost" id="ptn-preset-save" type="button" style="padding:5px 12px;font-size:11px;">Save current</button>
+        <button class="btn ghost" id="ptn-preset-delete" type="button" style="padding:5px 12px;font-size:11px;display:none;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
         <select id="ptn-filter-territory" style="padding:5px 10px;font-size:12px;">${optEmpty('Any territory')}${optGen(enums.territories || [], f.territory)}</select>
         <select id="ptn-filter-region" style="padding:5px 10px;font-size:12px;">${optEmpty('Any region')}${optGen(enums.regions || [], f.region)}</select>
@@ -10158,6 +10292,9 @@
       renderPartnerContactsForCurrentView(p);
     });
     $('#ptn-add-contact').addEventListener('click', () => openContactForm(p, null));
+    // v1.0.0ay: load + wire the saved-preset picker. Async — populates
+    // the dropdown when the fetch lands.
+    _initPartnerPresets(p);
     // v1.0.0d: wire the view-mode toggle.
     document.querySelectorAll('[data-ptn-view]').forEach(b => {
       b.addEventListener('click', () => {

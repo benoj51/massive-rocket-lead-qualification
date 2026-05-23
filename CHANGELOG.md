@@ -5,6 +5,59 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ay] — 2026-05-23 — Saved filter presets for partner contacts
+
+The partner contacts table has 8 filter dimensions (territory, region,
+country, industry, status, sentiment, tier, seniority, +my-contacts).
+The same combos get configured again and again — "My Champions in
+QSR", "Strategic AEs in EU", "Cold contacts on Braze". This ships
+per-user saved presets so a combo gets typed once and recalled with
+one click.
+
+### Added
+
+- **`filter_presets_store.py`** — per-user JSON store. Each preset:
+  `{id, user, scope, name, filters, created_at, updated_at}`. The
+  `filters` payload is opaque to the store — the UI defines the
+  shape, so the same store can power pipeline-filter presets later.
+  Name uniqueness enforced per (user, scope); duplicate save raises
+  `PresetExists`. Cap 50 presets per user.
+- **API**:
+  - `GET /api/filter-presets?user=&scope=` — list (alphabetical
+    by name)
+  - `POST /api/filter-presets` body `{user, name, filters, scope?}`
+    → 201 + preset, or 409 if name collides
+  - `PATCH /api/filter-presets/<id>` body `{user, name?, filters?}`
+  - `DELETE /api/filter-presets/<id>?user=`
+- **Preset picker row** in the partner contacts toolbar: dropdown
+  of saved presets + "Save current" + "Delete" buttons. Hidden
+  until a profile is set. Selecting a preset hydrates
+  `partnersState.filter` via `Object.assign` (so future filter
+  dimensions inherit the saved-filter behaviour automatically) and
+  re-opens the partner detail to repaint the dropdowns and table.
+
+### Tests
+
+- **`tests/test_filter_presets.py`** — 26 tests:
+  - 20 store unit tests: create+list, alphabetical sort, duplicate-
+    name (case-insensitive) raises, same-name-different-scope OK,
+    per-user isolation, get/get-missing, update name/filters/missing,
+    update rejects duplicate, update-to-same-name is fine,
+    unknown-field update raises, delete + delete-missing, validation
+    (empty name, 80-char cap, filters-must-be-dict, user required),
+    scope filter on list
+  - 6 endpoint tests: list-requires-user, create+list end-to-end,
+    duplicate → 409, update, delete, missing-name → 400
+
+### Why a separate store (not jam into `enum_config_store`)
+
+`enum_config_store` holds the *available options* for each filter
+dropdown (which territories exist, which tiers, etc.). Presets are
+*chosen combinations* across those options. Different lifetimes
+(enums change on org evolution; presets change per AE workflow),
+different scope (enums are org-wide; presets are per-user).
+Mixing them would tangle two concerns.
+
 ## [1.0.0ax] — 2026-05-23 — Bulk operations on partner contacts
 
 After v1.0.0ac added tier/sentiment/seniority, existing rows often
