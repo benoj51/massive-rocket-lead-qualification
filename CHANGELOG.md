@@ -5,6 +5,52 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0aj] — 2026-05-23 — "My contacts" filter + partner table formatting
+
+Ben flagged the partner-contacts table from the screenshot: owner
+names truncating ("Ben Ojuolape" → "Ben C") and the Last touch
+column wrapping into three lines. Plus he wanted a "My contacts"
+filter so AEs can scope the table to just their book.
+
+### Added
+
+- **"My contacts" filter chip** in the partner-contacts toolbar.
+  Reads the localStorage profile (set in the v1.0.0ah Home view)
+  and scopes the table to contacts where `mr_owner` matches the
+  current user. Prompts the user to pick a profile if none is set.
+  Works in both Table and Org-chart sub-views.
+
+### Fixed
+
+- **Owner cell truncation**: the inline `<select.inline-owner-cell>`
+  used `max-width:100%` with no `min-width`, so on narrow columns
+  the browser shrink-fit the control to "Ben C" or similar. Added
+  `min-width:130px` + `text-overflow:ellipsis` so names render in
+  full (or ellipsize at the longest sensible width, not the first
+  three characters).
+- **Last touch column wrapping**: the formatter stacked two `<div>`s
+  (label over status) which on narrower columns wrapped each div
+  onto two more lines — 4 rows in a single cell. Rewritten as a
+  single inline `<span>` with `white-space:nowrap`, joining label
+  and status with a middle-dot separator. Both the owner column and
+  the touch column now opt into `white-space:nowrap` at the `<td>`.
+- **Partner contacts table overflow**: with 12 columns (after
+  v1.0.0ac added Tier/Sentiment/Seniority) the table no longer fits
+  in narrower drawers. The `#ptn-contacts-table` container now has
+  `overflow-x:auto`, so wide rows scroll horizontally instead of
+  forcing cells to wrap.
+
+### Test stability
+
+- **`SKIP_COMMAND_CENTRE_SEED=1`** added to
+  `test_contacts_search.py` + `test_partner_touch_cadence.py`
+  setUpClass. Without the flag, the boot-time auto-seed of
+  Braze + Hightouch (181 contacts, many owned by "Ben") landed in
+  the test temp dir and broke owner-filter assertions — the seeded
+  data was alphabetically before the fixtures, so seeded contacts
+  consumed the 50-result limit. The flag has existed since v1.0.0j;
+  these two test classes had simply never set it.
+
 ## [1.0.0ai] — 2026-05-23 — SOW generator rewritten to MR Training Brief
 
 Ben shared the MR SOW Training Brief (May 2026) and asked the SOW

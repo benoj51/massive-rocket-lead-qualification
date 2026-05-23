@@ -107,6 +107,10 @@ class OverdueEndpointTests(unittest.TestCase):
         os.environ["PARTNER_CONTACTS_STORE_DIR"] = os.path.join(cls.tmp, "pc")
         os.environ["PARTNER_NOTES_STORE_DIR"] = os.path.join(cls.tmp, "pn")
         os.environ["APOLLO_USE_FIXTURES"] = "1"
+        # v1.0.0aj: opt out of Command Centre auto-seed — without this,
+        # the 181 seeded contacts (many owned by "Ben") inflate the
+        # overdue + owner-filter assertions.
+        os.environ["SKIP_COMMAND_CENTRE_SEED"] = "1"
         os.environ.pop("APP_AUTH_TOKEN", None)
         for mod in ("server", "partners_store", "partner_contacts_store",
                     "partner_notes_store"):
@@ -117,7 +121,7 @@ class OverdueEndpointTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         for k in ("PARTNERS_STORE_PATH", "PARTNER_CONTACTS_STORE_DIR",
-                  "PARTNER_NOTES_STORE_DIR"):
+                  "PARTNER_NOTES_STORE_DIR", "SKIP_COMMAND_CENTRE_SEED"):
             os.environ.pop(k, None)
         shutil.rmtree(cls.tmp, ignore_errors=True)
 

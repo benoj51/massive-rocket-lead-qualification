@@ -22,6 +22,11 @@ class ContactsSearchEndpointTests(unittest.TestCase):
         os.environ["PARTNERS_STORE_PATH"] = os.path.join(cls.tmp, "partners.json")
         os.environ["PARTNER_CONTACTS_STORE_DIR"] = os.path.join(cls.tmp, "pc")
         os.environ["APOLLO_USE_FIXTURES"] = "1"
+        # v1.0.0aj: opt out of the Command Centre auto-seed (181 contacts)
+        # that runs on server import. Without this, the seeded contacts
+        # land in the temp dir and bury the test fixtures past the
+        # 50-result alphabetical limit (Marina Klusas → row 95).
+        os.environ["SKIP_COMMAND_CENTRE_SEED"] = "1"
         os.environ.pop("APP_AUTH_TOKEN", None)
         for mod in ("server", "contacts_store", "partners_store",
                     "partner_contacts_store"):
@@ -57,7 +62,7 @@ class ContactsSearchEndpointTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         for k in ("CONTACTS_STORE_DIR", "PARTNERS_STORE_PATH",
-                  "PARTNER_CONTACTS_STORE_DIR"):
+                  "PARTNER_CONTACTS_STORE_DIR", "SKIP_COMMAND_CENTRE_SEED"):
             os.environ.pop(k, None)
         shutil.rmtree(cls.tmp, ignore_errors=True)
 

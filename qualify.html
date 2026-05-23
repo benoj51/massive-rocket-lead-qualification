@@ -408,9 +408,15 @@
     border-radius: 4px;
     cursor: pointer;
     transition: background .15s, border-color .15s;
+    /* v1.0.0aj: was max-width:100% which made the select shrink-fit
+       the column and clip the longer owner names ("Ben Ojuolape" →
+       "Ben C"). Min-width ensures legibility; the cell can still
+       hover into a dropdown that's wider. */
+    min-width: 130px;
     max-width: 100%;
     appearance: none;
     -webkit-appearance: none;
+    text-overflow: ellipsis;
   }
   select.inline-owner-cell:hover {
     background: var(--surface-2);
@@ -8021,7 +8027,7 @@
     partners: [],        // [partner_dict]
     selectedId: null,    // currently expanded partner
     filter: { territory: '', region: '', country: '', industry: '', status: 'active',
-              sentiment: '', tier: '', seniority: '' },
+              sentiment: '', tier: '', seniority: '', mine: false },
     // v1.0.0d (Tier 3a): partner detail can render as Table OR Org chart.
     viewMode: 'table',
   };
@@ -8502,16 +8508,41 @@
         <select id="ptn-filter-sentiment" style="padding:5px 10px;font-size:12px;">${optEmpty('Any sentiment')}${optGen(enums.partner_sentiments || [], f.sentiment)}</select>
         <select id="ptn-filter-tier" style="padding:5px 10px;font-size:12px;">${optEmpty('Any tier')}${optGen(enums.tiers || [], f.tier)}</select>
         <select id="ptn-filter-seniority" style="padding:5px 10px;font-size:12px;">${optEmpty('Any seniority')}${optGen(enums.seniorities || [], f.seniority)}</select>
+        <!-- v1.0.0aj: "My contacts" toggle — reads the localStorage
+             profile (set in the Home view) and scopes the table to
+             contacts where mr_owner matches. -->
+        <button class="chip ${f.mine ? 'active' : ''}" id="ptn-filter-mine" type="button" style="font-size:11px;padding:6px 12px;">My contacts</button>
         <button class="btn ghost" id="ptn-add-contact" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">+ Add contact</button>
       </div>
 
-      <div id="ptn-contacts-table"></div>
+      <!-- v1.0.0aj: horizontal-scroll wrapper. The contacts table now
+           has 12 columns (added Tier / Sentiment / Seniority in 1.0.0ac)
+           and on narrower viewports it was forcing long cells (owner
+           name, last-touch subtitle) to wrap into 3 lines. Letting the
+           table overflow horizontally keeps every row a single line. -->
+      <div id="ptn-contacts-table" style="overflow-x:auto;-webkit-overflow-scrolling:touch;"></div>
       <div id="ptn-contact-detail" style="margin-top:12px;"></div>
     `;
     $('#ptn-close').addEventListener('click', () => {
       el.style.display = 'none'; el.innerHTML = '';
       partnersState.selectedId = null;
     });
+    // v1.0.0aj: "My contacts" toggle wiring.
+    const mineBtn = $('#ptn-filter-mine');
+    if (mineBtn) {
+      mineBtn.addEventListener('click', () => {
+        // Need a profile to filter — prompt to pick one if not set.
+        const profile = (typeof homeState !== 'undefined' && homeState.profile) ||
+                         _readSavedProfile();
+        if (!profile?.name) {
+          toast('Pick your profile first (Home → Switch profile)', 'error');
+          return;
+        }
+        partnersState.filter.mine = !partnersState.filter.mine;
+        mineBtn.classList.toggle('active', partnersState.filter.mine);
+        renderPartnerContactsForCurrentView(p);
+      });
+    }
     ['territory','region','industry','status','sentiment','tier','seniority'].forEach(k => {
       $('#ptn-filter-' + k).addEventListener('change', (e) => {
         partnersState.filter[k] = e.target.value;
@@ -8570,6 +8601,13 @@
       if (f.sentiment && (c.partner_sentiment || '') !== f.sentiment) return false;
       if (f.tier && (c.tier || '') !== f.tier) return false;
       if (f.seniority && (c.seniority || '') !== f.seniority) return false;
+      // v1.0.0aj: "My contacts" scope.
+      if (f.mine) {
+        const me = (typeof homeState !== 'undefined' && homeState.profile?.name) ||
+                    (_readSavedProfile()?.name || '');
+        if (!me) return false;
+        if ((c.mr_owner || '').toLowerCase() !== me.toLowerCase()) return false;
+      }
       return true;
     }).map(c => c.id));
 
@@ -8675,22 +8713,33 @@
       if (f.sentiment && (c.partner_sentiment || '') !== f.sentiment) return false;
       if (f.tier && (c.tier || '') !== f.tier) return false;
       if (f.seniority && (c.seniority || '') !== f.seniority) return false;
+      // v1.0.0aj: "My contacts" scope.
+      if (f.mine) {
+        const me = (typeof homeState !== 'undefined' && homeState.profile?.name) ||
+                    (_readSavedProfile()?.name || '');
+        if (!me) return false;
+        if ((c.mr_owner || '').toLowerCase() !== me.toLowerCase()) return false;
+      }
       return true;
     });
     if (!filtered.length) {
       wrap.innerHTML = `<div class="muted" style="font-size:12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;">No contacts ${all.length ? 'match the filters' : 'yet — click + Add contact above to start'}.</div>`;
       return;
     }
+    // v1.0.0aj: tighter single-line layout. Previous stacked
+    // div-over-div was wrapping into 3 lines on narrow columns;
+    // now the label + status sit on the same row separated by a
+    // middle-dot, with white-space:nowrap on the parent td.
     const touchCell = (c) => {
       const days = c.days_since_touch;
       const overdue = c.overdue;
       const soon = c.is_due_soon;
       const label = c.last_touched_at ? _fmtDaysAgo(days) : 'Never';
-      const subtitle = overdue
-        ? `<span style="color:var(--red);font-weight:600;">Overdue ${Math.abs(c.days_until_due)}d</span>`
-        : (soon ? `<span style="color:var(--yellow);">Due in ${c.days_until_due}d</span>`
-                : `<span class="muted">cadence ${c.cadence_days}d</span>`);
-      return `<div style="font-size:11px;">${escapeHtml(label)}</div><div style="font-size:10px;margin-top:2px;">${subtitle}</div>`;
+      const status = overdue
+        ? `<span style="color:var(--red);font-weight:600;">overdue ${Math.abs(c.days_until_due)}d</span>`
+        : (soon ? `<span style="color:var(--yellow);">due ${c.days_until_due}d</span>`
+                : `<span class="muted">${c.cadence_days}d cadence</span>`);
+      return `<span style="font-size:11px;white-space:nowrap;">${escapeHtml(label)} <span class="muted">·</span> ${status}</span>`;
     };
     wrap.innerHTML = `
       <table class="stakeholders" style="width:100%;font-size:12px;">
@@ -8722,8 +8771,8 @@
               <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}</td>
               <td>${c.country ? escapeHtml(c.country) : '—'}</td>
               <td>${(c.industries || []).map(i => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(i)}</span>`).join('') || '—'}</td>
-              <td>${renderInlineOwnerCell(c.mr_owner, 'partner_contact', { partner: partner.id, contact: c.id }, 'mr_owner')}</td>
-              <td>${touchCell(c)}</td>
+              <td style="white-space:nowrap;">${renderInlineOwnerCell(c.mr_owner, 'partner_contact', { partner: partner.id, contact: c.id }, 'mr_owner')}</td>
+              <td style="white-space:nowrap;">${touchCell(c)}</td>
               <td style="text-align:right;white-space:nowrap;">
                 <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">${icon('check', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit">${icon('edit', { size: 12 })}</button>
