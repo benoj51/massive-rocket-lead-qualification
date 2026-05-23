@@ -2680,6 +2680,10 @@ def _maybe_lazy_retry_ensure_properties():
             "State Backup":              {"rich_text": {}},
             "Expected Close Date":       {"date": {}},
             "Deal Value (Monthly GBP)":  {"number": {"format": "pound"}},
+            # v1.0.0aq: keep the lazy retry list in sync with the boot
+            # self-heal so the recovery path creates the same set.
+            "Partner Source":            {"select": {}},
+            "Sourced For":               {"multi_select": {}},
         })
         _BACKUP_PROPERTY_READY = result
         if result.get("created"):
@@ -2897,6 +2901,8 @@ def _boot_self_heal_backup_property():
       - "State Backup" (v1.0.0g — durable mirror lifeline)
       - "Expected Close Date" (v1.0.0n — forecasting)
       - "Deal Value (Monthly GBP)" (v1.0.0n — forecasting)
+      - "Partner Source" (v1.0.0z — note-source attribution)
+      - "Sourced For" (v1.0.0z — multi-partner attribution)
 
     All created in a single batched PATCH. Status captured into the
     module global so /api/diagnostics/health can surface it.
@@ -2910,6 +2916,11 @@ def _boot_self_heal_backup_property():
             "State Backup":              {"rich_text": {}},
             "Expected Close Date":       {"date": {}},
             "Deal Value (Monthly GBP)":  {"number": {"format": "pound"}},
+            # v1.0.0aq: Ben hit "Sourced For is not a property" on save
+            # because his DB pre-dated v1.0.0z. Added here so any DB
+            # without these columns gets them on next boot.
+            "Partner Source":            {"select": {}},
+            "Sourced For":               {"multi_select": {}},
         })
         _BACKUP_PROPERTY_READY = result
         if result.get("created"):

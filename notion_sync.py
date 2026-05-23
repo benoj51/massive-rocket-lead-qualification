@@ -851,10 +851,59 @@ class NotionSync:
         if not props:
             return {"updated": False, "reason": "no editable fields supplied"}
 
-        page = self._request("PATCH", f"/pages/{page_id}",
-                             json_body={"properties": props})
+        # v1.0.0aq: defensive retry when the Notion DB is missing a
+        # property we tried to write. Without this, a single missing
+        # column (e.g. "Sourced For" on a DB that pre-dates v1.0.0z)
+        # 400s the whole save and the user loses every edit in the
+        # batch. We parse the error message, strip the offending
+        # property, and retry once. If it still fails, surface the
+        # error normally so the user sees the real problem.
+        page = self._patch_page_with_missing_property_recovery(page_id, props)
         return {"updated": True, "page_id": page.get("id"), "url": page.get("url"),
                 "lead": _page_to_detail(page)}
+
+    def _patch_page_with_missing_property_recovery(self, page_id: str,
+                                                     props: dict) -> dict:
+        """PATCH a page's properties; if Notion 400s with "X is not a
+        property that exists", drop X from the request and retry once.
+        Logs the dropped property so it's visible in the server log.
+
+        Notion's error format is reliable here: the message body
+        always starts with the property name, e.g.
+            "Sourced For is not a property that exists."
+        We parse the first token before " is not a property" and use
+        it as the key to drop from `props`.
+        """
+        import re as _re
+        try:
+            return self._request("PATCH", f"/pages/{page_id}",
+                                  json_body={"properties": props})
+        except NotionSyncError as e:
+            msg = str(e)
+            # Match: 'is not a property that exists' — extract the
+            # property name from the message. Quote chars vary.
+            m = _re.search(r'["\'`]?([A-Za-z][A-Za-z0-9 _]+?)["\'`]?\s+is not a property that exists', msg)
+            if not m:
+                raise
+            bad = m.group(1).strip()
+            if bad not in props:
+                # The parsed name doesn't match any prop we sent —
+                # parser may have grabbed something odd. Don't risk a
+                # silent partial save; re-raise.
+                raise
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Notion DB missing property %r — dropping from PATCH and "
+                "retrying. Add the column manually or wait for the next "
+                "boot self-heal to create it.", bad)
+            stripped = {k: v for k, v in props.items() if k != bad}
+            if not stripped:
+                # Nothing left to write — return a no-op response shape
+                # the caller can handle.
+                return {"id": page_id, "url": None}
+            # Second attempt — if THIS one fails, surface it.
+            return self._request("PATCH", f"/pages/{page_id}",
+                                  json_body={"properties": stripped})
 
 
 def sync_to_notion(payload: dict) -> dict:

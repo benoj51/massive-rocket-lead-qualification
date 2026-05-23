@@ -5,6 +5,45 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0aq] — 2026-05-23 — Fix: Notion 400 when DB lacks a property we wrote
+
+Ben hit "Save failed: Notion POST /pages 400: ... For is not a property
+that exists." (truncated in toast — full message: "Sourced For is not
+a property…"). His DB pre-dated v1.0.0z, which added the "Sourced For"
+multi_select. Without a recovery path, ONE missing column 400s the
+WHOLE save and the AE loses every edit in the batch.
+
+### Fixed
+
+- **Defensive retry in `NotionSync.update_page`**: new
+  `_patch_page_with_missing_property_recovery` wraps the PATCH. If
+  the first call 400s with "X is not a property that exists", the
+  helper parses X from the error, strips it from the payload, and
+  retries once. The user's other edits land; only the missing-prop
+  field is dropped. Logs the dropped name so the operator sees it.
+- **Boot self-heal extended** to create "Partner Source" and
+  "Sourced For" on app start. Same fix in the lazy retry path so a
+  Notion-unreachable-at-boot scenario also gets healed when the
+  first mirror call runs.
+
+### Tests
+
+- **`tests/test_notion_missing_property_recovery.py`** — 6 tests
+  with `_request` patched: recovery on the standard error, multi-
+  word property names, unrelated 400s aren't swallowed, second-
+  attempt failure propagates (no infinite loop), parser miss
+  propagates original error (no silent partial save), strip-leaves-
+  empty → no-op response (no empty PATCH).
+
+### Why narrow recovery, not a broad pre-check
+
+I considered fetching the DB schema before every PATCH to pre-filter
+unknown props. Rejected: that's a round-trip per write, and the
+boot self-heal already covers the common case. The recovery path is
+the safety net for DBs that haven't received the latest self-heal
+list (e.g. user has the app deployed but a separate DB they switched
+to mid-session). Cost is only paid on the rare miss.
+
 ## [1.0.0ap] — 2026-05-23 — Team activity feed on Home
 
 Notifications are "what's for you"; activity is "what's happening".
