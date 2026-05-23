@@ -5156,6 +5156,11 @@
         toast('Note saved · summary updated', 'success');
       } else {
         toast('Call saved', 'success');
+        // v1.0.0bh: surface refresh failure so the AE knows why the
+        // summary tile didn't update (instead of assuming it worked).
+        if (data.summary_refresh_error) {
+          toast(data.summary_refresh_error, 'error');
+        }
       }
       // v0.10.0x: surface AI scope prefill so the AE knows to review
       // Project Build for auto-filled criteria.
@@ -5629,6 +5634,11 @@
           summary.push('note + summary');
         } else {
           summary.push('note');
+          // v1.0.0bh: surface why synthesis didn't happen. Without
+          // this the user thinks the note was ignored.
+          if (callRes?.summary_refresh_error) {
+            toast(callRes.summary_refresh_error, 'error');
+          }
         }
         // v0.10.0x: scope-prefill toast (same path as inline Save note now).
         const prefilled = callRes?.scope_prefill || [];

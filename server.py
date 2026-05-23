@@ -1118,8 +1118,17 @@ def api_calls_add(lead_id: str):
     # to the save but means the summary tile reflects this call by the
     # time the UI re-renders. Safe to fail: any error here is logged but
     # doesn't break the call save.
+    # v1.0.0bh: was gated on `extracted is not None`. That gate caused
+    # partner-sourced notes (and any other note where the extraction
+    # call timed out / hit a transient API error / returned malformed
+    # JSON) to silently SKIP the summary refresh. The user's complaint:
+    # "Added notes which were given by a partner on Shell but the notes
+    # were not synthesised as they should be." Synthesis pulls from the
+    # FULL call history (not just this one call's extraction), so it
+    # has no dependency on this single extract succeeding.
     fresh_summary = None
-    if ai_summary.is_configured() and extracted is not None:
+    summary_refresh_error: str | None = None
+    if ai_summary.is_configured():
         try:
             ctx = _gather_lead_context(lead_id)
             synth = ai_summary.synthesise_lead(ctx)
@@ -1144,8 +1153,15 @@ def api_calls_add(lead_id: str):
                 audit.log_event("lead_summary_auto_refreshed",
                                 actor=_actor(), lead_id=lead_id,
                                 trigger="call_added", call_id=record["id"])
+            else:
+                # synth came back None — AI call probably failed.
+                # Surface it so the UI can toast something honest.
+                summary_refresh_error = (
+                    "AI synthesis returned no result — click Refresh on "
+                    "the lead summary to retry.")
         except Exception as e:
             log.warning("Auto-summary refresh failed for %s: %s", lead_id, e)
+            summary_refresh_error = f"AI summary refresh failed: {str(e)[:200]}"
 
     # v1.0.0f (Tier 3c): contact suggestions. Dedupe AI-extracted names
     # against existing lead contacts so the UI only offers genuinely
@@ -1207,6 +1223,10 @@ def api_calls_add(lead_id: str):
         # confirmation toasts (e.g. "Added WPP + Razorfish to agencies").
         "agencies_auto_added":  agencies_auto_added,
         "tech_stack_appended":  tech_stack_appended,
+        # v1.0.0bh: when the summary refresh failed (transient API
+        # error, malformed JSON, etc), surface it so the UI can toast
+        # honestly instead of silently looking like nothing happened.
+        "summary_refresh_error": summary_refresh_error,
     })
 
 

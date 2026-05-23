@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bh] — 2026-05-23 — Fix: partner-sourced notes not synthesised
+
+Ben: "Added notes which were given by a partner on Shell but the
+notes were not synthesised as they should be."
+
+Root cause: the call-save handler had this gate around the lead-
+summary refresh:
+
+    if ai_summary.is_configured() and extracted is not None:
+        # ... synthesise_lead(ctx) ...
+
+When `extract_from_notes` returned None (transient Anthropic API
+error, malformed JSON response, rate limit, timeout, etc), the
+**synthesis was silently skipped**. The user saved a partner note,
+saw "Saved", but the lead-summary tile never updated — and there
+was no toast explaining why.
+
+But `synthesise_lead` doesn't depend on this one call's extract.
+It pulls from the FULL call history + lead context, so it can
+write a meaningful summary even when this particular extraction
+failed. The two paths are conceptually independent.
+
+### Fixed
+
+- **De-coupled synthesis from extraction** in
+  `server.api_calls_add`. Synthesis now runs whenever AI is
+  configured, regardless of whether `extracted` is None.
+- **Surface the failure** when synthesis itself fails (rate limit,
+  Anthropic outage, malformed response). New `summary_refresh_error`
+  field in the `/api/calls/<lead>` POST response. UI toasts it
+  honestly: *"AI synthesis returned no result — click Refresh on
+  the lead summary to retry."* or the raw exception message,
+  truncated to 200 chars.
+- Two UI sites updated to surface the error: inline "Save note now"
+  toast + combined-save toast.
+
+### Tests
+
+- **`tests/test_partner_note_synthesis.py`** — 5 tests that lock
+  in the de-coupling so this doesn't regress:
+  - synthesis fires when extraction returns None (the regression
+    case Ben hit)
+  - summary_refresh_error surfaces when synth raises an exception
+  - summary_refresh_error tells the user to retry when synth
+    returns None (no exception, just no result)
+  - AI-off skips synthesis entirely and doesn't toast an error
+    (the existing "AI off" banner already covers that case)
+  - partner_source on the call propagates into the synthesis
+    context, so the prompt's attribution rubric ("Marina at Braze
+    told us...") has something to work with
+
 ## [1.0.0bg] — 2026-05-23 — Fix: contacts showing only first names
 
 Ben: "Why is it only showing the first name in contacts it should
