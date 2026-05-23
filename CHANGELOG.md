@@ -5,6 +5,58 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ap] — 2026-05-23 — Team activity feed on Home
+
+Notifications are "what's for you"; activity is "what's happening".
+This adds a Home card that surfaces recent changes across leads,
+partners, and contacts so you can see what teammates have been doing
+without digging through each surface.
+
+### Added
+
+- **`activity.py`** — pure formatter that converts raw audit events
+  into display rows. Curated `INTERESTING_EVENT_TYPES` allowlist (27
+  kinds covering lead/scope/SOW/partner/contact lifecycle) drops the
+  noisy internals (`pricing_preview`, `state_backup_mirrored`,
+  `notion_sync_started`, etc.). Per-type summary branches in
+  `_summary_for` turn `{type:"lead_updated", fields:["company"]}`
+  into "renamed lead → Acme Corp". Entity ids resolve to display
+  names via injectable `partner_names` / `lead_names` lookups.
+- **`GET /api/activity?limit=N`** — pulls the last `limit*4` raw
+  events (to give the filter headroom), builds the partner-id →
+  name map from `partners_store.list_partners()`, fetches the
+  pipeline once for lead-id → company names, then returns the
+  formatted rows. `limit` clamped to 1–100 (default 20). Notion
+  failure → fall back to short page-ids inside the formatter, never
+  500.
+- **Home "Team activity" card** — fetched separately from
+  `/api/home` so the personal payload stays fast. Renders up to 10
+  rows with actor + verb + entity link + time-ago. Click any row
+  with a link routes to the entity (re-uses the v1.0.0an
+  `_openTodoLink` helper). Refresh button for an on-demand pull.
+  Hidden when the activity log is empty.
+
+### Tests
+
+- **`tests/test_activity.py`** — 19 tests:
+  - 13 formatter unit tests (empty input, uninteresting-types
+    dropped, per-event-kind summary shape, owner-change reads as
+    reassignment, name-rename detection, link routing for each
+    entity kind, actor default, lead-name fallback chain
+    (lookup → company field → short id), input-order preservation,
+    forward-compat fallback for allowlisted-but-unhandled types)
+  - 6 endpoint tests (empty log, allowlist filter, limit clamping,
+    default limit = 20, bad limit falls back, partner-name
+    enrichment confirmed end-to-end)
+
+### Why a separate fetch, not folded into /api/home
+
+`/api/home` already calls Notion + dashboard rollup + multiple
+stores. Adding the activity scan + name enrichment inflated its p50
+in early prototypes. The activity feed lives outside the critical
+path so the greeting/KPIs paint immediately and activity backfills
+when ready.
+
 ## [1.0.0ao] — 2026-05-23 — Overdue todo notifications + lead-PATCH test coverage
 
 Closing the loop on todos + notifications: a todo with a `due_date`

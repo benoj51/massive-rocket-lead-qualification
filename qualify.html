@@ -951,6 +951,22 @@
       </div>
       <div id="home-todo-list" style="margin-top:12px;"></div>
     </div>
+    <!-- v1.0.0ap: team activity feed. Rendered from /api/activity
+         (separate fetch so the Home payload stays fast). Shows the
+         last ~10 cross-team changes — renames, ownership transfers,
+         scope moves — so you can see what's happening without
+         digging through each surface. Hidden until at least one
+         event lands. -->
+    <div class="card" id="home-activity-card" style="margin-top:14px;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Team activity</h3>
+          <div class="muted" style="font-size:11px;margin-top:2px;">Recent changes across leads, partners, contacts. Click a row to open.</div>
+        </div>
+        <button class="btn ghost" id="home-activity-refresh" type="button" style="padding:6px 12px;font-size:11px;">Refresh</button>
+      </div>
+      <div id="home-activity-list" style="margin-top:12px;"></div>
+    </div>
     <!-- v1.0.0al: notifications panel on Home. Rendered from
          home.notifications.recent so users see assignments without
          hunting for the bell. Hidden when there's nothing to show. -->
@@ -8194,6 +8210,58 @@
     // v1.0.0am: Home todos panel — fed by data.todos. Always rendered
     // (even when empty) so the input is always discoverable.
     _renderHomeTodos(data.todos || { items: [] });
+
+    // v1.0.0ap: team activity feed — fetched separately so the Home
+    // payload stays focused on personal data. Fire-and-forget; the
+    // panel updates whenever the activity API responds.
+    _loadActivityFeed();
+  }
+
+  // =============================================================
+  //  Team activity feed (v1.0.0ap) — Home card
+  // =============================================================
+  async function _loadActivityFeed() {
+    const card = $('#home-activity-card');
+    const list = $('#home-activity-list');
+    if (!card || !list) return;
+    // Wire the refresh button once.
+    const refreshBtn = $('#home-activity-refresh');
+    if (refreshBtn && !refreshBtn.dataset.wired) {
+      refreshBtn.dataset.wired = '1';
+      refreshBtn.addEventListener('click', _loadActivityFeed);
+    }
+    try {
+      const data = await jsonFetch('/api/activity?limit=10');
+      const items = data.items || [];
+      if (!items.length) { card.style.display = 'none'; return; }
+      card.style.display = 'block';
+      list.innerHTML = items.map(e => `
+        <div data-activity-link='${escapeAttr(JSON.stringify(e.link || {}))}'
+             style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;${e.link ? 'cursor:pointer;' : ''}">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;">
+              <strong>${escapeHtml(e.actor)}</strong>
+              <span class="muted"> ${escapeHtml(e.summary)}</span>
+            </div>
+            <div class="muted" style="font-size:10px;margin-top:2px;">${escapeHtml(_fmtAgoShort(e.ts))}</div>
+          </div>
+        </div>
+      `).join('');
+      list.querySelectorAll('[data-activity-link]').forEach(row => {
+        row.addEventListener('click', () => {
+          let link;
+          try { link = JSON.parse(row.dataset.activityLink); } catch (_) { link = null; }
+          if (!link || !link.kind) return;
+          // Reuse the todo-link router — same shape, same destinations.
+          _openTodoLink(link);
+        });
+      });
+    } catch (e) {
+      // Don't surface — activity is supplementary. Just keep the
+      // card hidden if it can't load.
+      console.warn('activity feed fetch failed', e);
+      card.style.display = 'none';
+    }
   }
 
   function _renderHomeNotifications(notifData) {

@@ -32,6 +32,7 @@ except ImportError:
     pass
 
 import accounts_graph
+import activity
 import ai_summary
 import apollo
 import audit
@@ -3270,6 +3271,51 @@ def api_notifications_mark_all_read():
         "marked":       n,
         "unread_count": notifications_store.unread_count(recipient),
     })
+
+
+# v1.0.0ap: Team activity feed --------------------------------------------
+# Reads the audit log, runs it through activity.format_events to drop
+# the noisy internals + add human-readable summaries, and enriches with
+# partner/lead names so links display real labels (not raw ids).
+
+@app.route("/api/activity", methods=["GET"])
+def api_activity():
+    """Recent team activity for the Home view.
+
+    Query: limit (int, default 20, clamped 1..100).
+    Returns a list of pre-formatted display rows. Each row has
+    summary, actor, timestamp, optional link. See activity.py for
+    the row shape contract.
+    """
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", "20"))))
+    except ValueError:
+        limit = 20
+    # Pull a larger raw window than `limit` so the filter has room to
+    # work — many audit events are filtered out by the allowlist.
+    raw = audit.read_events(limit=limit * 4)
+    # Resolve partner ids → names so the summary reads "renamed Braze",
+    # not "renamed braze-uuid". Cheap — single list call.
+    try:
+        partner_names = {p["id"]: p["name"] for p in partners_store.list_partners()}
+    except Exception:
+        partner_names = {}
+    # Resolve lead page_ids → company names where we can. Notion is
+    # the source of truth here; if it's unreachable, fall back to
+    # short ids inside the formatter.
+    lead_names: dict[str, str] = {}
+    try:
+        # Only fetch if there's at least one lead-tagged event in the
+        # window — saves the round-trip when the feed is partner-only.
+        if any((e.get("page_id") or e.get("lead_id")) for e in raw):
+            for row in NotionSync().list_pipeline(limit=500):
+                if row.get("id") and row.get("company"):
+                    lead_names[row["id"]] = row["company"]
+    except Exception as e:
+        log.warning("Activity feed: lead name lookup failed: %s", e)
+    rows = activity.format_events(raw, partner_names=partner_names,
+                                    lead_names=lead_names)
+    return jsonify({"items": rows[:limit]})
 
 
 # v1.0.0am: Todos API ------------------------------------------------------
