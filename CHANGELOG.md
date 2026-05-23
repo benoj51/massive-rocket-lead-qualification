@@ -5,6 +5,43 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ak] — 2026-05-23 — Inline rename for partners + project name clarity
+
+Ben asked to "edit company names" — v1.0.0aa fixed the lead drawer,
+but partners and projects still had stuck names. This rounds out
+the other two surfaces.
+
+### Added
+
+- **Inline partner rename** in the partner detail header. Pencil
+  button next to the partner name swaps the title for an
+  `<input>` + Save/Cancel. Save PATCHes `/api/partners/<id>` (the
+  endpoint already accepted arbitrary field merges), then re-opens
+  the detail so contacts + filters re-bind cleanly against the
+  renamed partner. Refreshes `refreshPartners()` so the side list +
+  global picker pick up the new name without a page reload.
+  Keyboard: Enter saves, Escape cancels.
+
+### Fixed
+
+- **Project name label** in the Project Build view. Previously
+  read "Or new lead — company name", which felt broken when an
+  AE was loading an existing project to rename it. Now reads
+  "Company name" with a `<small>` hint: "Edit to rename this
+  project; saves with the next Save scope." The save flow itself
+  was already correct (`pbSave` passes `company_name`, the server
+  upserts via `project.company_name = company_name`); only the
+  label was misleading.
+
+### Notes
+
+- Project name editing has been functional since first-cut, but
+  was discoverable only by knowing the input was bi-modal. The
+  label clarification makes it usable without prior knowledge.
+- Lead rename remains as v1.0.0aa: edit Company in the drawer
+  field, hit Save; the drawer title + meta refresh from the
+  server-confirmed PATCH response.
+
 ## [1.0.0aj] — 2026-05-23 — "My contacts" filter + partner table formatting
 
 Ben flagged the partner-contacts table from the screenshot: owner

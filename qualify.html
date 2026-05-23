@@ -1348,8 +1348,14 @@
           </select>
         </div>
         <div>
-          <label>Or new lead — company name</label>
+          <!-- v1.0.0ak: clarified label. The same input drives both
+               "new project" (when nothing is selected above) and
+               "rename current project" (when an existing project is
+               loaded). Previously the label only spoke to the new-lead
+               case and felt broken when editing. -->
+          <label id="pb-new-name-label">Company name</label>
           <input id="pb-new-name" type="text" placeholder="e.g. Deliveroo" />
+          <small class="muted" style="font-size:10px;">Edit to rename this project; saves with the next "Save scope".</small>
         </div>
         <div>
           <label>Lead ID (slug)</label>
@@ -8473,6 +8479,56 @@
     }
   }
 
+  // v1.0.0ak: Inline partner-rename. Mirrors the v1.0.0aa lead-drawer
+  // pattern but for the partner header. Replaces the title span with
+  // an input + Save/Cancel; on save, PATCH /api/partners/<id> and
+  // re-open the detail so the contacts table + filters re-bind cleanly
+  // against the renamed partner.
+  function beginPartnerRename(partner) {
+    const titleEl = $('#ptn-detail-title');
+    if (!titleEl) return;
+    const original = partner.name || '';
+    titleEl.innerHTML = `
+      <input id="ptn-rename-input" type="text" value="${escapeAttr(original)}"
+             style="font-size:18px;padding:4px 8px;min-width:240px;flex:1;max-width:480px;" />
+      <button class="btn" id="ptn-rename-save" type="button"
+              style="padding:4px 10px;font-size:11px;">Save</button>
+      <button class="btn ghost" id="ptn-rename-cancel" type="button"
+              style="padding:4px 10px;font-size:11px;">Cancel</button>
+    `;
+    const input = $('#ptn-rename-input');
+    input.focus();
+    input.select();
+    const cancel = () => openPartnerDetail(partner.id);
+    $('#ptn-rename-cancel').addEventListener('click', cancel);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') cancel();
+      if (e.key === 'Enter') { e.preventDefault(); $('#ptn-rename-save').click(); }
+    });
+    $('#ptn-rename-save').addEventListener('click', async () => {
+      const newName = input.value.trim();
+      if (!newName) { toast('Name cannot be empty', 'error'); return; }
+      if (newName === original) { cancel(); return; }
+      const saveBtn = $('#ptn-rename-save');
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        });
+        toast(`Renamed to "${newName}"`, 'success');
+        // Refresh the partners list cache so the side menu + filters
+        // pick up the new name without a full page reload.
+        if (typeof refreshPartners === 'function') { await refreshPartners(); }
+        await openPartnerDetail(partner.id);
+      } catch (e) {
+        toast(`Rename failed: ${e.body?.error || e.message}`, 'error');
+        saveBtn.disabled = false; saveBtn.textContent = 'Save';
+      }
+    });
+  }
+
   function renderPartnerDetail(p) {
     const el = $('#ptn-detail');
     const enums = partnersState.enums || {};
@@ -8483,7 +8539,18 @@
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
         <div style="min-width:0;flex:1;">
-          <h3 style="margin:0;">${escapeHtml(p.name)} <span class="muted" style="font-weight:400;font-size:11px;">— ${escapeHtml(p.type || 'Partner')}</span></h3>
+          <!-- v1.0.0ak: inline-editable partner name. Pencil button
+               swaps the h3 for an input + Save/Cancel; saving PATCHes
+               and re-opens the detail so the header (and downstream
+               references) refresh. Mirrors the v1.0.0aa lead-drawer
+               pattern. -->
+          <h3 id="ptn-detail-title" style="margin:0;display:flex;align-items:center;gap:8px;">
+            <span id="ptn-detail-name">${escapeHtml(p.name)}</span>
+            <span class="muted" style="font-weight:400;font-size:11px;">— ${escapeHtml(p.type || 'Partner')}</span>
+            <button class="btn ghost" id="ptn-edit-name" type="button"
+                    title="Rename partner"
+                    style="padding:2px 6px;font-size:10px;line-height:1;">${icon('edit', { size: 11 })}</button>
+          </h3>
           ${p.url ? `<a href="${escapeAttr(p.url.startsWith('http') ? p.url : 'https://'+p.url)}" target="_blank" rel="noopener" style="font-size:11px;">${escapeHtml(p.url)} ↗</a>` : ''}
           ${p.description ? `<p class="muted" style="font-size:12px;margin:6px 0 0;">${escapeHtml(p.description)}</p>` : ''}
         </div>
@@ -8527,6 +8594,13 @@
       el.style.display = 'none'; el.innerHTML = '';
       partnersState.selectedId = null;
     });
+    // v1.0.0ak: rename-in-place. Click the pencil → name span becomes
+    // an input + Save/Cancel. Save PATCHes /api/partners/<id>, then
+    // re-opens the detail (which refreshes contacts + filters too).
+    const editNameBtn = $('#ptn-edit-name');
+    if (editNameBtn) {
+      editNameBtn.addEventListener('click', () => beginPartnerRename(p));
+    }
     // v1.0.0aj: "My contacts" toggle wiring.
     const mineBtn = $('#ptn-filter-mine');
     if (mineBtn) {
