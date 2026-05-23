@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0aw] — 2026-05-23 — Engagement leaderboard on Dashboard
+
+The engagement score closed the loop for the individual AE (at → av).
+This version closes it for the manager: a per-MR-owner leaderboard
+on the Dashboard ranking AEs by how well they're working their book.
+
+### Added
+
+- **`engagement.aggregate_by_owner(entries)`** — pure-function
+  rollup. Takes per-lead `{owner, score, band}` entries, returns
+  per-owner `{owner, n_leads, avg_score, strong/warm/weak/cold,
+  needs_attention}` sorted by `avg_score` descending, alphabetical
+  tiebreak. Missing owner buckets as "Unassigned". Unknown bands
+  count toward n_leads but no band column (forward-compat).
+- **`GET /api/dashboard/engagement-leaderboard?per_owner_cap=N`** —
+  pulls pipeline, groups active leads by owner (excluding
+  Disqualified/On Hold/Closed Lost), caps per-owner scan at N
+  (default 30) sorted by recency to bound I/O, computes engagement
+  for each, runs the aggregator. Returns rows + totals + generated_at.
+  Notion outage → empty list, never 500.
+- **"Engagement leaderboard" card** on the Dashboard view, between
+  the "By partner" table and Coverage. Fetched in parallel with the
+  main dashboard load so the touch counts paint first and the
+  leaderboard backfills. Each row shows: owner, coloured avg score,
+  distribution chips (X strong / Y warm / Z weak / W cold),
+  needs-attention count (red if >0), leads-scored. Click a row to
+  scope the rest of the Dashboard to that owner.
+
+### Tests
+
+- **`tests/test_engagement_score.py`** grew 20 → 31 tests (+11):
+  - 7 aggregator unit tests: empty input, single-owner single-lead,
+    band counting (strong/warm/weak/cold/needs_attention), multi-owner
+    descending sort, alphabetical tiebreak, missing-owner →
+    Unassigned bucket, unknown-band forward-compat
+  - 4 endpoint tests with NotionSync patched: empty pipeline,
+    grouping by owner, Disqualified/On Hold/Closed Lost excluded,
+    per_owner_cap respected
+
+### Why a separate card, not folded into "By owner"
+
+The existing "By owner" table is about *activity counts* (touches +
+calls). The leaderboard is about *engagement quality* (the score the
+v1.0.0at module synthesises from coverage + recency + activity +
+overdue + key-touch). High activity with low engagement is a real
+pattern worth surfacing — an AE making lots of touches but
+hitting the wrong contacts shows up clearly. Folding them
+together would hide that.
+
 ## [1.0.0av] — 2026-05-23 — Engagement-driven workflow: "Needs attention" + pipeline filter
 
 v1.0.0at made the score; v1.0.0au showed it everywhere; v1.0.0av

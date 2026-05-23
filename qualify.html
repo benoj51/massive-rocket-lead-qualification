@@ -1428,6 +1428,12 @@
       <!-- By partner table -->
       <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">By partner</div>
       <div id="db-by-partner"></div>
+      <!-- v1.0.0aw: per-MR-owner engagement leaderboard. Ranks AEs by
+           average engagement score across their active book. Loaded
+           lazily after the main dashboard renders so the engagement
+           fan-out doesn't block the touch-counts paint. -->
+      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Engagement leaderboard</div>
+      <div id="db-engagement-leaderboard" class="muted" style="font-size:12px;">Loading…</div>
       <!-- Coverage health -->
       <div id="db-coverage" style="margin-top:18px;"></div>
       <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
@@ -8933,10 +8939,85 @@
       const data = await jsonFetch(`/api/dashboard?${qs.toString()}`);
       dashboardState.data = data;
       renderDashboard();
+      // v1.0.0aw: kick off the engagement-leaderboard fetch in parallel.
+      // Slower than the dashboard itself (scoring fan-out), so let the
+      // main paint happen first and backfill the leaderboard card.
+      _loadEngagementLeaderboard();
     } catch (e) {
       $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {
       btn.disabled = false; btn.innerHTML = '↻ Refresh';
+    }
+  }
+
+  // v1.0.0aw: fetch + render the per-MR-owner engagement leaderboard.
+  // Lives below the existing dashboard tables. Click any owner row to
+  // narrow the Dashboard's owner filter so the rest of the page focuses
+  // on that AE's book.
+  async function _loadEngagementLeaderboard() {
+    const el = $('#db-engagement-leaderboard');
+    if (!el) return;
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Computing scores across your book…</div>';
+    try {
+      const data = await jsonFetch('/api/dashboard/engagement-leaderboard');
+      const rows = data.rows || [];
+      if (!rows.length) {
+        el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No leads scored yet — owners need at least one active lead with contacts to appear.</div>';
+        return;
+      }
+      const colourFor = (s) =>
+        s >= 75 ? 'var(--green)' :
+        s >= 50 ? 'var(--yellow)' :
+        s >= 25 ? 'var(--orange,#f59e0b)' :
+                   'var(--red)';
+      const chip = (label, n, color) => n > 0
+        ? `<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;background:rgba(255,255,255,.04);color:${color};border:1px solid ${color};margin-right:4px;">${n} ${label}</span>`
+        : '';
+      el.innerHTML = `
+        <div class="muted" style="font-size:10px;margin-bottom:8px;">
+          ${data.totals?.n_leads_scored || 0} leads scored across ${data.totals?.n_owners || 0} owner${(data.totals?.n_owners || 0) === 1 ? '' : 's'}.
+          Click an owner to filter the rest of the dashboard to their book.
+        </div>
+        <table class="stakeholders" style="width:100%;font-size:12px;">
+          <thead>
+            <tr>
+              <th>MR owner</th>
+              <th style="text-align:right;">Avg engagement</th>
+              <th>Distribution</th>
+              <th style="text-align:right;">Needs attention</th>
+              <th style="text-align:right;">Leads scored</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr data-leaderboard-owner="${escapeAttr(r.owner)}" style="cursor:pointer;">
+                <td style="font-weight:500;">${escapeHtml(r.owner)}</td>
+                <td style="text-align:right;font-family:var(--mono);font-weight:600;color:${colourFor(r.avg_score)};">${r.avg_score}</td>
+                <td>
+                  ${chip('strong', r.strong, 'var(--green)')}
+                  ${chip('warm',   r.warm,   'var(--yellow)')}
+                  ${chip('weak',   r.weak,   'var(--orange,#f59e0b)')}
+                  ${chip('cold',   r.cold,   'var(--red)')}
+                </td>
+                <td style="text-align:right;${r.needs_attention > 0 ? 'color:var(--red);font-weight:600;' : 'color:var(--text-muted);'}">${r.needs_attention}</td>
+                <td style="text-align:right;color:var(--text-muted);font-family:var(--mono);">${r.n_leads}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      // Click row → narrow the rest of the Dashboard to this owner.
+      el.querySelectorAll('[data-leaderboard-owner]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const owner = tr.dataset.leaderboardOwner;
+          dashboardState.owner = owner;
+          const sel = $('#db-owner-filter');
+          if (sel) sel.value = owner;
+          loadDashboard();
+        });
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;padding:10px;">Leaderboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 

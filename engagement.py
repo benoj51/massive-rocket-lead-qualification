@@ -198,3 +198,72 @@ def compute_engagement_score(
             "considered_contacts": len(contacts),
         },
     }
+
+
+# v1.0.0aw: per-owner aggregation for the Dashboard leaderboard.
+# Pure-function: takes already-computed per-lead scores so it's easy
+# to test in isolation. Caller is responsible for the I/O fan-out.
+
+def aggregate_by_owner(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Roll up per-lead engagement entries into per-owner stats.
+
+    Args
+    ----
+    entries:
+        List of dicts, each with at least:
+          - owner   (str | None)
+          - score   (int 0..100)
+          - band    ("strong" | "warm" | "weak" | "cold")
+        Entries with no owner are bucketed under "Unassigned" so the
+        Dashboard can flag book-without-owner accounts.
+
+    Returns
+    -------
+    List of {owner, n_leads, avg_score, strong, warm, weak, cold,
+    needs_attention} dicts, sorted by avg_score DESCENDING. Empty
+    list if `entries` is empty.
+    """
+    if not entries:
+        return []
+    bucket: dict[str, dict[str, Any]] = {}
+    for e in entries:
+        owner = (e.get("owner") or "Unassigned").strip() or "Unassigned"
+        score = int(e.get("score") or 0)
+        band  = e.get("band") or "cold"
+        b = bucket.setdefault(owner, {
+            "owner":            owner,
+            "n_leads":          0,
+            "_score_total":     0,
+            "strong":           0,
+            "warm":             0,
+            "weak":             0,
+            "cold":             0,
+            "needs_attention":  0,
+        })
+        b["n_leads"]      += 1
+        b["_score_total"] += score
+        if band in ("strong", "warm", "weak", "cold"):
+            b[band] += 1
+        # "Needs attention" mirrors the Home card threshold (<50). A lead
+        # can be in cold OR weak — both count.
+        if score < 50:
+            b["needs_attention"] += 1
+    rows = []
+    for b in bucket.values():
+        avg = round(b["_score_total"] / b["n_leads"]) if b["n_leads"] else 0
+        rows.append({
+            "owner":           b["owner"],
+            "n_leads":         b["n_leads"],
+            "avg_score":       avg,
+            "strong":          b["strong"],
+            "warm":            b["warm"],
+            "weak":            b["weak"],
+            "cold":            b["cold"],
+            "needs_attention": b["needs_attention"],
+        })
+    # Sort by avg_score desc; tiebreak alphabetical so the order is
+    # deterministic across reads.
+    rows.sort(key=lambda r: (-r["avg_score"], r["owner"]))
+    return rows

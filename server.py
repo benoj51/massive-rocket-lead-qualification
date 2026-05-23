@@ -3686,6 +3686,82 @@ def api_todos_clear_completed():
 
 # v1.0.0t: Dashboard endpoint ----------------------------------------------
 
+# v1.0.0aw: per-MR-owner engagement leaderboard ---------------------------
+# Rolls up engagement scores by owner so the Dashboard can show who's
+# working their book hardest. Manager view of the v1.0.0at score.
+
+@app.route("/api/dashboard/engagement-leaderboard", methods=["GET"])
+def api_engagement_leaderboard():
+    """Per-owner engagement aggregates.
+
+    Query:
+      per_owner_cap — max leads per owner to score (default 30,
+                       clamped 1..100). Bounds the I/O fan-out for
+                       owners with huge books.
+
+    Returns:
+      {
+        "rows": [{owner, n_leads, avg_score, strong/warm/weak/cold,
+                  needs_attention}],
+        "totals": {n_owners, n_leads_scored},
+        "generated_at": iso8601,
+      }
+    """
+    from datetime import datetime, timezone
+    try:
+        per_owner_cap = max(1, min(100,
+                                     int(request.args.get("per_owner_cap", "30"))))
+    except ValueError:
+        per_owner_cap = 30
+
+    # Pull pipeline once; tolerate Notion outages by returning empty.
+    try:
+        pipeline_rows = NotionSync().list_pipeline(limit=500)
+    except Exception as e:
+        log.warning("Leaderboard: pipeline fetch failed (continuing): %s", e)
+        pipeline_rows = []
+
+    # Group active leads by owner, cap each owner's batch.
+    by_owner: dict[str, list[dict]] = {}
+    for r in pipeline_rows:
+        if (r.get("status") or "") in {"Disqualified", "On Hold", "Closed Lost"}:
+            continue
+        owner = (r.get("owner") or "").strip() or "Unassigned"
+        by_owner.setdefault(owner, []).append(r)
+
+    # Sort each owner's leads by recency so the cap takes the most
+    # relevant slice (recent activity = AE's current focus).
+    entries: list[dict] = []
+    n_scored = 0
+    for owner, leads in by_owner.items():
+        leads.sort(key=lambda r: r.get("last_edited") or "", reverse=True)
+        for r in leads[:per_owner_cap]:
+            lid = r.get("id")
+            if not lid:
+                continue
+            try:
+                e = _compute_engagement_for_lead(lid)
+            except Exception as ex:
+                log.warning("Leaderboard score for %s failed: %s", lid, ex)
+                continue
+            entries.append({
+                "owner": owner,
+                "score": e.get("score", 0),
+                "band":  e.get("band", "cold"),
+            })
+            n_scored += 1
+
+    rows = engagement.aggregate_by_owner(entries)
+    return jsonify({
+        "rows":   rows,
+        "totals": {
+            "n_owners":       len(rows),
+            "n_leads_scored": n_scored,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    })
+
+
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     """Manager dashboard: touch/call counts per MR owner + per partner

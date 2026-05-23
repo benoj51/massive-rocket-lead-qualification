@@ -341,5 +341,167 @@ class EngagementScoreEndpointTests(unittest.TestCase):
         self.assertLessEqual(len(body["scores"]), 200)
 
 
+class AggregateByOwnerTests(unittest.TestCase):
+    """v1.0.0aw: pure-function aggregator. No I/O — feed entries,
+    check the rollup."""
+
+    def setUp(self):
+        sys.modules.pop("engagement", None)
+        import engagement
+        self.eng = engagement
+
+    def test_empty_returns_empty_list(self):
+        self.assertEqual(self.eng.aggregate_by_owner([]), [])
+
+    def test_single_owner_single_lead(self):
+        entries = [{"owner": "Ben", "score": 80, "band": "strong"}]
+        rows = self.eng.aggregate_by_owner(entries)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["owner"], "Ben")
+        self.assertEqual(r["n_leads"], 1)
+        self.assertEqual(r["avg_score"], 80)
+        self.assertEqual(r["strong"], 1)
+        self.assertEqual(r["needs_attention"], 0)
+
+    def test_band_counting(self):
+        entries = [
+            {"owner": "Ben", "score": 80, "band": "strong"},
+            {"owner": "Ben", "score": 60, "band": "warm"},
+            {"owner": "Ben", "score": 30, "band": "weak"},
+            {"owner": "Ben", "score": 10, "band": "cold"},
+        ]
+        r = self.eng.aggregate_by_owner(entries)[0]
+        self.assertEqual(r["strong"], 1)
+        self.assertEqual(r["warm"], 1)
+        self.assertEqual(r["weak"], 1)
+        self.assertEqual(r["cold"], 1)
+        # 2 below 50 → 2 needs_attention.
+        self.assertEqual(r["needs_attention"], 2)
+        # avg of 80+60+30+10 = 180/4 = 45
+        self.assertEqual(r["avg_score"], 45)
+
+    def test_multi_owner_sorted_desc_by_avg(self):
+        entries = [
+            {"owner": "Glenn", "score": 40, "band": "weak"},
+            {"owner": "Ben",   "score": 85, "band": "strong"},
+            {"owner": "Alice", "score": 60, "band": "warm"},
+        ]
+        rows = self.eng.aggregate_by_owner(entries)
+        owners = [r["owner"] for r in rows]
+        self.assertEqual(owners, ["Ben", "Alice", "Glenn"])
+
+    def test_alphabetical_tiebreak(self):
+        """Two owners with identical avg → alphabetical."""
+        entries = [
+            {"owner": "Zane",  "score": 50, "band": "warm"},
+            {"owner": "Alice", "score": 50, "band": "warm"},
+        ]
+        rows = self.eng.aggregate_by_owner(entries)
+        self.assertEqual([r["owner"] for r in rows], ["Alice", "Zane"])
+
+    def test_missing_owner_bucketed_as_unassigned(self):
+        entries = [
+            {"owner": None, "score": 30, "band": "weak"},
+            {"owner": "",   "score": 40, "band": "weak"},
+            {"owner": "  ", "score": 20, "band": "cold"},
+        ]
+        rows = self.eng.aggregate_by_owner(entries)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["owner"], "Unassigned")
+        self.assertEqual(rows[0]["n_leads"], 3)
+
+    def test_unknown_band_doesnt_crash(self):
+        """Future-compat: if a band string slips through that's not
+        in the expected set, the count goes nowhere but the entry
+        still contributes to n_leads / avg."""
+        entries = [{"owner": "Ben", "score": 50, "band": "molten"}]
+        rows = self.eng.aggregate_by_owner(entries)
+        self.assertEqual(rows[0]["n_leads"], 1)
+        self.assertEqual(rows[0]["strong"], 0)
+        self.assertEqual(rows[0]["warm"], 0)
+        self.assertEqual(rows[0]["weak"], 0)
+        self.assertEqual(rows[0]["cold"], 0)
+
+
+class LeaderboardEndpointTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["CONTACTS_STORE_DIR"] = os.path.join(cls.tmp, "contacts")
+        os.environ["LEAD_CONTACT_NOTES_STORE_DIR"] = os.path.join(cls.tmp, "notes")
+        os.environ["CALLS_STORE_DIR"] = os.path.join(cls.tmp, "calls")
+        os.environ["SKIP_COMMAND_CENTRE_SEED"] = "1"
+        os.environ.pop("APP_AUTH_TOKEN", None)
+        for mod in ("server", "contacts_store", "calls_store",
+                    "lead_contact_notes_store", "engagement"):
+            sys.modules.pop(mod, None)
+        cls.server = importlib.import_module("server")
+        cls.client = cls.server.app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        for k in ("CONTACTS_STORE_DIR", "LEAD_CONTACT_NOTES_STORE_DIR",
+                  "CALLS_STORE_DIR", "SKIP_COMMAND_CENTRE_SEED"):
+            os.environ.pop(k, None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_leaderboard_empty_when_no_pipeline(self):
+        from unittest.mock import patch
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.list_pipeline.return_value = []
+            body = self.client.get(
+                "/api/dashboard/engagement-leaderboard").get_json()
+        self.assertEqual(body["rows"], [])
+        self.assertEqual(body["totals"]["n_owners"], 0)
+        self.assertEqual(body["totals"]["n_leads_scored"], 0)
+
+    def test_leaderboard_groups_by_owner(self):
+        from unittest.mock import patch
+        rows = [
+            {"id": "lead-1", "company": "A", "owner": "Ben",
+             "status": "Qualified"},
+            {"id": "lead-2", "company": "B", "owner": "Ben",
+             "status": "Qualified"},
+            {"id": "lead-3", "company": "C", "owner": "Glenn",
+             "status": "Qualified"},
+        ]
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.list_pipeline.return_value = rows
+            body = self.client.get(
+                "/api/dashboard/engagement-leaderboard").get_json()
+        # 3 leads scored, 2 owners.
+        self.assertEqual(body["totals"]["n_leads_scored"], 3)
+        self.assertEqual(body["totals"]["n_owners"], 2)
+        owners = {r["owner"]: r for r in body["rows"]}
+        self.assertEqual(owners["Ben"]["n_leads"], 2)
+        self.assertEqual(owners["Glenn"]["n_leads"], 1)
+
+    def test_leaderboard_excludes_disqualified(self):
+        from unittest.mock import patch
+        rows = [
+            {"id": "lead-active", "owner": "Ben", "status": "Qualified"},
+            {"id": "lead-dq",     "owner": "Ben", "status": "Disqualified"},
+            {"id": "lead-onhold", "owner": "Ben", "status": "On Hold"},
+        ]
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.list_pipeline.return_value = rows
+            body = self.client.get(
+                "/api/dashboard/engagement-leaderboard").get_json()
+        ben = body["rows"][0]
+        self.assertEqual(ben["n_leads"], 1)
+
+    def test_leaderboard_respects_per_owner_cap(self):
+        from unittest.mock import patch
+        rows = [{"id": f"lead-{i}", "owner": "Ben", "status": "Qualified"}
+                for i in range(50)]
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.list_pipeline.return_value = rows
+            body = self.client.get(
+                "/api/dashboard/engagement-leaderboard?per_owner_cap=10").get_json()
+        # Cap at 10 — only the 10 most recent scored.
+        self.assertEqual(body["rows"][0]["n_leads"], 10)
+
+
 if __name__ == "__main__":
     unittest.main()
