@@ -5,6 +5,51 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ad] — 2026-05-23 — Tier defaults reframed around importance to MR
+
+Ben pointed out that "Active" and "Dormant" describe engagement
+frequency, not strategic importance. Tier should answer "how much does
+losing this relationship hurt us?" — cadence + last-touched already
+cover the activity dimension.
+
+### Default tiers now read
+
+| Old | New |
+|---|---|
+| T1 — Strategic | **T1 — Critical** |
+| T2 — Active | **T2 — Important** |
+| T3 — Light | **T3 — Nurture** |
+| T4 — Dormant | **T4 — Awareness** |
+
+Meaning:
+- **T1 — Critical**: relationships we cannot afford to lose
+- **T2 — Important**: meaningful pipeline + regular co-sell value
+- **T3 — Nurture**: developing — could become Important
+- **T4 — Awareness**: they know us; low priority for now
+
+Form helper text updated: *"Tier — importance to MR (not how active)"*
+to make the meaning explicit at the point of entry.
+
+### Existing data unchanged
+Any partner contact currently saved with "T1 — Strategic" etc. keeps
+its label — the store accepts any string. The label just displays in
+the table as a free-text tag and won't appear in the new dropdown.
+If you want to migrate, edit the contact + pick a new value from the
+dropdown.
+
+### Customisable anyway
+The Settings panel still lets you replace these defaults with whatever
+labels match your team's vocabulary — they're just the starting point.
+
+### Tests
+- 568 still passing. Test fixtures referencing the old tier label
+  updated.
+
+### Files touched
+- `partner_contacts_store.py` — TIERS constant
+- `qualify.html` — form helper text
+- `tests/test_enum_config.py` — fixture labels
+
 ## [1.0.0ac] — 2026-05-23 — Industries + sentiment/tier/seniority + Settings panel
 
 Three requests bundled:

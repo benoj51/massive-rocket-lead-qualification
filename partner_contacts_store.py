@@ -72,7 +72,11 @@ STATUSES = ["active", "dormant", "left"]
 # - Seniority: org-rank shorthand for who's the right escalation path.
 # All three are user-editable via the Settings panel (enum_config_store).
 PARTNER_SENTIMENTS = ["Champion", "Warm", "Neutral", "Cool", "Blocker"]
-TIERS              = ["T1 — Strategic", "T2 — Active", "T3 — Light", "T4 — Dormant"]
+# v1.0.0ad: tiers describe IMPORTANCE TO MR (not engagement frequency
+# — Last touch + cadence already cover that). T1 = relationships we
+# cannot afford to lose; T4 = we know them, low priority.
+TIERS              = ["T1 — Critical", "T2 — Important",
+                       "T3 — Nurture", "T4 — Awareness"]
 SENIORITIES        = ["C-Suite", "VP", "Director", "Manager",
                        "Individual Contributor"]
 

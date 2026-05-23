@@ -51,9 +51,9 @@ class EnumConfigStoreTests(unittest.TestCase):
     def test_save_dedupes_and_strips(self):
         import enum_config_store
         cfg = enum_config_store.save({
-            "tiers": ["  T1 — Strategic  ", "T1 — Strategic", "T2", "", "  ", "T2"],
+            "tiers": ["  T1 — Critical  ", "T1 — Critical", "T2", "", "  ", "T2"],
         })
-        self.assertEqual(cfg["tiers"], ["T1 — Strategic", "T2"])
+        self.assertEqual(cfg["tiers"], ["T1 — Critical", "T2"])
 
     def test_save_empty_list_resets_to_default(self):
         import enum_config_store
@@ -82,7 +82,7 @@ class EnumConfigStoreTests(unittest.TestCase):
         enum_config_store.save({"tiers": ["Custom"]})
         self.assertEqual(enum_config_store.load()["tiers"], ["Custom"])
         cfg = enum_config_store.reset_key("tiers")
-        self.assertIn("T1 — Strategic", cfg["tiers"])
+        self.assertIn("T1 — Critical", cfg["tiers"])
 
     def test_reset_unknown_key_raises(self):
         import enum_config_store
@@ -117,11 +117,11 @@ class PartnerContactsNewFieldsTests(unittest.TestCase):
         c = partner_contacts_store.save_contact("braze", {
             "name": "Marina Klusas",
             "partner_sentiment": "Champion",
-            "tier": "T1 — Strategic",
+            "tier": "T1 — Critical",
             "seniority": "Director",
         })
         self.assertEqual(c["partner_sentiment"], "Champion")
-        self.assertEqual(c["tier"], "T1 — Strategic")
+        self.assertEqual(c["tier"], "T1 — Critical")
         self.assertEqual(c["seniority"], "Director")
         # Survives re-read
         rows = partner_contacts_store.list_contacts("braze")

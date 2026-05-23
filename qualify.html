@@ -8323,7 +8323,7 @@
             </select>
           </div>
           <div class="field">
-            <label>Tier <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— strategic importance</span></label>
+            <label>Tier <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">— importance to MR (not how active)</span></label>
             <select id="ptn-c-tier">
               <option value="">—</option>
               ${(enums.tiers || []).map(t => `<option value="${escapeAttr(t)}"${t === (c.tier || '') ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}
