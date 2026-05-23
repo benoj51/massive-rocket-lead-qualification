@@ -5,6 +5,50 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0x] — 2026-05-23 — Stakeholder names: first + last, not first only
+
+Ben reported the Stakeholder Targets table showed only first names
+("Chrissina", "Rodica", "Kate", "Kelsey") instead of full names.
+
+### Root cause
+`apollo._normalise_person` did `p.get("name") or "{first} {last}"`.
+Apollo's `name` field is unreliable — for some records it contains
+just the first name. The OR short-circuited at the truthy first
+name, never reaching the full-name fallback.
+
+### Fix
+New `_resolve_person_name()` helper inverts the preference:
+1. **first_name + last_name** when both are present → wins
+2. Apollo's `name` field if it looks like a full name (has a space)
+3. Whatever first / last we do have
+4. Empty string as a last resort
+
+`_normalise_person` also now surfaces `first_name` and `last_name`
+separately on every stakeholder dict — useful if anything downstream
+wants to render them differently later.
+
+### What you need to do
+- **Going forward**: every new lead you qualify will get full names
+  in the stakeholder table.
+- **For leads already qualified**: the saved stakeholder names are
+  stuck with just the first name. To refresh them, re-qualify the
+  lead (top of the Qualify view → enter the company name + URL →
+  Save lead again). Or edit each contact's name in the lead drawer.
+
+### Tests
+- 534 total (+6). `tests/test_apollo_name_resolution.py` covers:
+  - The exact failing case (Apollo `name="Chrissina"` +
+    first/last set → resolves to "Chrissina Rocha")
+  - `name` wins when first or last is missing AND `name` looks full
+  - Falls back to first-only when nothing else
+  - Empty input → empty string
+  - Whitespace stripped from components
+  - `_normalise_person` exposes first_name + last_name + name
+
+### Files touched
+- `apollo.py` — `_resolve_person_name` + updated `_normalise_person`
+- `tests/test_apollo_name_resolution.py` (new, 6 tests)
+
 ## [1.0.0w] — 2026-05-23 — Light-mode contrast audit (7 more sites)
 
 Systematic audit of every hardcoded colour in `qualify.html` that

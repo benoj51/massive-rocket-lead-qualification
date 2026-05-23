@@ -193,9 +193,18 @@ def _normalise_organization(raw: dict) -> dict:
 
 
 def _normalise_person(p: dict) -> dict:
+    # v1.0.0x: prefer constructing the full name from first_name + last_name
+    # when both are present. Apollo's `name` field is unreliable — for
+    # some records it only contains the first name, which leaves the
+    # stakeholder table showing "Chrissina" instead of "Chrissina Rocha".
+    # Fall back to `name` if either component is missing, then to
+    # whatever scraps remain.
+    name = _resolve_person_name(p)
     return {
         "apollo_id": p.get("id"),
-        "name": p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+        "name": name,
+        "first_name": (p.get("first_name") or "").strip() or None,
+        "last_name":  (p.get("last_name") or "").strip() or None,
         "title": p.get("title"),
         "seniority": p.get("seniority"),
         "linkedin_url": p.get("linkedin_url"),
@@ -206,6 +215,25 @@ def _normalise_person(p: dict) -> dict:
         "departments": p.get("departments") or [],
         "functions": p.get("functions") or [],
     }
+
+
+def _resolve_person_name(p: dict) -> str:
+    """Return the best available full name. Prefers first + last when
+    both present; otherwise prefers Apollo's `name` field; otherwise
+    whichever single component exists. Always returns a stripped str
+    (may be empty)."""
+    first = (p.get("first_name") or "").strip()
+    last  = (p.get("last_name") or "").strip()
+    if first and last:
+        return f"{first} {last}"
+    apollo_name = (p.get("name") or "").strip()
+    # If Apollo's `name` looks fuller than what we have, use it.
+    if apollo_name and " " in apollo_name:
+        return apollo_name
+    # Otherwise pick whichever single piece is longest / non-empty.
+    if first or last:
+        return f"{first} {last}".strip()
+    return apollo_name
 
 
 def enrich_organization(domain_or_url: str, cfg: ApolloConfig | None = None) -> dict:
