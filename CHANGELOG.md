@@ -5,6 +5,100 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ah] — 2026-05-23 — Personalised Home view as the default landing
+
+Ben asked: "Personalised Dashboard based on their role should be the
+first page the user sees when opening up the [app]."
+
+### The Home view
+
+New default landing surface (Home nav tab, leftmost). Shows:
+- **Time-of-day greeting** ("Good morning, Ben") + role + region
+- **5 personal KPIs** (last 30 days): touches you logged, partner
+  contacts you own, your overdue contacts (red-tinted if >0), your
+  active leads, team-wide cadence compliance %
+- **Your overdue contacts**: top 5 partner contacts on your book that
+  have slipped past cadence. Each row links to the partner detail.
+- **Your active leads**: top 5 leads you own (sorted by recent
+  activity). Each row opens the lead drawer.
+- **Team snapshot card**: 4 team-wide stats so a single number
+  comparison (your touches vs team touches) is one glance away. Link
+  to the full Dashboard view.
+- **Role-aware extra card**:
+  - CEO / Director of Growth → Executive view (team touches /
+    active leads / team overdue)
+  - Marketing roles → Marketing view (new leads / qualified count /
+    in-pipeline)
+  - All other roles → no extra card (the personal stats are the view)
+
+### Profile picker
+
+No per-user auth in the platform today, so we identify the user via
+a localStorage profile picker:
+- **First load** → modal lists all 12 MR owners (from
+  `mr_owners.list_owners`) with role + region. Pick yours → saved
+  to `localStorage.mr-profile` → Home renders.
+- **Subsequent loads** → reads the saved profile and skips the
+  picker. Home loads directly.
+- **"Switch profile"** button in the Home greeting card re-opens
+  the picker so you can switch (or shadow another role for testing).
+- Picker uses the same modal infrastructure as the global search
+  (`.doc-preview-overlay` + `.doc-preview-modal`).
+
+### New endpoint
+
+`GET /api/home?owner=<name>` — wraps the existing dashboard
+aggregator with owner-scoped KPIs + computed lists. Returns:
+```
+{
+  owner: { name, role, region, email },
+  kpis: { touches_30d, partner_contacts_owned,
+          partner_contacts_overdue, leads_owned, leads_active },
+  overdue_contacts: [ top 5, sorted by most overdue ],
+  active_leads:     [ top 5, sorted by recent activity ],
+  team_snapshot:    { touches, active_contacts, overdue, compliance_pct },
+  role_extras:      { exec?, marketing? }
+}
+```
+
+400 if `owner` query param missing; 404 if owner name doesn't
+resolve to a known MR person; 200 with empty leads if Notion is
+down (partner-side stats still come through).
+
+### Role detection
+
+`role_extras` is keyword-matched against the owner's `role` string
+so a label rename ("AE → AM") doesn't break this:
+- `"ceo"` or `"director of growth"` in role → `exec` block
+- `"marketing"` in role → `marketing` block
+- Otherwise → no extras (sales-side default applies)
+
+### Files touched
+- `server.py` — new `/api/home` endpoint
+- `qualify.html` — Home view markup, profile-picker modal, all the
+  Home JS (`ensureProfileSelected`, `loadHome`, `_renderHome`,
+  `reopenProfilePicker`), nav button + init wiring
+- `tests/test_home.py` (new, 12 tests)
+
+### Tests
+- 580 total (+12). Covers: 400/404 errors, full shape, per-owner
+  KPI scoping, top-overdue ordering, lead filter excludes
+  disqualified, role-extras gating (CEO + Director both get exec;
+  Jamie + Lea both get marketing; AM gets neither), graceful
+  degradation when Notion is unreachable.
+
+### What you'll see
+
+Open the app:
+1. **First time ever**: modal appears — "Who are you?" — pick from
+   the 12 names with role + region tooltips. Saved to localStorage.
+2. **Every subsequent visit**: Home loads instantly with your
+   personal book — greeting at the top, your KPIs across the row,
+   your overdue contacts on the left, your active leads on the
+   right, team-wide snapshot at the bottom for comparison.
+3. **Switch profile** in the greeting card if you ever want to see
+   the platform through a teammate's lens (or for testing).
+
 ## [1.0.0ag] — 2026-05-23 — Settings panel: chip-list editor, not textareas
 
 Ben pointed out that the v1.0.0ac settings panel — seven monospace

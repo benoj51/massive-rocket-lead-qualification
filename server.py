@@ -2892,6 +2892,162 @@ def api_admin_seed_command_centre():
         return jsonify({"error": str(e)}), 500
 
 
+# v1.0.0ah: Personal Home endpoint -----------------------------------------
+# Powers the new Home view — the role-aware landing page each user
+# sees first. Wraps the dashboard aggregator with owner-scoped KPIs +
+# a few extras tuned to who's looking.
+
+@app.route("/api/home", methods=["GET"])
+def api_home():
+    """Personal-book snapshot for the named MR owner.
+
+    Query: owner (required) — the MR owner's name. Returns:
+      - owner: { name, role, region, email }
+      - kpis: { touches_30d, partner_contacts_owned,
+                partner_contacts_overdue, leads_active, leads_total }
+      - overdue_contacts: top 5 partner contacts owned + overdue
+      - active_leads: top 5 leads owned (by recency)
+      - team_snapshot: small team-aggregated block for context
+      - role_extras: role-specific extras (e.g. marketing gets
+        new_leads_week)
+    """
+    import dashboard
+    import mr_owners
+
+    owner_name = (request.args.get("owner") or "").strip()
+    if not owner_name:
+        return jsonify({"error": "owner query param required"}), 400
+    owner = mr_owners.get_owner(owner_name)
+    if owner is None:
+        return jsonify({"error": f"unknown owner: {owner_name}"}), 404
+
+    # Pull pipeline once — used for both the owner-scoped view + the
+    # team snapshot. Best-effort if Notion is down.
+    pipeline_rows: list[dict] = []
+    try:
+        pipeline_rows = NotionSync().list_pipeline(limit=500)
+    except Exception as e:
+        log.warning("Home: pipeline fetch failed (continuing): %s", e)
+
+    # Owner-scoped dashboard payload (30-day window — matches Dashboard
+    # default).
+    scoped = dashboard.build_dashboard(
+        window_days=30,
+        owner_filter=owner_name,
+        pipeline_rows=pipeline_rows,
+    )
+    owner_bucket = next(
+        (b for b in scoped["by_owner"] if b["name"] == owner_name),
+        None,
+    )
+
+    # Overdue partner contacts owned by this user — sorted by most
+    # days overdue first so the top 5 are the worst offenders.
+    overdue_owned = [
+        partner_contacts_store.annotate_touch_state(dict(c))
+        for c in partner_contacts_store.list_all_contacts()
+        if (c.get("mr_owner") or "").lower() == owner_name.lower()
+        and (c.get("status") or "active") == "active"
+    ]
+    overdue_owned = [c for c in overdue_owned if c.get("overdue")]
+    overdue_owned.sort(key=lambda c: c.get("days_until_due") or 0)
+    # Enrich with partner name for the click-through label.
+    partner_name_by_id = {p["id"]: p["name"] for p in partners_store.list_partners()}
+    overdue_top = [{
+        "id":          c.get("id"),
+        "name":        c.get("name"),
+        "title":       c.get("title"),
+        "partner_id":  c.get("partner_id"),
+        "partner_name": partner_name_by_id.get(c.get("partner_id"), c.get("partner_id")),
+        "days_overdue": abs(c.get("days_until_due") or 0),
+        "cadence_days": c.get("cadence_days"),
+        "last_touched_at": c.get("last_touched_at"),
+    } for c in overdue_owned[:5]]
+
+    # Active leads owned by this user — last_edited descending so the
+    # freshest activity surfaces first.
+    leads_owned = [
+        r for r in pipeline_rows
+        if (r.get("owner") or "").lower() == owner_name.lower()
+        and (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost"}
+    ]
+    leads_owned.sort(key=lambda r: r.get("last_edited") or "", reverse=True)
+    active_leads_top = [{
+        "id":            r.get("id"),
+        "company":       r.get("company"),
+        "status":        r.get("status"),
+        "sales_stage":   r.get("sales_stage"),
+        "icp_normalised": r.get("icp_normalised"),
+        "next_steps":    (r.get("next_steps") or "").split("\n")[0][:120],
+        "last_edited":   r.get("last_edited"),
+    } for r in leads_owned[:5]]
+
+    # Team snapshot — un-scoped totals across the same window so a
+    # user can compare their book vs the team.
+    team = dashboard.build_dashboard(
+        window_days=30,
+        owner_filter=None,
+        pipeline_rows=pipeline_rows,
+    )
+    team_snapshot = {
+        "touches":            team["totals"]["touches"],
+        "active_contacts":    team["coverage"]["active_contacts"],
+        "overdue":            team["coverage"]["overdue"],
+        "compliance_pct":     team["coverage"]["compliance_pct"],
+    }
+
+    # Role-aware extras — small block tailored to who's looking. Roles
+    # bucketed by keyword match against the owner.role string so a
+    # rename ("AE → AM") doesn't break this.
+    role_lower = (owner.get("role") or "").lower()
+    role_extras: dict = {}
+    if "ceo" in role_lower or "director of growth" in role_lower:
+        # Exec lens: pipeline coverage, team activity totals.
+        role_extras["exec"] = {
+            "team_touches_30d": team["totals"]["touches"],
+            "team_active_leads_owned": sum(
+                b.get("leads_active", 0) for b in team["by_owner"]
+            ),
+            "team_overdue_contacts": team["coverage"]["overdue"],
+        }
+    elif "marketing" in role_lower:
+        # Marketing lens: how many new leads this window, qualified
+        # rate. new_leads here uses the same proxy as the team
+        # dashboard.
+        role_extras["marketing"] = {
+            "new_leads_30d": team["totals"]["new_leads"],
+            "qualified_count": sum(
+                1 for r in pipeline_rows
+                if (r.get("status") or "") == "Qualified"
+            ),
+            "total_in_pipeline": sum(
+                1 for r in pipeline_rows
+                if (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost"}
+            ),
+        }
+
+    return jsonify({
+        "owner": {
+            "name":   owner["name"],
+            "role":   owner["role"],
+            "region": owner["region"],
+            "email":  owner["email"],
+        },
+        "kpis": {
+            "touches_30d":              owner_bucket["touches"] if owner_bucket else 0,
+            "partner_contacts_owned":   owner_bucket["partner_contacts"] if owner_bucket else 0,
+            "partner_contacts_overdue": owner_bucket["partner_contacts_overdue"] if owner_bucket else 0,
+            "leads_owned":              owner_bucket["leads_owned"] if owner_bucket else 0,
+            "leads_active":             owner_bucket["leads_active"] if owner_bucket else 0,
+        },
+        "overdue_contacts": overdue_top,
+        "active_leads":     active_leads_top,
+        "team_snapshot":    team_snapshot,
+        "role_extras":      role_extras,
+        "generated_at":     team["generated_at"],
+    })
+
+
 # v1.0.0t: Dashboard endpoint ----------------------------------------------
 
 @app.route("/api/dashboard", methods=["GET"])

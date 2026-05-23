@@ -851,7 +851,8 @@
 <header class="top">
   <div class="brand"><span class="dot"></span> MR · Lead Qualification</div>
   <nav>
-    <button id="nav-qualify" class="active" type="button">Qualify Lead</button>
+    <button id="nav-home" class="active" type="button">Home</button>
+    <button id="nav-qualify" type="button">Qualify Lead</button>
     <button id="nav-pipeline" type="button">Pipeline</button>
     <button id="nav-forecast" type="button"><span data-icon="chart-line"></span>Forecast</button>
     <button id="nav-dashboard" type="button"><span data-icon="chart-bar"></span>Dashboard</button>
@@ -871,7 +872,47 @@
 
 <main>
   <!-- QUALIFY VIEW ============================================= -->
-  <section id="view-qualify" class="view active">
+  <!-- HOME VIEW (v1.0.0ah) — personalised landing page ====== -->
+  <section id="view-home" class="view active">
+    <div class="card" id="home-greeting-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+        <div>
+          <h2 id="home-greeting" style="margin:0;">Welcome back</h2>
+          <div class="muted" id="home-role-sub" style="font-size:12px;margin-top:4px;"></div>
+        </div>
+        <div class="btn-row">
+          <button id="home-switch-profile" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">Switch profile</button>
+          <button id="home-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">Refresh</button>
+        </div>
+      </div>
+    </div>
+    <div id="home-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div class="card" id="home-overdue-card">
+        <h3 style="margin:0 0 4px;font-size:14px;">Your overdue contacts</h3>
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Partner contacts on your book that have slipped past cadence. Top 5 shown.</div>
+        <div id="home-overdue-list">Loading…</div>
+      </div>
+      <div class="card" id="home-leads-card">
+        <h3 style="margin:0 0 4px;font-size:14px;">Your active leads</h3>
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Leads you own, sorted by recent activity. Top 5 shown.</div>
+        <div id="home-leads-list">Loading…</div>
+      </div>
+    </div>
+    <div id="home-role-extra" style="margin-top:14px;"></div>
+    <div class="card" id="home-team-snapshot" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Team snapshot</h3>
+          <div class="muted" style="font-size:11px;margin-top:2px;">Last 30 days · context for your personal numbers above.</div>
+        </div>
+        <button id="home-open-dashboard" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">Open full Dashboard →</button>
+      </div>
+      <div id="home-team-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;"></div>
+    </div>
+  </section>
+
+  <section id="view-qualify" class="view">
 
     <div class="card">
       <h2>1 · Input</h2>
@@ -1512,6 +1553,24 @@
     </header>
     <div class="doc-preview-body">
       <iframe id="doc-preview-iframe" title="Document preview" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- PROFILE PICKER MODAL (v1.0.0ah) ========================== -->
+<!-- Shown on first load (no localStorage profile saved) and re-openable
+     via the "Switch profile" button in the Home view. -->
+<div id="profile-picker-overlay" class="doc-preview-overlay" aria-hidden="true">
+  <div class="doc-preview-modal" role="dialog" aria-modal="true"
+       style="width:min(560px, 100%);height:auto;max-height:80vh;">
+    <header class="doc-preview-header">
+      <div style="flex:1;min-width:0;">
+        <div class="doc-preview-title">Who are you?</div>
+        <div class="doc-preview-subtitle">Pick your profile to personalise the dashboard. You can switch any time.</div>
+      </div>
+    </header>
+    <div style="padding:18px 20px;background:var(--surface);overflow:auto;">
+      <div id="profile-picker-list" class="muted" style="font-size:12px;">Loading roster…</div>
     </div>
   </div>
 </div>
@@ -6977,6 +7036,10 @@
     populatePartnerSourceSelect('#qf-new-note-source');
     const qfAddBtn = document.getElementById('qf-add-note');
     if (qfAddBtn) qfAddBtn.addEventListener('click', _qfBufferNote);
+    // v1.0.0ah: ensure we know who the user is, then fire the Home
+    // load. The picker modal appears on first ever visit; subsequent
+    // visits pull from localStorage and skip straight to Home.
+    ensureProfileSelected().then(() => { if (homeState.profile) loadHome(); });
     // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
     // here we sync its icon to the current theme + wire click to flip.
     const _themeBtn = $('#theme-toggle');
@@ -6996,6 +7059,18 @@
         _syncThemeIcon();
       });
     }
+    // v1.0.0ah: Home view nav + buttons. Default landing surface.
+    $('#nav-home').addEventListener('click', () => { switchView('home'); loadHome(); });
+    const homeSwitchBtn = document.getElementById('home-switch-profile');
+    if (homeSwitchBtn) homeSwitchBtn.addEventListener('click', reopenProfilePicker);
+    const homeRefreshBtn = document.getElementById('home-refresh');
+    if (homeRefreshBtn) homeRefreshBtn.addEventListener('click', loadHome);
+    const homeOpenDash = document.getElementById('home-open-dashboard');
+    if (homeOpenDash) homeOpenDash.addEventListener('click', () => {
+      switchView('dashboard');
+      loadDashboard();
+    });
+
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
@@ -7300,6 +7375,228 @@
   //  Dashboard view (v1.0.0t) — manager surface
   // =============================================================
   const dashboardState = { data: null, window: 30, owner: '' };
+
+  // =============================================================
+  //  Home view (v1.0.0ah) — personalised landing page per MR owner
+  // =============================================================
+  const PROFILE_STORAGE_KEY = 'mr-profile';
+  const homeState = { profile: null, data: null };
+
+  function _readSavedProfile() {
+    try {
+      const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  }
+
+  function _saveProfile(profile) {
+    try {
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    } catch (_) { /* localStorage disabled — pickers stays per-session */ }
+  }
+
+  async function ensureProfileSelected() {
+    let p = _readSavedProfile();
+    if (p && p.name) {
+      homeState.profile = p;
+      return p;
+    }
+    // No saved profile — show the picker, await user choice.
+    const owners = await loadMrOwners();
+    return new Promise((resolve) => {
+      _showProfilePicker(owners, (selected) => {
+        _saveProfile(selected);
+        homeState.profile = selected;
+        resolve(selected);
+      });
+    });
+  }
+
+  function _showProfilePicker(owners, onPick) {
+    const overlay = $('#profile-picker-overlay');
+    const list = $('#profile-picker-list');
+    if (!overlay || !list) return;
+    list.innerHTML = (owners || []).map(o => `
+      <button type="button" data-pick-owner="${escapeAttr(o.name)}"
+              style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;text-align:left;cursor:pointer;transition:background .15s,border-color .15s;color:var(--text);"
+              onmouseover="this.style.borderColor='var(--accent)';this.style.background='var(--input-focus-bg)';"
+              onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface-2)';">
+        <div>
+          <div style="font-weight:600;font-size:13px;">${escapeHtml(o.name)}</div>
+          <div class="muted" style="font-size:11px;margin-top:2px;">${escapeHtml(o.role || '')} · ${escapeHtml(o.region || '')}</div>
+        </div>
+        <span style="font-size:14px;color:var(--text-muted);align-self:center;">→</span>
+      </button>
+    `).join('');
+    list.querySelectorAll('[data-pick-owner]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.pickOwner;
+        const selected = owners.find(o => o.name === name);
+        if (!selected) return;
+        overlay.classList.remove('open');
+        overlay.setAttribute('aria-hidden', 'true');
+        onPick(selected);
+      });
+    });
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+
+  async function reopenProfilePicker() {
+    const owners = await loadMrOwners();
+    _showProfilePicker(owners, (selected) => {
+      _saveProfile(selected);
+      homeState.profile = selected;
+      loadHome();
+    });
+  }
+
+  async function loadHome() {
+    if (!homeState.profile) {
+      await ensureProfileSelected();
+      if (!homeState.profile) return;
+    }
+    const greet = $('#home-greeting');
+    const sub   = $('#home-role-sub');
+    const p     = homeState.profile;
+    if (greet) {
+      // Time-of-day greeting keeps it warmer than a flat "Welcome back".
+      const hr = new Date().getHours();
+      const tod = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+      greet.textContent = `${tod}, ${p.name.split(' ')[0]}`;
+    }
+    if (sub) sub.textContent = `${p.role || '—'} · ${p.region || '—'}`;
+    try {
+      const data = await jsonFetch(`/api/home?owner=${encodeURIComponent(p.name)}`);
+      homeState.data = data;
+      _renderHome(data);
+    } catch (e) {
+      $('#home-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Home failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderHome(data) {
+    const k = data.kpis || {};
+    const card = (label, value, sub, valueColor) => `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(label)}</div>
+        <div style="font-size:22px;font-weight:600;color:${valueColor || 'var(--text)'};line-height:1.1;">${escapeHtml(String(value))}</div>
+        ${sub ? `<div class="muted" style="font-size:10px;margin-top:4px;">${escapeHtml(sub)}</div>` : ''}
+      </div>
+    `;
+    const overdueColor = (k.partner_contacts_overdue || 0) > 0 ? 'var(--red)' : 'var(--text)';
+    $('#home-kpis').innerHTML = [
+      card('Touches (30d)',           k.touches_30d || 0,
+            'partner notes + lead calls you logged'),
+      card('Partner contacts owned',  k.partner_contacts_owned || 0,
+            `on your book`),
+      card('Overdue contacts',        k.partner_contacts_overdue || 0,
+            'past cadence — reach out', overdueColor),
+      card('Active leads',            k.leads_active || 0,
+            `of ${k.leads_owned || 0} total owned`),
+      card('Coverage',                `${data.team_snapshot?.compliance_pct || 0}%`,
+            'team-wide cadence — context'),
+    ].join('');
+
+    // Overdue contacts
+    const overdueList = $('#home-overdue-list');
+    const overdue = data.overdue_contacts || [];
+    if (!overdue.length) {
+      overdueList.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">Nothing overdue. You\'re in good shape.</div>';
+    } else {
+      overdueList.innerHTML = overdue.map(c => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.20);border-radius:6px;margin-bottom:6px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:13px;font-weight:500;">${escapeHtml(c.name || '—')}</div>
+            <div class="muted" style="font-size:10px;">${escapeHtml(c.title || '')} · ${escapeHtml(c.partner_name || '')}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:11px;color:var(--red);font-weight:600;">${c.days_overdue}d overdue</div>
+            <button class="btn ghost" type="button" data-home-open-partner="${escapeAttr(c.partner_id)}" style="padding:2px 8px;font-size:10px;margin-top:2px;">Open partner →</button>
+          </div>
+        </div>
+      `).join('');
+      overdueList.querySelectorAll('[data-home-open-partner]').forEach(b => {
+        b.addEventListener('click', () => {
+          switchView('partners');
+          setTimeout(() => openPartnerDetail(b.dataset.homeOpenPartner), 50);
+        });
+      });
+    }
+
+    // Active leads
+    const leadsList = $('#home-leads-list');
+    const leads = data.active_leads || [];
+    if (!leads.length) {
+      leadsList.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No active leads on your book yet.</div>';
+    } else {
+      leadsList.innerHTML = leads.map(l => {
+        const score = l.icp_normalised;
+        const cls = score >= 7 ? 'qualify_in' : (score >= 5 ? 'borderline' : 'qualify_out');
+        const scoreColor = cls === 'qualify_in' ? 'var(--green)'
+                          : cls === 'borderline' ? 'var(--yellow)' : 'var(--red)';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;"
+               data-home-open-lead="${escapeAttr(l.id)}">
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:13px;font-weight:500;">${escapeHtml(l.company || '—')}</div>
+              <div class="muted" style="font-size:10px;">${escapeHtml(l.sales_stage || l.status || '')}${l.next_steps ? ' · ' + escapeHtml(l.next_steps) : ''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="font-size:13px;font-weight:600;color:${scoreColor};font-family:var(--mono);">${score != null ? score + '/10' : '—'}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+      leadsList.querySelectorAll('[data-home-open-lead]').forEach(b => {
+        b.addEventListener('click', () => openLeadDrawer(b.dataset.homeOpenLead));
+      });
+    }
+
+    // Team snapshot
+    const ts = data.team_snapshot || {};
+    $('#home-team-grid').innerHTML = [
+      card('Team touches (30d)', ts.touches || 0, 'all owners combined'),
+      card('Active contacts',    ts.active_contacts || 0, 'across all partners'),
+      card('Overdue (team)',     ts.overdue || 0, 'partner contacts past cadence',
+            (ts.overdue || 0) > 0 ? 'var(--red)' : 'var(--text)'),
+      card('Compliance',         `${ts.compliance_pct || 0}%`, 'team cadence health',
+            (ts.compliance_pct || 0) >= 75 ? 'var(--green)'
+              : (ts.compliance_pct || 0) >= 50 ? 'var(--yellow)' : 'var(--red)'),
+    ].join('');
+
+    // Role-aware extras
+    const extras = data.role_extras || {};
+    const extraEl = $('#home-role-extra');
+    if (extras.exec) {
+      extraEl.innerHTML = `
+        <div class="card">
+          <h3 style="margin:0 0 4px;font-size:14px;">Executive view</h3>
+          <div class="muted" style="font-size:11px;margin-bottom:10px;">Org-wide rollups. Drill into Forecast or Dashboard for the breakdown.</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+            ${card('Team touches (30d)', extras.exec.team_touches_30d, 'partner + lead activity')}
+            ${card('Active leads (team)', extras.exec.team_active_leads_owned, 'owned across all AEs')}
+            ${card('Team overdue', extras.exec.team_overdue_contacts, 'partner contacts',
+                    extras.exec.team_overdue_contacts > 0 ? 'var(--red)' : 'var(--text)')}
+          </div>
+        </div>
+      `;
+    } else if (extras.marketing) {
+      extraEl.innerHTML = `
+        <div class="card">
+          <h3 style="margin:0 0 4px;font-size:14px;">Marketing view</h3>
+          <div class="muted" style="font-size:11px;margin-bottom:10px;">Lead-sourcing health. Drill into Pipeline for the qualifier filters.</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+            ${card('New leads (30d)', extras.marketing.new_leads_30d, 'edited inside window — proxy')}
+            ${card('Qualified count', extras.marketing.qualified_count, 'currently in Qualified status')}
+            ${card('In pipeline', extras.marketing.total_in_pipeline, 'active leads total')}
+          </div>
+        </div>
+      `;
+    } else {
+      extraEl.innerHTML = '';
+    }
+  }
 
   async function loadDashboard() {
     const btn = $('#db-refresh');
