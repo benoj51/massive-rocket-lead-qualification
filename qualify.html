@@ -4657,6 +4657,17 @@
         // "Qualified" + saving left the header chip stuck on the old
         // "DISQUALIFIED" text from load-time.
         refreshHeaderStatusChip(data.lead?.status);
+        // v1.0.0aa: same fix for the drawer title + meta. Editing the
+        // Company field used to look broken because the title (set
+        // once on load) never refreshed even though the PATCH had
+        // saved the new name to Notion. Now they always reflect the
+        // server-confirmed values after a successful save.
+        const titleEl = $('#ld-title');
+        if (titleEl) titleEl.textContent = data.lead?.company || '(no name)';
+        const metaEl = $('#ld-meta');
+        if (metaEl && data.lead?.last_edited) {
+          metaEl.textContent = `Last edited ${new Date(data.lead.last_edited).toLocaleString()}`;
+        }
         summary.push(`${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`);
         // v0.10.0p: server re-scores when scoring-relevant fields change.
         // Reflect the new ICP in the drawer header pill + add a toast.

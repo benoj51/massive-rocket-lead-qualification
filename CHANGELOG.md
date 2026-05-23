@@ -5,6 +5,42 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0aa] — 2026-05-23 — Editable company name actually reflects after save
+
+Ben reported the company name couldn't be edited. Investigation: the
+input field exists (`data-ld="company"`), the change is collected by
+`collectLeadEdits`, and the PATCH endpoint writes
+`props["Company"] = {"title": ...}` to Notion correctly. End-to-end
+the data DOES save.
+
+### Real bug
+`#ld-title` was set once on load and never refreshed after save.
+Editing "Shell UK" → "Shell EMEA" → Save = silently succeeds; title
+at the top of the drawer keeps showing "Shell UK", which reads as
+"my edit was ignored." Same pattern as the status-chip bug from
+v1.0.0h.
+
+### Fix
+Mirror the v1.0.0h status-chip refresh pattern. After every successful
+PATCH, refresh:
+- `#ld-title` from `data.lead.company` (or `(no name)` if cleared)
+- `#ld-meta` from `data.lead.last_edited`
+
+No data model changes — purely a UI sync. Subsequent pipeline refresh
+already updates the row name in the table; that path was unchanged
+and worked already.
+
+### Verified safe
+- The Notion page_id is immutable; renaming a lead doesn't break
+  the cache files (they're keyed by Notion UUID, not company slug)
+- `drawerState.original = data.lead` was already happening; downstream
+  code reading `drawerState.original.company` (LinkedIn search helper,
+  call POST `company_name` field) now sees the new value
+- 550 tests still pass — JS-only change, no Python contract touched
+
+### Files touched
+- `qualify.html` — 8 lines in saveLead's success path
+
 ## [1.0.0z] — 2026-05-23 — Partner-sourced notes + initial qualification notes
 
 Ben asked: "record notes from a partner (select which partner) — roll
