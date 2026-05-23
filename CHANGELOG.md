@@ -5,6 +5,41 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bd] — 2026-05-23 — Pipeline filter presets
+
+v1.0.0ay shipped filter presets for partner contacts. The Pipeline
+has its own filter combo (status × source × sourced-for × group ×
+engagement-band × view-mode × sort). Same store, just scope=
+"pipeline".
+
+### Added
+
+- **Preset picker row** above the Pipeline filter chips: dropdown
+  + Save current + Delete. Hidden until a profile is set. Lazy-
+  inits on first nav to Pipeline.
+- **`_savePipelinePreset`** snapshots only the filter slice of
+  `state.pipeline` (filter, sourceFilter, sourcedForFilter,
+  groupFilter, engagementFilter, viewMode, sort) — runtime fields
+  like `rows` and `engagementScores` are deliberately excluded.
+- **`_syncPipelineFiltersFromState`** mirror that hydrates every
+  on-screen filter widget (chips, dropdowns, view-mode toggle)
+  from `state.pipeline` after a preset apply. Otherwise the data
+  would change but the widgets would still show the previous
+  selection.
+
+### Server
+
+No change. The v1.0.0ay store accepts arbitrary `scope` values; the
+endpoints already route by it.
+
+### Why share the store with partner contacts
+
+The two surfaces have different filter shapes but identical store
+needs: per-user, named, opaque-payload, scope-keyed. Sharing the
+store means one place to evolve (notifications when a preset is
+shared, "favourite" flag, sort presets, etc.). The scope discriminator
+keeps the two surfaces' presets cleanly separated.
+
 ## [1.0.0bc] — 2026-05-23 — Engagement trends (deltas, arrows, drop notifications)
 
 A single engagement score (v1.0.0at) tells you the state today. A

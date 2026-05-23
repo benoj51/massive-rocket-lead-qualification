@@ -1297,6 +1297,17 @@
   <section id="view-pipeline" class="view">
     <div class="card">
       <h2>Pipeline</h2>
+      <!-- v1.0.0bd: saved-preset row for the Pipeline. Reuses the
+           v1.0.0ay filter_presets_store with scope="pipeline".
+           Hidden until a profile is set. -->
+      <div id="pipe-preset-row" style="display:none;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;">Preset:</span>
+        <select id="pipe-preset-picker" style="padding:5px 10px;font-size:12px;min-width:220px;">
+          <option value="">— pick a saved view —</option>
+        </select>
+        <button class="btn ghost" id="pipe-preset-save" type="button" style="padding:5px 12px;font-size:11px;">Save current</button>
+        <button class="btn ghost" id="pipe-preset-delete" type="button" style="padding:5px 12px;font-size:11px;display:none;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+      </div>
       <div class="filters" id="pipeline-filters">
         <button class="chip active" data-filter="all" type="button">All</button>
         <button class="chip" data-filter="qualify_in" type="button">Qualified</button>
@@ -7851,7 +7862,12 @@
     });
 
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
-    $('#nav-pipeline').addEventListener('click', () => switchView('pipeline'));
+    $('#nav-pipeline').addEventListener('click', () => {
+      switchView('pipeline');
+      // v1.0.0bd: lazy-init the pipeline preset picker the first
+      // time the user opens the view.
+      _initPipelinePresets();
+    });
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
     // v1.0.0t: Dashboard view wiring.
     $('#nav-dashboard').addEventListener('click', () => { switchView('dashboard'); loadDashboard(); });
@@ -9509,10 +9525,18 @@
     partnerId: null,      // scope-guard so a stale render doesn't cross partners
   };
 
-  // v1.0.0ay: saved-filter-preset state.
+  // v1.0.0ay: saved-filter-preset state (partner contacts scope).
   const presetsState = {
     items: [],            // [{id, name, filters, ...}]
     selectedId: null,     // currently-applied preset, or null
+  };
+
+  // v1.0.0bd: separate state for the Pipeline scope so the two
+  // dropdowns don't fight each other.
+  const pipelinePresetsState = {
+    items: [],
+    selectedId: null,
+    wired: false,
   };
 
   async function initPartners() {
@@ -10226,6 +10250,152 @@
     } catch (e) {
       const msg = e.body?.error || e.message;
       toast(`Save failed: ${msg}`, 'error');
+    }
+  }
+
+  // =============================================================
+  //  Pipeline saved filter presets (v1.0.0bd)
+  // =============================================================
+  // Same store as partner-contacts presets (filter_presets_store)
+  // but scope="pipeline". State + handlers are separate so the two
+  // dropdowns are independent.
+
+  async function _initPipelinePresets() {
+    const row = $('#pipe-preset-row');
+    if (!row) return;
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) { row.style.display = 'none'; return; }
+    row.style.display = 'flex';
+    try {
+      const data = await jsonFetch(
+        `/api/filter-presets?user=${encodeURIComponent(profile.name)}&scope=pipeline`);
+      pipelinePresetsState.items = data.items || [];
+    } catch (e) {
+      console.warn('pipeline preset fetch failed', e);
+      pipelinePresetsState.items = [];
+    }
+    _renderPipelinePresetPicker();
+    if (!pipelinePresetsState.wired) {
+      pipelinePresetsState.wired = true;
+      $('#pipe-preset-picker').addEventListener('change', (e) => {
+        _applyPipelinePreset(e.target.value || null);
+      });
+      $('#pipe-preset-save').addEventListener('click', _savePipelinePreset);
+      $('#pipe-preset-delete').addEventListener('click', _deletePipelinePreset);
+    }
+  }
+
+  function _renderPipelinePresetPicker() {
+    const sel = $('#pipe-preset-picker');
+    const del = $('#pipe-preset-delete');
+    if (!sel) return;
+    const cur = pipelinePresetsState.selectedId || '';
+    sel.innerHTML = '<option value="">— pick a saved view —</option>' +
+      pipelinePresetsState.items.map(p =>
+        `<option value="${escapeAttr(p.id)}"${p.id === cur ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+      ).join('');
+    if (del) del.style.display = cur ? 'inline-flex' : 'none';
+  }
+
+  function _applyPipelinePreset(presetId) {
+    pipelinePresetsState.selectedId = presetId || null;
+    if (presetId) {
+      const preset = pipelinePresetsState.items.find(p => p.id === presetId);
+      if (preset && preset.filters) {
+        // Hydrate the pipeline filter state. Object.assign so future
+        // filter keys inherit the preset behaviour automatically.
+        Object.assign(state.pipeline, preset.filters);
+        // Sync the on-screen filter widgets to the new state.
+        _syncPipelineFiltersFromState();
+      }
+    }
+    renderPipeline();
+    _renderPipelinePresetPicker();
+  }
+
+  // v1.0.0bd: push state.pipeline values back into the visible filter
+  // widgets after a preset apply (or any other state-driven render).
+  function _syncPipelineFiltersFromState() {
+    const f = state.pipeline;
+    // Status chip group.
+    document.querySelectorAll('#pipeline-filters [data-filter]').forEach(c => {
+      c.classList.toggle('active', c.dataset.filter === f.filter);
+    });
+    const sourceSel = $('#pipe-filter-source');
+    if (sourceSel) sourceSel.value = f.sourceFilter || '';
+    const sfSel = $('#pipe-filter-sourced-for');
+    if (sfSel) sfSel.value = f.sourcedForFilter || '';
+    const grpSel = $('#pipe-filter-group');
+    if (grpSel) grpSel.value = f.groupFilter || '';
+    const engSel = $('#pipe-filter-engagement');
+    if (engSel) engSel.value = f.engagementFilter || '';
+    // View-mode toggle.
+    document.querySelectorAll('[data-view-mode]').forEach(b => {
+      b.classList.toggle('active', b.dataset.viewMode === f.viewMode);
+    });
+  }
+
+  async function _savePipelinePreset() {
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) {
+      toast('Pick your profile first (Home → Switch profile)', 'error');
+      return;
+    }
+    const name = window.prompt(
+      'Name this Pipeline preset (e.g. "Active Qualified · Strong engagement"):', '');
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    // Snapshot only the filter-relevant slice of state.pipeline so we
+    // don't persist runtime junk (rows array, score cache, etc).
+    const filters = {
+      filter:            state.pipeline.filter,
+      sourceFilter:      state.pipeline.sourceFilter,
+      sourcedForFilter:  state.pipeline.sourcedForFilter,
+      groupFilter:       state.pipeline.groupFilter,
+      engagementFilter:  state.pipeline.engagementFilter,
+      viewMode:          state.pipeline.viewMode,
+      sort:              state.pipeline.sort,
+    };
+    try {
+      const data = await jsonFetch('/api/filter-presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: profile.name,
+          name: trimmed,
+          scope: 'pipeline',
+          filters,
+        }),
+      });
+      pipelinePresetsState.items.push(data.preset);
+      pipelinePresetsState.items.sort((a, b) =>
+        (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
+      pipelinePresetsState.selectedId = data.preset.id;
+      _renderPipelinePresetPicker();
+      toast(`Saved "${trimmed}"`, 'success');
+    } catch (e) {
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _deletePipelinePreset() {
+    const profile = homeState.profile || _readSavedProfile();
+    if (!profile?.name) return;
+    const id = pipelinePresetsState.selectedId;
+    if (!id) return;
+    const preset = pipelinePresetsState.items.find(p => p.id === id);
+    if (!window.confirm(`Delete preset "${preset?.name || id}"?`)) return;
+    try {
+      await jsonFetch(
+        `/api/filter-presets/${encodeURIComponent(id)}?user=${encodeURIComponent(profile.name)}`,
+        { method: 'DELETE' });
+      pipelinePresetsState.items = pipelinePresetsState.items.filter(p => p.id !== id);
+      pipelinePresetsState.selectedId = null;
+      _renderPipelinePresetPicker();
+      toast('Preset deleted', 'success');
+    } catch (e) {
+      toast(`Delete failed: ${e.body?.error || e.message}`, 'error');
     }
   }
 
