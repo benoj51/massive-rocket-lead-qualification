@@ -3725,7 +3725,11 @@
     const el = $('#ld-contacts-list');
     try {
       const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`);
-      const contacts = data.contacts || [];
+      // v1.0.0ba: was `const contacts` — broken in v1.0.0as when the
+      // scope-filter rewrite added `contacts = scoped;` later in this
+      // function (TypeError: Assignment to constant variable). Use
+      // `let` so the reassignment works; the surface API is unchanged.
+      let contacts = data.contacts || [];
       accountViewState.cachedByLeadId[leadId] = contacts;
       // Section count badge
       const cnt = $('#ld-contacts-count');
