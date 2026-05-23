@@ -49,6 +49,7 @@ import project_preview
 import state_backup
 import contacts_store
 import criteria_store
+import engagement
 import hubspot_sync
 import lead_summary_store
 import notifications_store
@@ -557,6 +558,48 @@ def api_lead_engagement_timeline(lead_id: str):
             "contacts_total": len(contacts),
         },
     })
+
+
+# v1.0.0at: account engagement score --------------------------------------
+# Pulls the contact roster + every note + every call for the lead, runs
+# them through engagement.compute_engagement_score, returns the score
+# + band + signals breakdown so the UI can render "why this number" on
+# hover. Same shape as the engagement-timeline stats so the surfaces
+# stay consistent.
+
+@app.route("/api/lead/<lead_id>/engagement-score", methods=["GET"])
+def api_lead_engagement_score(lead_id: str):
+    """Compute the engagement score for an account.
+
+    Cheap: one contacts read + one calls read + per-contact note reads.
+    Result is uncached — engagement changes minute-to-minute (a new
+    note shifts the score immediately), and the per-call cost is
+    already <100ms for typical accounts.
+    """
+    contacts = [contacts_store.annotate_touch_state(dict(c))
+                for c in contacts_store.list_contacts(lead_id)]
+    # Gather every engagement event's timestamp for the activity-volume
+    # signal. We don't need content — just dates.
+    event_isos: list[str] = []
+    for c in contacts:
+        try:
+            for n in lead_contact_notes_store.list_notes(lead_id, c["id"]):
+                if n.get("created_at"):
+                    event_isos.append(n["created_at"])
+        except Exception:
+            continue
+    try:
+        for k in calls_store.list_calls(lead_id):
+            if k.get("created_at"):
+                event_isos.append(k["created_at"])
+    except Exception:
+        pass
+
+    result = engagement.compute_engagement_score(
+        contacts=contacts,
+        recent_event_isos=event_isos,
+    )
+    return jsonify(result)
 
 
 # v1.0.0p: incumbent + previous agencies per lead -----------------------------

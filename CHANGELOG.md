@@ -5,6 +5,72 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0at] — 2026-05-23 — Account engagement score
+
+ICP score tells you how good a lead is intrinsically (revenue, employees,
+tech stack fit). Engagement score tells you how well we're actually
+working it. Same 0–100 scale so AEs read both at a glance, side by
+side in the drawer header.
+
+### Added
+
+- **`engagement.py`** — pure-function scoring module. Single entry
+  point: `compute_engagement_score(contacts, recent_event_isos,
+  today_iso)`. Returns `{score, band, signals}`. No I/O — caller
+  handles the data pull. The formula breakdown lives in the module
+  docstring so a future weight tweak forces a deliberate update.
+
+### Scoring formula
+
+Five signals sum to 100, clamped [0, 100]:
+
+| Signal | Max | Notes |
+|---|---|---|
+| **Coverage** | 30 | % of *active* contacts touched at all (left/dormant excluded) |
+| **Recency** | 30 | days since most recent touch: 0d=30, 7d=25, 14d=20, 30d=15, 60d=8, 90d+=0 |
+| **Activity** | 25 | notes+calls in last 30d (linear, caps at 10 events) |
+| **Overdue penalty** | -15 | -5 per overdue contact, capped |
+| **Key bonus** | 10 | +10 if any `is_primary` contact has been touched in last 30d |
+
+Bands (give the UI a colour without re-deciding):
+- ≥75 **strong** (green) · ≥50 **warm** (yellow) · ≥25 **weak** (orange) · <25 **cold** (red)
+
+### Added (server + UI)
+
+- **`GET /api/lead/<id>/engagement-score`** — pulls contacts + every
+  per-contact note + every lead call, runs through the scorer,
+  returns score + band + signals. Cheap (typical account: <100ms
+  including the I/O fan-out).
+- **Engagement chip in the lead drawer header**, sibling of the
+  ICP pill. Renders as `ENG 75/100` with the same `qualify_in /
+  borderline / qualify_out` colour classes the ICP pill uses (no
+  new CSS). Multi-line `title=` tooltip explains the breakdown:
+  *"Coverage: 80% of active contacts touched (24 pts) · Recency: 5d
+  ago (25 pts) · Activity: 7 events in last 30d (18 pts) · Key
+  contact touched recently (+10 pts)"*. Fires after the first paint
+  so it doesn't block the drawer.
+
+### Tests
+
+- **`tests/test_engagement_score.py`** — 16 tests:
+  - 14 scorer unit tests: empty inputs, no-engagement zero, full
+    coverage + recency, recency band cliffs (0/7/14/30/60/90/180d
+    spot-checks), activity volume ramp + cap, old events ignored,
+    overdue penalty cap, key-contact bonus fires + skipped-when-old,
+    dormant/left contacts excluded from coverage, score clamping
+    both ways (never >100, never <0), band boundary at 75
+  - 2 endpoint tests: empty account returns the well-formed shape,
+    real seeded data (contact + note + call) lands a reasonable
+    score end-to-end
+
+### Why a separate score (not roll it into ICP)
+
+ICP and engagement answer different questions and rotate at
+different speeds. ICP is "should this deal be in our pipeline at
+all" — barely moves once captured. Engagement is "are we earning
+this deal" — shifts week-to-week as the AE works it. Mixing them
+loses both signals. Two chips, two purposes.
+
 ## [1.0.0as] — 2026-05-23 — Account engagement timeline + filter chips
 
 v1.0.0ar gave the Account view a structure (org chart) and a

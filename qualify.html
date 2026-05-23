@@ -1725,6 +1725,10 @@
       <div class="meta" id="ld-meta"></div>
       <div class="subtitle-row">
         <span class="icp-pill" id="ld-icp">—</span>
+        <!-- v1.0.0at: engagement-score chip — sibling of the ICP pill.
+             ICP = how good the lead is intrinsically; Engagement =
+             how well we're working it. Hidden until the score loads. -->
+        <span class="icp-pill" id="ld-engagement" style="display:none;" title="">—</span>
         <span class="status-chip" id="ld-status-chip" style="display:none;"></span>
         <span id="ld-group-chip"></span>
       </div>
@@ -3629,6 +3633,51 @@
     return contacts;
   }
 
+  // v1.0.0at: fetch + render the engagement score chip in the drawer
+  // header. Hidden until the first successful load; replaced in place
+  // on every drawer open. Tooltip shows the signal breakdown so the
+  // AE understands *why* the score is what it is.
+  async function loadLeadEngagementScore(leadId) {
+    const chip = $('#ld-engagement');
+    if (!chip || !leadId) return;
+    try {
+      const data = await jsonFetch(
+        `/api/lead/${encodeURIComponent(leadId)}/engagement-score`);
+      const score = data.score ?? 0;
+      const band = data.band || 'cold';
+      const sig = data.signals || {};
+      // Band → palette mapping. Re-uses the existing icp-pill classes
+      // so the chip sits visually next to ICP without extra CSS.
+      const cls =
+        band === 'strong' ? 'qualify_in' :
+        band === 'warm'   ? 'borderline' :
+        band === 'weak'   ? 'borderline' :
+                            'qualify_out';
+      chip.className = `icp-pill ${cls}`;
+      chip.textContent = `ENG ${score}/100`;
+      // Tooltip explains where the score came from. Multi-line via
+      // \n — the browser renders this inside the title attribute.
+      const lines = [
+        `Engagement: ${score}/100 (${band})`,
+        '',
+        `Coverage: ${sig.coverage_pct ?? 0}% of active contacts touched (${sig.coverage_points ?? 0} pts)`,
+        `Recency: ${sig.days_since_touch == null ? 'never touched' : sig.days_since_touch + 'd ago'} (${sig.recency_points ?? 0} pts)`,
+        `Activity: ${sig.events_30d ?? 0} events in last 30d (${sig.activity_points ?? 0} pts)`,
+      ];
+      if ((sig.overdue_count || 0) > 0) {
+        lines.push(`Overdue: ${sig.overdue_count} contacts (${sig.overdue_penalty} pts)`);
+      }
+      if (sig.key_touched_30d) {
+        lines.push(`Key contact touched recently (+${sig.key_bonus} pts)`);
+      }
+      chip.title = lines.join('\n');
+      chip.style.display = '';
+    } catch (e) {
+      // Quiet failure — engagement score is supplementary; don't toast.
+      chip.style.display = 'none';
+    }
+  }
+
   async function loadLeadContacts(leadId) {
     if (!leadId) return;
     const el = $('#ld-contacts-list');
@@ -4978,6 +5027,9 @@
       checkRestoreAvailability(pageId, lead);
       loadLeadCalls(pageId);
       loadLeadProject(pageId, lead.company);
+      // v1.0.0at: account engagement score chip — fired after the
+      // first paint so it doesn't block the header/hero rendering.
+      loadLeadEngagementScore(pageId);
       // Reset dirty state — freshly loaded data is the new baseline.
       updateDirtyState();
     } catch (e) {
