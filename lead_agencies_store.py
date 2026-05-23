@@ -47,7 +47,12 @@ _LOCK = threading.Lock()
 # Type constants — keep the UI dropdown + store validation aligned.
 TYPE_INCUMBENT = "incumbent"
 TYPE_PREVIOUS = "previous"
-AGENCY_TYPES = [TYPE_INCUMBENT, TYPE_PREVIOUS]
+# v1.0.0bb: competitive agencies extracted from call notes land as
+# `competitor` (or `previous` if AI flagged them as past providers).
+# Distinct from incumbent so the AE can tell "we're up against WPP"
+# from "they used to use WPP, switched 2 years ago".
+TYPE_COMPETITOR = "competitor"
+AGENCY_TYPES = [TYPE_INCUMBENT, TYPE_PREVIOUS, TYPE_COMPETITOR]
 
 
 class LeadAgenciesStoreError(RuntimeError):
@@ -108,9 +113,27 @@ def _normalise(lead_id: str, payload: dict[str, Any],
         "since":      (payload.get("since") or "").strip() or None,
         "until":      (payload.get("until") or "").strip() or None,
         "notes":      (payload.get("notes") or "").strip() or None,
+        # v1.0.0bb: provenance for AI-extracted agencies. Set to
+        # "call_extracted" by the auto-link path; preserved across
+        # subsequent edits so the AE can see which entries came from
+        # AI vs. manual capture.
+        "source":     (payload.get("source") or (existing or {}).get("source") or "manual").strip() or "manual",
+        "source_call_id": (payload.get("source_call_id") or (existing or {}).get("source_call_id") or None),
         "added_at":   (existing or {}).get("added_at") or _now_iso(),
         "updated_at": _now_iso(),
     }
+
+
+# v1.0.0bb: case-insensitive lookup so the auto-link doesn't add
+# "WPP" when "wpp" already exists.
+def get_by_name(lead_id: str, name: str) -> dict[str, Any] | None:
+    target = (name or "").strip().lower()
+    if not target:
+        return None
+    for r in _load_raw(lead_id):
+        if (r.get("name") or "").strip().lower() == target:
+            return r
+    return None
 
 
 # ---------------------------------------------------------------------------

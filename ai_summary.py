@@ -435,6 +435,12 @@ Schema:
   "contacts_mentioned": [
     {"name": "<full name as spoken>", "title": "<title if mentioned, else null>", "email": "<if mentioned, else null>", "role": "<prospect-side | mr-side | partner-side | unknown>"}
   ],
+  "competitive_agencies": [
+    {"name": "<agency name as spoken>", "context": "<short phrase: 'current incumbent' | 'previously evaluated' | 'pitching against MR' | 'mentioned in passing', or null>"}
+  ],
+  "tech_stack_mentioned": [
+    "<tool or platform name as spoken — e.g. 'Braze', 'Snowflake', 'Iterable', 'Segment'>"
+  ],
   "synthesised_note": "<a structured call summary in the MR Call Note format — see below>"
 }
 
@@ -453,6 +459,34 @@ CONTACTS_MENTIONED rubric:
 - Don't fabricate emails or titles. If only the name was said, leave
   title and email as null.
 - Return an empty array (not null) when no named people are mentioned.
+
+COMPETITIVE_AGENCIES rubric:
+- Capture any AGENCY mentioned that is currently doing OR has done OR
+  is pitching for marketing/CRM/data work the prospect could give to MR.
+  Examples: "they're with WPP today", "Razorfish ran their last campaign",
+  "Accenture is also pitching".
+- Only AGENCIES, not technology vendors. WPP / Razorfish / Wunderman /
+  Accenture / Deloitte / VML / R/GA = yes. Braze / Snowflake / Segment
+  = NO (those go in tech_stack_mentioned).
+- `context` is one short phrase from the rubric set above. Use the closest
+  match; pick null if you genuinely can't tell.
+- Return [] (not null) when no agencies were mentioned.
+- Don't fabricate. If the AE says "an agency in NYC" without naming
+  one, skip it.
+
+TECH_STACK_MENTIONED rubric:
+- Capture any marketing / CRM / data / analytics / mobile platform or
+  tool the prospect mentions they USE, EVALUATE, MIGRATED FROM, or PLAN
+  TO ADOPT.
+- Examples: "we run on Braze", "evaluating Iterable vs Customer.io",
+  "Snowflake is our warehouse", "moved off Salesforce Marketing Cloud".
+- Use the canonical vendor name as it's known in the industry. Strip
+  product suffixes ("Salesforce Marketing Cloud" → "Salesforce Marketing Cloud" OK,
+  but "Braze platform" → "Braze").
+- One entry per tool. Dedup case-insensitively.
+- Return [] (not null) when nothing tech-stack-y is mentioned.
+- Don't capture generic categories ("a CDP", "their analytics tool") —
+  only named tools.
 
 SCOPE_CRITERIA rubric:
 - Only fill values that are EXPLICITLY supported by the notes. Numbers and counts
@@ -655,12 +689,62 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
             "name": name, "title": title, "email": email, "role": role,
         })
 
+    # v1.0.0bb: competitive agencies — agencies the prospect is
+    # working with, has worked with, or is evaluating against MR.
+    _valid_context = {
+        "current incumbent", "previously evaluated",
+        "pitching against mr", "mentioned in passing",
+    }
+    agencies_out: list[dict[str, Any]] = []
+    seen_agency_names: set[str] = set()
+    for entry in data.get("competitive_agencies") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get("name") or "").strip()
+        if not name or name.lower() == "null":
+            continue
+        # Case-insensitive dedup within the same call's extraction.
+        key = name.lower()
+        if key in seen_agency_names:
+            continue
+        seen_agency_names.add(key)
+        context = entry.get("context")
+        if context and str(context).strip().lower() in _valid_context:
+            context = str(context).strip().lower()
+        else:
+            context = None
+        agencies_out.append({"name": name, "context": context})
+
+    # v1.0.0bb: tech stack mentions — named tools/platforms only,
+    # case-insensitively deduped.
+    tech_stack_out: list[str] = []
+    seen_tools: set[str] = set()
+    for entry in data.get("tech_stack_mentioned") or []:
+        if not entry:
+            continue
+        name = str(entry).strip()
+        if not name or name.lower() == "null":
+            continue
+        # Reject overly-generic entries that often slip through —
+        # the rubric warns against them but belt-and-braces here too.
+        if name.lower() in {"a cdp", "their cdp", "their crm",
+                              "their warehouse", "their analytics",
+                              "a platform", "a tool"}:
+            continue
+        key = name.lower()
+        if key in seen_tools:
+            continue
+        seen_tools.add(key)
+        tech_stack_out.append(name)
+
     return {
         "meddpicc": meddpicc_out,
         "project_scope": project_scope,
         "synthesised_note": synthesised_note,
         "scope_criteria": scope_criteria_out or None,
         "contacts_mentioned": contacts_mentioned_out,
+        "competitive_agencies": agencies_out,
+        "tech_stack_mentioned": tech_stack_out,
     }
 
 

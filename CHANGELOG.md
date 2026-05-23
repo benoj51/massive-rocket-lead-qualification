@@ -5,6 +5,89 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bb] — 2026-05-23 — Calls auto-extract competitive agencies + tech stack
+
+Ben: "Notes should also be able to pick up on competitive agencies or
+tech stack mentioned to be added to the respective account."
+
+Today, AI extraction from call notes captures MEDDPICC + contacts +
+scope criteria. This adds two more dimensions and auto-links them
+to the lead so the AE doesn't have to copy/paste from notes into
+fields.
+
+### Added
+
+- **Two new fields on the AI extraction schema**:
+  - `competitive_agencies: [{name, context}]` where context ∈
+    {`current incumbent`, `previously evaluated`,
+    `pitching against mr`, `mentioned in passing`}. Rubric in the
+    prompt steers the LLM to capture AGENCIES (WPP, Razorfish,
+    Wunderman, Accenture, R/GA) and explicitly NOT tech vendors.
+  - `tech_stack_mentioned: [str]` — named tools the prospect uses,
+    evaluates, migrated from, or plans to adopt. Rubric explicitly
+    rejects generic categories ("a CDP", "their analytics tool").
+  - Parser dedupes case-insensitively within a single call's
+    extraction; an extra defensive filter strips overly-generic
+    phrases that occasionally slip through despite the rubric.
+- **Auto-link competitive agencies → `lead_agencies_store`**:
+  - New `TYPE_COMPETITOR` constant (sibling of `incumbent` +
+    `previous`); rows tagged with `source="call_extracted"` +
+    `source_call_id` for provenance so the AE can see "this came
+    from call X".
+  - `lead_agencies_store.get_by_name(lead_id, name)` for the
+    auto-link's case-insensitive dedup against existing entries.
+    Already-tracked agencies are skipped (no spam, no overwriting
+    AE-set type).
+  - When the AI's `context` is `"previously evaluated"` the auto-
+    link saves as `previous` instead of `competitor` (more honest
+    categorisation).
+- **Auto-merge tech stack → lead's Notion `Tech Stack` field**:
+  - On every call save, fetches the lead's current `tech_stack`,
+    compares case-insensitively against `tech_stack_mentioned`,
+    appends any new tools comma-separated. Empty field initialises
+    cleanly (no stray leading comma).
+  - Best-effort: Notion outage or PATCH failure is logged but
+    doesn't block the call save.
+- **`calls_store.aggregate_extractions` extended** to roll up
+  tech_stack + agencies across every call on the lead. Each entry
+  carries mention count, first/last seen timestamps, and the call
+  IDs that mentioned it so the UI can deep-link back to the source.
+- **"Discovered in calls" panel** in the lead drawer hero. Renders
+  chip rows for tech stack tools (accent-coloured) + agencies
+  (MR-red), each with a mention count badge. Hidden when nothing's
+  been extracted yet.
+- **Audit events**: `lead_agency_auto_added` +
+  `lead_tech_stack_auto_appended` so the team-activity feed
+  (v1.0.0ap) surfaces the AI auto-actions.
+
+### Tests
+
+- **`tests/test_call_extraction_agencies_tech.py`** — 11 tests
+  across three layers:
+  - **5 extraction parser tests** (Anthropic SDK stubbed inline):
+    parses agencies with context, case-insensitive dedup within a
+    call, invalid context normalises to null, generic tech mentions
+    filtered, null/empty entries skipped.
+  - **2 aggregator tests**: cross-call rollup with mention counts +
+    call_ids, empty extraction → empty rollups.
+  - **4 end-to-end tests via the call POST endpoint** (NotionSync
+    patched): agencies auto-added with correct type + source,
+    already-present agencies skipped (no dupes), tech stack
+    auto-merged with case-insensitive dedup against existing field,
+    empty-field initialises without stray comma.
+
+### Why auto-merge to Notion (and not just surface)
+
+I considered just rendering the "Discovered in calls" panel and
+letting the AE click to merge. Decided against because Ben said
+"to be added to the respective account" — they want it on the
+account record, not buried in a panel. The trade-off is that an
+AI hallucination could land bogus tech names in the Notion field.
+Mitigated by: (a) rubric explicitly rejects generic terms, (b)
+defensive filter in parser, (c) audit log captures every auto-add
+so it's reversible. Agencies are safer because the AGENCIES
+section is supplementary (not a Notion field).
+
 ## [1.0.0az] — 2026-05-23 — Sortable ENG column on Pipeline
 
 Tiny but high-utility: click the ENG column header on the Pipeline to

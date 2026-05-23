@@ -968,6 +968,77 @@ def api_calls_add(lead_id: str):
         except Exception as e:
             log.warning("Scope prefill failed for %s: %s", lead_id, e)
 
+    # v1.0.0bb: auto-merge tech_stack mentions into the lead's Notion
+    # `Tech Stack` field. Append-only, case-insensitive dedup. Pulls the
+    # current value, compares each AI mention, PATCHes only when there's
+    # something new to add. Best-effort — Notion outage doesn't block
+    # the call save.
+    tech_stack_appended: list[str] = []
+    if extracted and isinstance(extracted.get("tech_stack_mentioned"), list):
+        new_tools = [t for t in extracted["tech_stack_mentioned"]
+                     if isinstance(t, str) and t.strip()]
+        if new_tools:
+            try:
+                sync = NotionSync()
+                current = sync.get_page(lead_id) or {}
+                existing_raw = (current.get("tech_stack") or "").strip()
+                # Split on common separators; lowercase for compare.
+                existing_set = {
+                    s.strip().lower()
+                    for chunk in existing_raw.replace("\n", ",").split(",")
+                    for s in [chunk] if s.strip()
+                }
+                to_add = [t.strip() for t in new_tools
+                          if t.strip().lower() not in existing_set]
+                if to_add:
+                    merged = (existing_raw + ", " if existing_raw else "") + ", ".join(to_add)
+                    try:
+                        sync.update_page(lead_id, {"tech_stack": merged})
+                        tech_stack_appended = to_add
+                        audit.log_event("lead_tech_stack_auto_appended",
+                                        actor=_actor(), lead_id=lead_id,
+                                        added=to_add,
+                                        source_call_id=record["id"])
+                    except Exception as e:
+                        log.warning("Tech stack PATCH failed: %s", e)
+            except Exception as e:
+                log.warning("Tech stack auto-merge failed (skipped): %s", e)
+
+    # v1.0.0bb: auto-link competitive agencies mentioned in the call.
+    # Each agency lands as type=competitor with source=call_extracted.
+    # Dedup case-insensitively against existing entries — don't add
+    # "WPP" again if there's already a "wpp" row of any type. AE can
+    # re-categorise (competitor → incumbent) later via the agencies UI.
+    agencies_auto_added: list[dict] = []
+    if extracted and isinstance(extracted.get("competitive_agencies"), list):
+        for ag in extracted["competitive_agencies"]:
+            try:
+                name = (ag.get("name") or "").strip()
+                if not name:
+                    continue
+                if lead_agencies_store.get_by_name(lead_id, name):
+                    continue  # already tracked
+                context = ag.get("context") or ""
+                ag_type = lead_agencies_store.TYPE_COMPETITOR
+                if context == "previously evaluated":
+                    ag_type = lead_agencies_store.TYPE_PREVIOUS
+                saved = lead_agencies_store.save_agency(lead_id, {
+                    "name":           name,
+                    "type":           ag_type,
+                    "source":         "call_extracted",
+                    "source_call_id": record["id"],
+                    "notes":          (f"Mentioned: {context}" if context
+                                          else "Mentioned in call"),
+                })
+                agencies_auto_added.append(saved)
+                audit.log_event("lead_agency_auto_added",
+                                actor=_actor(), lead_id=lead_id,
+                                agency_id=saved["id"], name=name,
+                                source_call_id=record["id"])
+            except Exception as e:
+                log.warning("Auto-add agency %r failed: %s",
+                              ag.get("name"), e)
+
     # v0.10.0p: auto-refresh the lead summary so the AE doesn't have to
     # re-read every previous note. Inline (synchronous) — adds ~2s latency
     # to the save but means the summary tile reflects this call by the
@@ -1058,6 +1129,10 @@ def api_calls_add(lead_id: str):
         # already in the lead's contact list. UI offers a one-click
         # "Add these" panel.
         "contact_suggestions": contact_suggestions,
+        # v1.0.0bb: what got auto-added from the call. UI uses these for
+        # confirmation toasts (e.g. "Added WPP + Razorfish to agencies").
+        "agencies_auto_added":  agencies_auto_added,
+        "tech_stack_appended":  tech_stack_appended,
     })
 
 

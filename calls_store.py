@@ -229,10 +229,19 @@ def aggregate_extractions(lead_id: str) -> dict[str, Any]:
 
     Useful for building a "rolling" MEDDPICC view that reflects everything
     we've learned about the lead — not just the most recent qualification.
+
+    v1.0.0bb: also surfaces deduped tech_stack_mentioned + the set of
+    agencies mentioned (with the call ids that mentioned each, so the
+    UI can link back to the source). MEDDPICC behaviour unchanged.
     """
     calls = sorted(_load_raw(lead_id), key=lambda r: r.get("created_at") or "")
     meddpicc: dict[str, Any] = {}
     project_scope: str | None = None
+    # v1.0.0bb: cross-call rollups for tech + agencies. Keyed by
+    # case-insensitive name; the value tracks call provenance so the
+    # UI can "view the call that mentioned this".
+    tech_stack_map: dict[str, dict[str, Any]] = {}
+    agencies_map: dict[str, dict[str, Any]] = {}
     for c in calls:
         ext = c.get("extracted") or {}
         for k, v in (ext.get("meddpicc") or {}).items():
@@ -240,4 +249,53 @@ def aggregate_extractions(lead_id: str) -> dict[str, Any]:
                 meddpicc[k] = {"value": v["value"]}
         if ext.get("project_scope"):
             project_scope = ext["project_scope"]
-    return {"meddpicc": meddpicc, "project_scope": project_scope}
+        # Tech stack rollup
+        for name in (ext.get("tech_stack_mentioned") or []):
+            if not isinstance(name, str):
+                continue
+            key = name.strip().lower()
+            if not key:
+                continue
+            entry = tech_stack_map.setdefault(key, {
+                "name": name.strip(),
+                "mentions": 0,
+                "first_mentioned_at": c.get("created_at"),
+                "last_mentioned_at":  c.get("created_at"),
+                "call_ids": [],
+            })
+            entry["mentions"] += 1
+            entry["last_mentioned_at"] = c.get("created_at")
+            if c.get("id") and c["id"] not in entry["call_ids"]:
+                entry["call_ids"].append(c["id"])
+        # Agencies rollup — same shape so the UI renders identically.
+        for ag in (ext.get("competitive_agencies") or []):
+            if not isinstance(ag, dict):
+                continue
+            name = (ag.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            entry = agencies_map.setdefault(key, {
+                "name": name,
+                "context": ag.get("context"),
+                "mentions": 0,
+                "first_mentioned_at": c.get("created_at"),
+                "last_mentioned_at":  c.get("created_at"),
+                "call_ids": [],
+            })
+            entry["mentions"] += 1
+            entry["last_mentioned_at"] = c.get("created_at")
+            # Most recent context wins (signal evolves over the call
+            # sequence: "evaluating" → "incumbent" etc).
+            if ag.get("context"):
+                entry["context"] = ag["context"]
+            if c.get("id") and c["id"] not in entry["call_ids"]:
+                entry["call_ids"].append(c["id"])
+    return {
+        "meddpicc": meddpicc,
+        "project_scope": project_scope,
+        "tech_stack_mentioned": sorted(tech_stack_map.values(),
+                                         key=lambda e: -e["mentions"]),
+        "competitive_agencies": sorted(agencies_map.values(),
+                                         key=lambda e: -e["mentions"]),
+    }

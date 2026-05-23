@@ -1796,6 +1796,10 @@
       <div class="muted" id="ld-summary-subheading" style="font-size:10px;margin-bottom:8px;">— AI synthesis across notes + qualification</div>
       <div id="ld-bant-strip" class="bant-strip" style="margin-top:0;margin-bottom:12px;"></div>
       <div id="ld-notes-summary" class="muted" style="font-size:12px;">Loading…</div>
+      <!-- v1.0.0bb: Discovered in calls — tech stack tools + competitive
+           agencies the AI surfaced from call notes. Hidden until there's
+           something to show. -->
+      <div id="ld-discovered" style="margin-top:10px;"></div>
     </div>
 
     <!-- Calls & Notes — open by default, most-touched section -->
@@ -4624,6 +4628,10 @@
       // health from rolling MEDDPICC + project scope so we just render.
       if (data.bant_health) renderBantStrip('#ld-bant-strip', data.bant_health);
       renderLeadSummary(calls, data.rolling || {});
+      // v1.0.0bb: render the "Discovered in calls" panel — tech stack
+      // tools + competitive agencies extracted by the AI across every
+      // call. Hidden when there's nothing to show.
+      _renderDiscoveredInCalls(leadId, data.rolling || {});
       if (!calls.length) {
         const emptyBanner = aiIsOn()
           ? ''
@@ -4707,6 +4715,49 @@
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
+  }
+
+  // v1.0.0bb: render the "Discovered in calls" panel. Two chip rows:
+  // tech stack tools + competitive agencies. Each entry shows the name
+  // + mention count. Agencies auto-link to lead_agencies_store on call
+  // save, so this panel is informational; tech_stack mentions are
+  // surfaced for the AE to merge into the lead's tech_stack field
+  // (manual today; auto-merge in a follow-up if usage shows demand).
+  function _renderDiscoveredInCalls(leadId, rolling) {
+    const el = $('#ld-discovered');
+    if (!el) return;
+    const tech = (rolling.tech_stack_mentioned || []);
+    const agencies = (rolling.competitive_agencies || []);
+    if (!tech.length && !agencies.length) { el.innerHTML = ''; return; }
+    const chip = (label, count, color) =>
+      `<span style="display:inline-block;background:var(--surface);border:1px solid ${color};color:${color};font-size:10px;padding:3px 8px;border-radius:10px;margin-right:4px;margin-bottom:4px;">
+         ${escapeHtml(label)}${count > 1 ? ` <span style="opacity:.6;">×${count}</span>` : ''}
+       </span>`;
+    el.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">
+          Discovered in calls
+          <span class="muted" style="text-transform:none;letter-spacing:0;margin-left:6px;">— AI extracted from your call notes</span>
+        </div>
+        ${tech.length ? `
+          <div style="margin-bottom:6px;">
+            <span class="muted" style="font-size:10px;margin-right:6px;">Tech stack:</span>
+            ${tech.map(t => chip(t.name, t.mentions, 'var(--accent)')).join('')}
+          </div>
+        ` : ''}
+        ${agencies.length ? `
+          <div>
+            <span class="muted" style="font-size:10px;margin-right:6px;">Agencies:</span>
+            ${agencies.map(a => chip(
+              a.context ? `${a.name} (${a.context})` : a.name,
+              a.mentions,
+              'var(--mr-red,#e82b23)'
+            )).join('')}
+            <span class="muted" style="font-size:10px;display:block;margin-top:4px;">Auto-added to the Agencies section below — re-categorise if needed.</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
   }
 
   async function renderLeadSummary(calls, rolling) {
