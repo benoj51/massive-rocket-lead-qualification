@@ -3679,6 +3679,17 @@
     return contacts;
   }
 
+  // v1.0.0bc: shared helper for the trend arrow shown next to ENG
+  // scores. Returns an HTML span (or empty string).
+  function _engagementArrow(direction) {
+    if (!direction || direction === 'flat') return '';
+    if (direction === 'up')
+      return ` <span style="color:var(--green);font-size:11px;" title="Engagement up vs last week">↑</span>`;
+    if (direction === 'down')
+      return ` <span style="color:var(--red);font-size:11px;" title="Engagement down vs last week">↓</span>`;
+    return '';
+  }
+
   // v1.0.0at: fetch + render the engagement score chip in the drawer
   // header. Hidden until the first successful load; replaced in place
   // on every drawer open. Tooltip shows the signal breakdown so the
@@ -3700,16 +3711,24 @@
         band === 'weak'   ? 'borderline' :
                             'qualify_out';
       chip.className = `icp-pill ${cls}`;
-      chip.textContent = `ENG ${score}/100`;
-      // Tooltip explains where the score came from. Multi-line via
-      // \n — the browser renders this inside the title attribute.
+      // v1.0.0bc: trend arrow next to the score. ↑ green for up,
+      // ↓ red for down, → muted for flat / no comparison.
+      const trend = data.trend || {};
+      const arrow = _engagementArrow(trend.direction);
+      chip.innerHTML = `ENG ${score}/100${arrow}`;
+      // Tooltip explains where the score came from + the trend.
+      // Multi-line via \n — the browser renders this inside title.
       const lines = [
         `Engagement: ${score}/100 (${band})`,
-        '',
-        `Coverage: ${sig.coverage_pct ?? 0}% of active contacts touched (${sig.coverage_points ?? 0} pts)`,
-        `Recency: ${sig.days_since_touch == null ? 'never touched' : sig.days_since_touch + 'd ago'} (${sig.recency_points ?? 0} pts)`,
-        `Activity: ${sig.events_30d ?? 0} events in last 30d (${sig.activity_points ?? 0} pts)`,
       ];
+      if (trend.direction && trend.direction !== 'flat' && trend.then != null) {
+        const sign = trend.delta > 0 ? '+' : '';
+        lines.push(`Trend: ${sign}${trend.delta} vs ${trend.days_compared}d ago (${trend.then} → ${trend.now})`);
+      }
+      lines.push('');
+      lines.push(`Coverage: ${sig.coverage_pct ?? 0}% of active contacts touched (${sig.coverage_points ?? 0} pts)`);
+      lines.push(`Recency: ${sig.days_since_touch == null ? 'never touched' : sig.days_since_touch + 'd ago'} (${sig.recency_points ?? 0} pts)`);
+      lines.push(`Activity: ${sig.events_30d ?? 0} events in last 30d (${sig.activity_points ?? 0} pts)`);
       if ((sig.overdue_count || 0) > 0) {
         lines.push(`Overdue: ${sig.overdue_count} contacts (${sig.overdue_penalty} pts)`);
       }
@@ -5748,8 +5767,14 @@
           s.band === 'warm'   ? 'var(--yellow)' :
           s.band === 'weak'   ? 'var(--orange,#f59e0b)' :
                                  'var(--red)';
-        cell.innerHTML = `<span style="color:${colour};">ENG ${s.score}</span>`;
-        cell.title = `Engagement ${s.score}/100 (${s.band})`;
+        // v1.0.0bc: trend arrow inline so the AE sees direction
+        // without clicking through to the drawer.
+        const arrow = _engagementArrow(s.trend_direction);
+        cell.innerHTML = `<span style="color:${colour};">ENG ${s.score}</span>${arrow}`;
+        const trendTitle = s.trend_direction && s.trend_direction !== 'flat'
+          ? ` · ${s.trend_delta > 0 ? '+' : ''}${s.trend_delta} vs last week`
+          : '';
+        cell.title = `Engagement ${s.score}/100 (${s.band})${trendTitle}`;
       });
     } catch (e) {
       console.warn('home engagement-scores fetch failed', e);
@@ -5786,7 +5811,12 @@
           s.band === 'warm'   ? 'var(--yellow)' :
           s.band === 'weak'   ? 'var(--orange,#f59e0b)' :
                                  'var(--red)';
-        cell.innerHTML = `<span style="color:${colour};font-weight:600;" title="Engagement ${s.score}/100 (${s.band})">${s.score}</span>`;
+        // v1.0.0bc: include the trend arrow.
+        const trendMarker = _engagementArrow(s.trend_direction);
+        const trendTitle = s.trend_direction && s.trend_direction !== 'flat'
+          ? ` · ${s.trend_delta > 0 ? '+' : ''}${s.trend_delta} vs last week`
+          : '';
+        cell.innerHTML = `<span style="color:${colour};font-weight:600;" title="Engagement ${s.score}/100 (${s.band})${trendTitle}">${s.score}${trendMarker}</span>`;
       });
       // v1.0.0av: now that scores are in, apply the engagement-band filter.
       _applyPipelineEngagementFilter();

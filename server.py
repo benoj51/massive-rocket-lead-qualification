@@ -50,6 +50,7 @@ import state_backup
 import contacts_store
 import criteria_store
 import engagement
+import engagement_snapshots_store
 import hubspot_sync
 import filter_presets_store
 import lead_summary_store
@@ -568,10 +569,18 @@ def api_lead_engagement_timeline(lead_id: str):
 # hover. Same shape as the engagement-timeline stats so the surfaces
 # stay consistent.
 
-def _compute_engagement_for_lead(lead_id: str) -> dict:
+def _compute_engagement_for_lead(lead_id: str, *,
+                                    record_snapshot: bool = True,
+                                    include_trend: bool = True) -> dict:
     """Internal helper: pull contacts + events for one lead and run
     the scorer. Returns the same shape as /engagement-score (with
-    the lead_id embedded so the batch endpoint can route results)."""
+    the lead_id embedded so the batch endpoint can route results).
+
+    v1.0.0bc: also records today's snapshot, computes a 7-day delta
+    (returned as `trend`), and fires an `engagement_dropped`
+    notification when the band downgrades since the previous snapshot.
+    Toggleable via flags for tests + paths that don't want side effects.
+    """
     contacts = [contacts_store.annotate_touch_state(dict(c))
                 for c in contacts_store.list_contacts(lead_id)]
     event_isos: list[str] = []
@@ -591,6 +600,64 @@ def _compute_engagement_for_lead(lead_id: str) -> dict:
     result = engagement.compute_engagement_score(
         contacts=contacts, recent_event_isos=event_isos)
     result["lead_id"] = lead_id
+
+    if record_snapshot:
+        try:
+            # Peek at the previous snapshot BEFORE recording today's so
+            # the band-drop check compares against the right baseline.
+            from datetime import datetime, timezone
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            prev = engagement_snapshots_store.previous_snapshot(
+                lead_id, before_date=today)
+            # Check if today's snapshot already exists — drives the
+            # notification dedup below so we only fire ONCE on the day
+            # of the drop, not on every score recomputation today.
+            already_recorded_today = any(
+                s.get("date") == today
+                for s in engagement_snapshots_store.history(lead_id, limit=5)
+            )
+            engagement_snapshots_store.record(lead_id, result)
+            # Fire notification on a band downgrade. We only notify when
+            # the band actually got WORSE — score moves within a band
+            # are noise. And only on the FIRST recording of today so the
+            # bell doesn't ping every time the user opens the lead.
+            if (not already_recorded_today and prev and
+                    engagement_snapshots_store.band_downgraded(
+                        prev.get("band"), result.get("band"))):
+                try:
+                    # Find the lead's owner (best-effort via Notion).
+                    owner = None
+                    try:
+                        lead = NotionSync().get_page(lead_id) or {}
+                        owner = (lead.get("owner") or "").strip() or None
+                        company = lead.get("company") or lead_id
+                    except Exception:
+                        company = lead_id
+                    if owner:
+                        notifications_store.notify_assignment(
+                            owner,
+                            kind="engagement_dropped",
+                            title=f"{company} dropped to {result.get('band')}",
+                            body=(f"Engagement fell from {prev.get('score')} "
+                                    f"({prev.get('band')}) to {result.get('score')} "
+                                    f"({result.get('band')}) since "
+                                    f"{prev.get('date')}."),
+                            link={"kind": "lead", "lead_id": lead_id},
+                            actor=None,
+                        )
+                except Exception as e:
+                    log.warning("Engagement-drop notify failed: %s", e)
+        except Exception as e:
+            log.warning("Engagement snapshot for %s failed: %s", lead_id, e)
+
+    if include_trend:
+        try:
+            result["trend"] = engagement_snapshots_store.delta(
+                lead_id, days_ago=7)
+        except Exception as e:
+            log.warning("Engagement delta for %s failed: %s", lead_id, e)
+            result["trend"] = None
+
     return result
 
 
@@ -621,7 +688,14 @@ def api_engagement_scores_batch():
     for lid in ids:
         try:
             r = _compute_engagement_for_lead(lid)
-            scores[lid] = {"score": r["score"], "band": r["band"]}
+            # v1.0.0bc: include trend direction so Pipeline column +
+            # Home chips can show ↑/↓/→ without a second fetch.
+            trend = r.get("trend") or {}
+            scores[lid] = {
+                "score": r["score"], "band": r["band"],
+                "trend_direction": trend.get("direction"),
+                "trend_delta":     trend.get("delta"),
+            }
         except Exception as e:
             # Log but don't fail the whole batch — one bad lead
             # shouldn't blank out the whole pipeline.

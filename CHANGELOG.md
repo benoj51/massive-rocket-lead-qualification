@@ -5,6 +5,69 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bc] — 2026-05-23 — Engagement trends (deltas, arrows, drop notifications)
+
+A single engagement score (v1.0.0at) tells you the state today. A
+sequence tells you whether the account is going up or down — and
+the platform can flag it when an AE's account drops a band.
+
+### Added
+
+- **`engagement_snapshots_store.py`** — daily-deduped snapshots per
+  lead. Ring-capped at 30 entries. Key API: `record()` (insert-or-
+  update for today, idempotent), `history()`, `previous_snapshot()`
+  (strictly before a date), `delta(days_ago=7)` (with graceful
+  fallback to oldest available when history is shallow),
+  `band_downgraded(prev, now)` helper for the notification trigger.
+- **Snapshot recording wired into `_compute_engagement_for_lead`**.
+  Every drawer load + batch fetch records today's snapshot
+  (same-day calls update in place). Notification side-effects are
+  guarded so opening the drawer twice on the same day doesn't
+  re-fire the bell.
+- **`engagement_dropped` notification kind**. Fires when today's
+  band is strictly worse than the most recent prior snapshot's
+  band. Routes to the lead's owner (best-effort via NotionSync);
+  body explains the drop: *"Acme dropped to cold. Engagement fell
+  from 75 (strong) to 35 (weak) since 2026-05-22."* Click goes to
+  the lead drawer.
+- **`trend` field on `/api/lead/<id>/engagement-score`** with
+  `{now, then, delta, direction, days_compared, then_band,
+  now_band}`. The batch endpoint also returns `trend_direction +
+  trend_delta` per lead so Pipeline + Home chips render the arrow.
+- **Trend arrows in the UI**:
+  - Lead drawer ENG chip: `ENG 75/100 ↑` (or ↓ / nothing for flat)
+  - Pipeline ENG column: same arrow next to the score
+  - Home active-leads chips: `ENG 75 ↑`
+  - Tooltip includes "Trend: +12 vs 7d ago (63 → 75)" so the AE
+    sees the magnitude on hover.
+
+### Tests
+
+- **`tests/test_engagement_snapshots.py`** — 19 tests:
+  - 14 store units: record + same-day dedup (update in place),
+    multi-day accumulation, 30-entry ring cap, per-lead isolation,
+    previous_snapshot (excludes today, finds most-recent prior,
+    None when no history), delta (none on single snapshot, finds
+    N-days-ago, direction up/down/flat, falls back to oldest when
+    not enough history), band_downgraded matrix
+  - 5 integration tests (NotionSync patched): band downgrade fires
+    notification with correct lead link + body, same-day repeat
+    doesn't re-fire (dedup), no notification when band unchanged,
+    no notification when band IMPROVES, trend field present in
+    score response with correct then/now.
+
+### Why per-day dedup + same-day update-in-place
+
+Two callers will frequently compute the same lead's score on the
+same day (e.g. AE opens the drawer, then the Pipeline view re-runs
+the batch). Without dedup we'd write multiple rows per day and
+inflate the file with noise. Update-in-place means the snapshot
+represents end-of-day state — useful for the next day's comparison.
+
+The notification fires only on the FIRST recording of today
+(checked via `history()` before calling `record()`) so the bell
+doesn't ping each time the user navigates back to the lead.
+
 ## [1.0.0bb] — 2026-05-23 — Calls auto-extract competitive agencies + tech stack
 
 Ben: "Notes should also be able to pick up on competitive agencies or
