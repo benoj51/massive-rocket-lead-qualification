@@ -5,6 +5,33 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0v] — 2026-05-23 — ICP + pricing chart: light-mode contrast
+
+Both Chart.js bar charts (ICP Score on Qualify view, pricing on
+Project Build view) had hardcoded dark-mode colours for tick labels,
+grid lines, and the "remaining" / "discount" bar fills. In light mode
+the criterion labels and grid were near-invisible.
+
+### Fix
+New helper `_chartThemeColors()` reads `--text`, `--text-dim` from
+the current theme's CSS variables and returns appropriate grid +
+"remaining bar" tints (rgba black for light, rgba white for dark).
+Both Chart.js call sites use it:
+- ICP Score chart (`#score-chart`) — y-axis criterion labels were
+  `#e8e8f0`; now `var(--text)` flips to readable dark in light mode
+- Pricing chart (`#pb-pricing-chart`) — same x/y tick colours +
+  legend label colour
+
+### Caveat
+Charts don't auto-redraw when the theme toggle flips mid-session.
+Next data refresh (or page reload) picks up the new colours.
+Acceptable for v1 — adding a redraw-on-theme-change listener is
+deferred until anyone hits it in practice.
+
+### Files touched
+- `qualify.html` — added `_chartThemeColors()` helper + applied to
+  both chart sites; ~20 lines
+
 ## [1.0.0u] — 2026-05-23 — Search modal: light-mode contrast fix
 
 Ben reported the global search modal (⌘K) had near-invisible header

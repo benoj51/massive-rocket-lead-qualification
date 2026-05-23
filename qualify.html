@@ -2326,6 +2326,7 @@
 
     const ctx = $('#score-chart').getContext('2d');
     if (state.chart) state.chart.destroy();
+    const theme = _chartThemeColors();
     state.chart = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -2340,7 +2341,10 @@
           {
             label: 'Max',
             data: max.map((m, i) => m - data[i]),
-            backgroundColor: 'rgba(255,255,255,.06)',
+            // v1.0.0v: theme-aware fill so the "remaining" bar is
+            // visible against either background (was a fixed
+            // rgba(255,255,255,.06) which disappeared in light mode).
+            backgroundColor: theme.barRemain,
             borderRadius: 4,
           },
         ],
@@ -2352,11 +2356,15 @@
         scales: {
           x: {
             stacked: true, beginAtZero: true,
-            grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#9898aa' },
+            grid: { color: theme.grid }, ticks: { color: theme.textDim },
           },
           y: {
             stacked: true,
-            grid: { display: false }, ticks: { color: '#e8e8f0', font: { size: 11 } },
+            // v1.0.0v: y-axis tick labels are the criterion names —
+            // these were near-invisible in light mode (was #e8e8f0,
+            // a light grey). Pull from CSS so they flip with theme.
+            grid: { display: false },
+            ticks: { color: theme.text, font: { size: 11 } },
           },
         },
         plugins: {
@@ -2373,6 +2381,26 @@
         },
       },
     });
+  }
+
+  // v1.0.0v: helper for Chart.js — pulls the current theme's text +
+  // grid colours from the CSS custom properties so charts read
+  // correctly in either light or dark mode. Called at chart-build
+  // time; charts don't auto-redraw on theme change, but the next data
+  // refresh will pick the new colours up. Good-enough for v1.
+  function _chartThemeColors() {
+    const css = getComputedStyle(document.documentElement);
+    const get = (name, fallback) => (css.getPropertyValue(name).trim() || fallback);
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    return {
+      text:    get('--text',      isLight ? '#1a1a24' : '#e8e8f0'),
+      textDim: get('--text-dim',  isLight ? '#4a4a52' : '#9898aa'),
+      // Grid lines + the "remaining" bar fill — soft tint that reads
+      // on both backgrounds. Use rgba so they don't compete with the
+      // data ink.
+      grid:      isLight ? 'rgba(0,0,0,.06)'  : 'rgba(255,255,255,.06)',
+      barRemain: isLight ? 'rgba(0,0,0,.08)'  : 'rgba(255,255,255,.06)',
+    };
   }
 
   function renderMeddicc(result) {
@@ -5603,22 +5631,24 @@
 
     const ctx = $('#pb-pricing-chart').getContext('2d');
     if (pbState.pricingChart) pbState.pricingChart.destroy();
+    // v1.0.0v: theme-aware chart colours (same fix as the ICP chart).
+    const pcTheme = _chartThemeColors();
     pbState.pricingChart = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: q.monthly.map(m => `M${m.month}`),
         datasets: [
           { label: 'Net', data: q.monthly.map(m => m.net_usd), backgroundColor: '#ff4d2a', borderRadius: 4 },
-          { label: 'Discount', data: q.monthly.map(m => m.discount_usd), backgroundColor: 'rgba(255,255,255,.06)', borderRadius: 4 },
+          { label: 'Discount', data: q.monthly.map(m => m.discount_usd), backgroundColor: pcTheme.barRemain, borderRadius: 4 },
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         scales: {
-          x: { stacked: true, grid: { display: false }, ticks: { color: '#9898aa' } },
-          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#9898aa' } },
+          x: { stacked: true, grid: { display: false }, ticks: { color: pcTheme.textDim } },
+          y: { stacked: true, beginAtZero: true, grid: { color: pcTheme.grid }, ticks: { color: pcTheme.textDim } },
         },
-        plugins: { legend: { labels: { color: '#e8e8f0' } } },
+        plugins: { legend: { labels: { color: pcTheme.text } } },
       },
     });
 
