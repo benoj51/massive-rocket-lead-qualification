@@ -5,6 +5,64 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bg] — 2026-05-23 — Fix: contacts showing only first names
+
+Ben: "Why is it only showing the first name in contacts it should
+provide their full name (first and last names)"
+
+Root cause: the AI-extracted `contacts_mentioned` field surfaces
+people exactly as they were spoken in the call notes. In practice
+people get referred to by first name only ("Sarah said yes",
+"Marina mentioned…") and that first-name-only string was getting
+saved as the contact's `name`. v1.0.0x already fixed this for
+Apollo's contact search; the AI-extraction path still leaked
+half-names through.
+
+### Fixed
+
+- **AI rubric tightened** in `_EXTRACT_SYSTEM_PROMPT`:
+  - First + last preferred whenever both knowable from the notes
+  - If only a first name is said, the AI is now told to look
+    elsewhere (signature lines, email addresses, attendee lists,
+    later references like "Sarah Johnson in legal") to pair the
+    surname back
+  - If only a first name + no email → **omit the entry** rather
+    than save a half-named contact
+  - Single-name + email pair is the one exception (email lets the
+    AE disambiguate later)
+- **Defensive parser filter** in `extract_from_notes` — drops
+  single-word names without an email, as a belt-and-braces under
+  the rubric. Stops the contact list filling up with cleanup
+  work when the LLM ignores the rubric.
+- **Editable contact-suggestion UI** in the lead drawer:
+  - Name + title are now `<input>` fields (not just display text)
+    so the AE can complete a truncated name on the fly before
+    clicking Add
+  - Single-name suggestions get a yellow "NEEDS LAST NAME" badge
+  - The save handler reads from the editable inputs, not the
+    original AI output, so corrections actually persist
+  - One final guard: if the AE clicks Add with a name still
+    truncated, a confirm() asks "Add anyway?" with the names
+    listed — gives one more chance to correct without forcing it
+
+### Tests
+
+- **`tests/test_call_extraction_agencies_tech.py`** grew 11 → 13
+  with 2 new cases:
+  - `test_drops_single_word_contacts_without_email`: {name:"Sarah",
+    role:"prospect-side"} → dropped; {name:"John Doe"} → kept
+  - `test_keeps_single_word_contact_when_email_present`: {name:
+    "Sarah", email:"sarah@acme.com"} → kept (email
+    disambiguates)
+
+### Doesn't fix (out of scope for this commit)
+
+- **Backfilling existing contacts** whose names are already saved
+  as just first names — these stay as-is. The AE can either delete
+  + re-add (cleaner) or open the edit form and add the surname
+  manually. A future commit could Apollo-enrich existing single-
+  name contacts via the lead's domain.
+
 ## [1.0.0bf] — 2026-05-23 — Morning brief on Home
 
 The first thing the user sees when they open the app: a single

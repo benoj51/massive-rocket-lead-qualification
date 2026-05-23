@@ -4285,17 +4285,33 @@
           </div>
           <button id="ld-cs-dismiss" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Dismiss</button>
         </div>
-        ${suggestions.map((s, i) => `
+        ${suggestions.map((s, i) => {
+          // v1.0.0bg: editable name + title inputs so the AE can fix a
+          // missing surname (or correct a typo) before clicking Add.
+          // The defensive filter at parse-time drops single-name
+          // entries unless they have email, but a name could still
+          // arrive truncated — this gives a one-click correction path.
+          const needsCompletion = !s.name || s.name.trim().split(/\s+/).length < 2;
+          const warnBadge = needsCompletion
+            ? `<span style="background:rgba(245,158,11,.18);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:10px;margin-left:6px;">NEEDS LAST NAME</span>`
+            : '';
+          return `
           <label style="display:flex;align-items:flex-start;gap:10px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer;">
-            <input type="checkbox" data-cs-idx="${i}" checked style="margin-top:3px;" />
-            <div style="flex:1;min-width:0;">
-              <div style="font-size:13px;">
-                <strong>${escapeHtml(s.name)}</strong>${roleBadge(s.role)}
+            <input type="checkbox" data-cs-idx="${i}" checked style="margin-top:6px;" />
+            <div style="flex:1;min-width:0;display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center;">
+              <input type="text" data-cs-name="${i}" value="${escapeAttr(s.name)}"
+                     placeholder="Full name (first + last)"
+                     style="padding:4px 8px;font-size:12px;width:100%;" />
+              <input type="text" data-cs-title="${i}" value="${escapeAttr(s.title || '')}"
+                     placeholder="Title (optional)"
+                     style="padding:4px 8px;font-size:12px;width:100%;" />
+              <div style="grid-column:1/-1;font-size:10px;color:var(--text-muted);">
+                ${roleBadge(s.role)}${warnBadge}${s.email ? ' · ' + escapeHtml(s.email) : ''}
               </div>
-              <div class="muted" style="font-size:11px;">${escapeHtml(s.title || '(no title mentioned)')}${s.email ? ' · ' + escapeHtml(s.email) : ''}</div>
             </div>
           </label>
-        `).join('')}
+          `;
+        }).join('')}
         <div class="btn-row" style="margin-top:10px;">
           <button id="ld-cs-save" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add selected to lead →</button>
           <span class="muted" id="ld-cs-status" style="font-size:11px;"></span>
@@ -4306,11 +4322,35 @@
       el.style.display = 'none'; el.innerHTML = '';
     });
     $('#ld-cs-save').addEventListener('click', async () => {
-      const picks = Array.from(el.querySelectorAll('input[type=checkbox]:checked'))
-                          .map(b => suggestions[parseInt(b.dataset.csIdx, 10)])
-                          .filter(Boolean);
+      // v1.0.0bg: read name + title from the editable inputs, not the
+      // original suggestion. The AE may have corrected a truncated
+      // name ("Sarah" → "Sarah Johnson") before clicking Add.
+      const checkedBoxes = Array.from(
+        el.querySelectorAll('input[type=checkbox]:checked'));
+      const picks = checkedBoxes.map(b => {
+        const i = parseInt(b.dataset.csIdx, 10);
+        const orig = suggestions[i] || {};
+        const nameInp = el.querySelector(`[data-cs-name="${i}"]`);
+        const titleInp = el.querySelector(`[data-cs-title="${i}"]`);
+        return {
+          ...orig,
+          name:  (nameInp?.value || orig.name || '').trim(),
+          title: (titleInp?.value || orig.title || '').trim() || null,
+        };
+      }).filter(p => p.name);
       if (!picks.length) {
         toast('Pick at least one to add', 'error'); return;
+      }
+      // v1.0.0bg: warn (but don't block) if any picked name is still
+      // single-word — gives the AE one more chance to complete it.
+      const stillTruncated = picks.filter(
+        p => p.name.split(/\s+/).filter(Boolean).length < 2);
+      if (stillTruncated.length) {
+        const names = stillTruncated.map(p => p.name).join(', ');
+        if (!window.confirm(
+          `${stillTruncated.length} contact${stillTruncated.length === 1 ? '' : 's'} still missing a last name (${names}).\n\nAdd anyway?`)) {
+          return;
+        }
       }
       const saveBtn = $('#ld-cs-save');
       const statusEl = $('#ld-cs-status');

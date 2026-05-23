@@ -450,6 +450,17 @@ CONTACTS_MENTIONED rubric:
 - Capture every person mentioned — attendees, people referenced ("Sara
   in legal still needs to review"), CC'd people, anyone identified by
   name.
+- **FULL NAME preferred** — capture FIRST + LAST whenever both are
+  knowable from the notes. If only a first name is said ("Sarah said
+  yes"), look elsewhere in the same notes (signature lines, email
+  addresses, attendee lists, references like "Sarah Johnson in legal")
+  to pair the surname back. If you genuinely only have a first name
+  AND no email, OMIT the entry — a half-named contact creates more
+  cleanup work than it saves.
+- The one exception: if a first name appears alongside a clear email
+  (e.g. "Sarah · sarah.johnson@acme.com"), capture it — the email
+  gives the AE enough to disambiguate even without the surname in the
+  `name` field.
 - `role`:
   - "prospect-side" — people who work at the prospect/customer org
   - "mr-side" — people who work at Massive Rocket
@@ -664,6 +675,11 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
     # v1.0.0f (Tier 3c): named people mentioned in the notes.
     # Filtered for plausible names only — at minimum a name string,
     # and `role` falls back to "unknown".
+    # v1.0.0bg: drop single-word names UNLESS they came with an email.
+    # The AI rubric asks for full names but occasionally the LLM still
+    # surfaces "Sarah" alone; that creates a half-named contact the AE
+    # then has to clean up. Email-paired single names slip through
+    # because the email gives the AE enough to find the rest later.
     contacts_mentioned_out: list[dict[str, Any]] = []
     _valid_roles = {"prospect-side", "mr-side", "partner-side", "unknown"}
     for entry in data.get("contacts_mentioned") or []:
@@ -685,6 +701,15 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
         role = str(entry.get("role") or "unknown").strip().lower()
         if role not in _valid_roles:
             role = "unknown"
+        # v1.0.0bg: single-word name guard. Split on whitespace; if only
+        # one token AND no email, skip the entry. Email-paired single
+        # names slip through (the email gives the AE enough to find the
+        # surname later via Apollo enrichment). This is a defensive net
+        # under the rubric — the rubric already asks the LLM to skip
+        # these, but belt-and-braces stops cleanup work for the AE.
+        name_tokens = [t for t in name.split() if t]
+        if len(name_tokens) < 2 and not email:
+            continue
         contacts_mentioned_out.append({
             "name": name, "title": title, "email": email, "role": role,
         })

@@ -130,6 +130,41 @@ class ExtractFromNotesTests(unittest.TestCase):
         })
         self.assertEqual(out["tech_stack_mentioned"], ["Braze"])
 
+    # v1.0.0bg: contacts_mentioned single-word filter -----------------
+
+    def test_drops_single_word_contacts_without_email(self):
+        """An AI-extracted contact like {name:'Sarah'} with no email
+        is dropped — half-named contacts create cleanup work."""
+        out = self._run_with_response({
+            "meddpicc": {},
+            "tech_stack_mentioned": [],
+            "competitive_agencies": [],
+            "contacts_mentioned": [
+                {"name": "Sarah", "role": "prospect-side"},
+                {"name": "John Doe", "role": "prospect-side"},
+            ],
+        })
+        names = [c["name"] for c in out["contacts_mentioned"]]
+        self.assertNotIn("Sarah", names)
+        self.assertIn("John Doe", names)
+
+    def test_keeps_single_word_contact_when_email_present(self):
+        """A single-name + email pair is kept — the email gives the AE
+        enough to disambiguate even without a surname."""
+        out = self._run_with_response({
+            "meddpicc": {},
+            "tech_stack_mentioned": [],
+            "competitive_agencies": [],
+            "contacts_mentioned": [
+                {"name": "Sarah", "email": "sarah@acme.com",
+                 "role": "prospect-side"},
+            ],
+        })
+        self.assertEqual(len(out["contacts_mentioned"]), 1)
+        self.assertEqual(out["contacts_mentioned"][0]["name"], "Sarah")
+        self.assertEqual(out["contacts_mentioned"][0]["email"],
+                          "sarah@acme.com")
+
 
 # -----------------------------------------------------------------
 # Layer 2: aggregate_extractions rollup
