@@ -2102,6 +2102,16 @@
           <span id="ld-contacts-search-status" class="muted" style="font-size:11px;"></span>
         </div>
         <div id="ld-contacts-search-results" style="display:none;margin-bottom:12px;"></div>
+        <!-- v1.0.0ar: Account view toolbar. Table/Org chart toggle +
+             engagement summary (how many contacts have been touched,
+             how many are overdue). Hidden until contacts load. -->
+        <div id="ld-account-toolbar" style="display:none;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;flex-wrap:wrap;">
+          <div id="ld-account-engagement" class="muted" style="font-size:11px;"></div>
+          <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+            <button class="chip active" data-ld-view="table" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Table</button>
+            <button class="chip" data-ld-view="orgchart" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Org chart</button>
+          </div>
+        </div>
         <div id="ld-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
         <details style="margin-top: 10px;">
           <summary style="cursor:pointer;color:var(--accent);font-size:12px;">+ Add contact manually</summary>
@@ -2138,6 +2148,15 @@
                   <option value="left">left</option>
                 </select>
               </div>
+            </div>
+            <!-- v1.0.0ar: optional reports-to for the org chart.
+                 Populated lazily — the form picker pulls from the
+                 currently-loaded contacts cache. -->
+            <div class="field">
+              <label>Reports to <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;font-size:10px;">(optional, drives org chart)</span></label>
+              <select id="ld-new-contact-reports-to">
+                <option value="">— none / root —</option>
+              </select>
             </div>
             <div class="btn-row">
               <button id="ld-add-contact" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add contact</button>
@@ -3577,19 +3596,36 @@
     });
   }
 
+  // v1.0.0ar: cached state for the Account view inside the lead drawer.
+  // viewMode drives Table vs Org chart toggle; cached contacts are re-
+  // rendered without a fetch when the user flips views.
+  const accountViewState = { viewMode: 'table', cachedByLeadId: {} };
+
   async function loadLeadContacts(leadId) {
     if (!leadId) return;
     const el = $('#ld-contacts-list');
     try {
       const data = await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`);
       const contacts = data.contacts || [];
+      accountViewState.cachedByLeadId[leadId] = contacts;
       // Section count badge
       const cnt = $('#ld-contacts-count');
       if (cnt) cnt.textContent = contacts.length ? `(${contacts.length})` : '';
+      // v1.0.0ar: engagement summary + view-mode toolbar wiring.
+      _renderAccountToolbar(leadId, contacts);
+      // v1.0.0ar: keep the manual-add reports-to dropdown options
+      // in sync with the latest contacts list.
+      _refreshManualAddReportsTo(contacts);
       if (!contacts.length) {
         el.innerHTML = '<div class="muted" style="font-size:12px;">No contacts saved yet. Save discovered stakeholders from Qualify Lead, or add manually below.</div>';
         return;
       }
+      // Route to the right renderer based on the toggle. Default Table.
+      if (accountViewState.viewMode === 'orgchart') {
+        _renderLeadOrgChart(leadId, contacts);
+        return;
+      }
+      // Fall through to the Table view rendering below.
       // v1.0.0a: render touch state per contact — last touched, overdue.
       const touchLabel = (c) => {
         if (!c.last_touched_at) return `<span class="muted" style="font-size:10px;">never touched · cadence ${c.cadence_days || 30}d</span>`;
@@ -3659,6 +3695,154 @@
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed to load contacts: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
+  }
+
+  // v1.0.0ar: keep the manual-add "Reports to" dropdown in sync with
+  // the currently-loaded contacts. Called whenever loadLeadContacts
+  // refreshes the cache.
+  function _refreshManualAddReportsTo(contacts) {
+    const sel = $('#ld-new-contact-reports-to');
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— none / root —</option>' +
+      (contacts || []).map(c =>
+        `<option value="${escapeAttr(c.id)}"${c.id === current ? ' selected' : ''}>${escapeHtml(c.name || '(unnamed)')}${c.title ? ' — ' + escapeHtml(c.title) : ''}</option>`
+      ).join('');
+  }
+
+  // v1.0.0ar: Account view toolbar — summary + view toggle. Wired once
+  // per drawer open via dataset.wired so the toggle handler doesn't
+  // accumulate.
+  function _renderAccountToolbar(leadId, contacts) {
+    const bar = $('#ld-account-toolbar');
+    const sum = $('#ld-account-engagement');
+    if (!bar || !sum) return;
+    bar.style.display = contacts.length ? 'flex' : 'none';
+    const engaged = contacts.filter(c => c.last_touched_at).length;
+    const overdue = contacts.filter(c => c.overdue).length;
+    const primary = contacts.filter(c => c.is_primary).length;
+    const parts = [
+      `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`,
+      `${engaged} engaged`,
+    ];
+    if (overdue) parts.push(`<span style="color:var(--red);">${overdue} overdue</span>`);
+    if (primary) parts.push(`${primary} key`);
+    sum.innerHTML = parts.join(' · ');
+    // Sync toggle button active state to current viewMode.
+    bar.querySelectorAll('[data-ld-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.ldView === accountViewState.viewMode);
+    });
+    if (!bar.dataset.wired) {
+      bar.dataset.wired = '1';
+      bar.querySelectorAll('[data-ld-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          accountViewState.viewMode = btn.dataset.ldView;
+          // Re-render from cache (no fetch needed).
+          const cached = accountViewState.cachedByLeadId[drawerState.id] || [];
+          _renderAccountToolbar(drawerState.id, cached);
+          if (accountViewState.viewMode === 'orgchart') {
+            _renderLeadOrgChart(drawerState.id, cached);
+          } else {
+            // Easiest path back to Table view: re-fire the loader. It
+            // re-reads from the cache below (no double fetch — the
+            // network call returns instantly from Notion's response
+            // cache during a quick toggle).
+            loadLeadContacts(drawerState.id);
+          }
+        });
+      });
+    }
+  }
+
+  // v1.0.0ar: lead-side org chart. Mirrors the partner-side renderer
+  // (renderPartnerOrgChart) but for a single account's contacts.
+  // Reports-to chains build the tree; orphan or cycle-broken contacts
+  // render as roots. Each node card surfaces the key engagement bits:
+  // title, last touch, notes count, click-through to edit.
+  function _renderLeadOrgChart(leadId, contacts) {
+    const el = $('#ld-contacts-list');
+    if (!el) return;
+    if (!contacts.length) {
+      el.innerHTML = '<div class="muted" style="font-size:12px;">No contacts yet — switch to Table view and add one below.</div>';
+      return;
+    }
+    const byId = new Map(contacts.map(c => [c.id, c]));
+    const children = new Map();
+    const roots = [];
+    contacts.forEach(c => {
+      const parent = c.reports_to_id && byId.has(c.reports_to_id) ? c.reports_to_id : null;
+      if (parent) {
+        if (!children.has(parent)) children.set(parent, []);
+        children.get(parent).push(c);
+      } else {
+        roots.push(c);
+      }
+    });
+    // Stable sort by name within each level so the chart doesn't
+    // jiggle on every re-render.
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+    roots.sort(byName);
+    children.forEach(list => list.sort(byName));
+    // Cycle guard: bound recursion at 8 levels — well past any
+    // realistic org depth, but stops a corrupted reports_to_id chain
+    // from blowing the stack.
+    const renderNode = (c, depth) => {
+      if (depth > 8) return '';
+      const kids = children.get(c.id) || [];
+      const overdueStyle = c.overdue ? 'border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.04);' : '';
+      const keyChip = c.is_primary ? '<span style="background:var(--accent);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:600;">KEY</span>' : '';
+      const statusChip = c.status === 'left'
+        ? '<span style="background:var(--surface-2);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;border:1px solid var(--border);">LEFT</span>'
+        : c.status === 'dormant'
+        ? '<span style="background:rgba(251,191,36,.15);color:var(--yellow);font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;">DORMANT</span>'
+        : '';
+      const lastTouch = c.last_touched_at
+        ? (c.overdue
+            ? `<span style="color:var(--red);font-size:9px;">overdue ${Math.abs(c.days_until_due || 0)}d</span>`
+            : `<span class="muted" style="font-size:9px;">touched ${_fmtDaysAgo(c.days_since_touch)}</span>`)
+        : '<span class="muted" style="font-size:9px;">never touched</span>';
+      return `
+        <li style="list-style:none;padding-left:0;">
+          <div data-ld-orgnode="${escapeAttr(c.id)}"
+               style="background:var(--surface);border:1px solid var(--border);${overdueStyle}border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:500;">${escapeHtml(c.name || '—')}${keyChip}${statusChip}</div>
+              <div class="muted" style="font-size:10px;">${escapeHtml(c.title || '—')}</div>
+              <div style="margin-top:3px;">${lastTouch}</div>
+            </div>
+            <div style="display:flex;gap:3px;flex-shrink:0;">
+              <button class="btn ghost" type="button" data-ld-orgnode-note="${escapeAttr(c.id)}" style="padding:2px 6px;font-size:9px;" title="Stakeholder notes">${icon('note', { size: 10 })}</button>
+              <button class="btn ghost" type="button" data-ld-orgnode-edit="${escapeAttr(c.id)}" style="padding:2px 6px;font-size:9px;" title="Edit">${icon('edit', { size: 10 })}</button>
+            </div>
+          </div>
+          ${kids.length ? `<ul style="list-style:none;padding-left:18px;border-left:1px dashed var(--border);margin:0 0 6px;">${kids.map(k => renderNode(k, depth + 1)).join('')}</ul>` : ''}
+        </li>
+      `;
+    };
+    el.innerHTML = `
+      <ul style="list-style:none;padding-left:0;margin:0;">${roots.map(r => renderNode(r, 0)).join('')}</ul>
+      <div class="muted" style="font-size:10px;margin-top:4px;">Set each contact's "Reports to" in the edit form to map your stakeholders.</div>
+    `;
+    el.querySelectorAll('[data-ld-orgnode-edit]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const c = contacts.find(x => x.id === b.dataset.ldOrgnodeEdit);
+        if (c) openLeadContactEditForm(leadId, c);
+      });
+    });
+    el.querySelectorAll('[data-ld-orgnode-note]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const c = contacts.find(x => x.id === b.dataset.ldOrgnodeNote);
+        if (c) openLeadContactNotes(leadId, c);
+      });
+    });
+    el.querySelectorAll('[data-ld-orgnode]').forEach(card => {
+      card.addEventListener('click', () => {
+        const c = contacts.find(x => x.id === card.dataset.ldOrgnode);
+        if (c) openLeadContactNotes(leadId, c);
+      });
+    });
   }
 
   async function setContactPrimary(leadId, contactId) {
@@ -3949,6 +4133,16 @@
             <select id="lcef-cadence">${CADENCES.map(d => `<option value="${d}"${d === (contact.cadence_days || 30) ? ' selected' : ''}>${d} days</option>`).join('')}</select>
           </div>
         </div>
+        <!-- v1.0.0ar: reports-to picker — drives the Account org chart. -->
+        <div class="field">
+          <label>Reports to (org chart)</label>
+          <select id="lcef-reports-to">
+            <option value="">— none / root —</option>
+            ${(accountViewState.cachedByLeadId[leadId] || [])
+                .filter(x => x.id !== contact.id)
+                .map(x => `<option value="${escapeAttr(x.id)}"${x.id === contact.reports_to_id ? ' selected' : ''}>${escapeHtml(x.name || '(unnamed)')}${x.title ? ' — ' + escapeHtml(x.title) : ''}</option>`).join('')}
+          </select>
+        </div>
         <div class="field" style="margin-bottom:0;">
           <label>Last touched</label>
           <div style="padding:8px 10px;font-size:12px;color:var(--text-dim);">
@@ -3970,6 +4164,8 @@
         linkedin_url: $('#lcef-linkedin').value.trim(),
         status: $('#lcef-status').value,
         cadence_days: parseInt($('#lcef-cadence').value, 10) || 30,
+        // v1.0.0ar: persist the reports-to selection for the org chart.
+        reports_to_id: $('#lcef-reports-to')?.value || null,
         // Preserve fields the form doesn't touch:
         is_primary: contact.is_primary,
         last_touched_at: contact.last_touched_at,
@@ -4010,6 +4206,8 @@
       // v1.0.0a: cadence + status optional fields, with sane defaults
       cadence_days: parseInt($('#ld-new-contact-cadence')?.value || '30', 10) || 30,
       status: $('#ld-new-contact-status')?.value || 'active',
+      // v1.0.0ar: optional reports-to for the org chart.
+      reports_to_id: $('#ld-new-contact-reports-to')?.value || null,
       source: 'manual',
     };
     try {

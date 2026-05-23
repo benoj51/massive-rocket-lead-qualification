@@ -118,6 +118,11 @@ def _normalise(contact: dict[str, Any]) -> dict[str, Any]:
         "added_at": contact.get("added_at") or _now(),
         "updated_at": _now(),
         "source": (contact.get("source") or "manual").strip() or "manual",
+        # v1.0.0ar: optional reports-to link for the Account org chart.
+        # Same shape as partner_contacts_store — FK to another contact
+        # on the SAME lead. Empty string normalises to None so the chart
+        # treats it as a root node.
+        "reports_to_id": (contact.get("reports_to_id") or "").strip() or None,
     }
 
 

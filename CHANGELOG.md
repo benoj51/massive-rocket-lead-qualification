@@ -5,6 +5,53 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ar] — 2026-05-23 — Account view: engagement summary + org chart + stakeholder notes
+
+Ben asked: "There also needs to be an account view in which you can
+see the contacts that you have engaged maybe the ability to add
+stakeholder notes as well as an org chart to map the account
+appropriately."
+
+Stakeholder notes per contact already existed via
+`lead_contact_notes_store` (the note icon on each contact row). The
+two missing pieces: an engagement summary so you can see at a glance
+how the account is being worked, and an org chart so you can map
+the buying group.
+
+### Added
+
+- **`reports_to_id`** on lead-side contacts (mirrors the
+  partner_contacts_store pattern). Empty/whitespace normalises to
+  None so the chart treats unanchored contacts as roots.
+- **Account view toolbar** in the lead drawer's Contacts section:
+  one-line engagement summary (`5 contacts · 3 engaged · 1 overdue
+  · 1 key`) + Table/Org chart toggle. Hidden when there are no
+  contacts so the empty state isn't cluttered.
+- **`_renderLeadOrgChart`** — vertical tree built from `reports_to_id`
+  chains. Each node card shows name + title + key/dormant/left
+  chips + last-touch state + note + edit buttons. Click any node to
+  open its stakeholder notes. Cycle guard caps recursion at 8
+  levels so a corrupted FK can't blow the stack.
+- **"Reports to" picker** added to both the manual-add form and the
+  edit form. The edit form lists every other contact on the lead;
+  the add form's options refresh whenever `loadLeadContacts` fires.
+
+### Tests
+
+- **`tests/test_lead_contact_reports_to.py`** — 6 tests: default is
+  None, persists and round-trips, empty string + whitespace
+  normalise to None (form-field hygiene), update clears the field,
+  list/save cycle preserves the FK across multiple contacts.
+
+### Why a toolbar inside the existing section, not a separate view
+
+Considered a new top-level "Account" view in the nav. Held back:
+the lead drawer is already the natural context for everything
+account-scoped (calls, scope, pricing, contacts), splitting it
+across two surfaces would force the AE to context-switch. The
+toolbar gives the new org-chart view first-class status without
+breaking the existing flow.
+
 ## [1.0.0aq] — 2026-05-23 — Fix: Notion 400 when DB lacks a property we wrote
 
 Ben hit "Save failed: Notion POST /pages 400: ... For is not a property
