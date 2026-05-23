@@ -1337,8 +1337,11 @@
             <th data-sort="icp_normalised">ICP</th>
             <!-- v1.0.0au: engagement-score column. Populated post-render
                  via the batch /api/engagement-scores endpoint so the
-                 initial table paint isn't blocked. -->
-            <th title="Engagement score 0–100 — how well we're working this account">ENG</th>
+                 initial table paint isn't blocked.
+                 v1.0.0az: sortable column. Click to sort asc (worst
+                 first) → second click flips to desc. Uses the in-state
+                 score cache so re-sorts don't re-fetch. -->
+            <th data-sort="engagement_score" title="Engagement score 0–100 — click to sort">ENG</th>
             <th data-sort="status">Status</th>
             <th data-sort="sales_stage">Stage</th>
             <th data-sort="vertical">Vertical</th>
@@ -5517,13 +5520,35 @@
     }
 
     const { key, dir } = state.pipeline.sort;
-    rows.sort((a, b) => {
-      const av = a[key] ?? ''; const bv = b[key] ?? '';
-      if (typeof av === 'number' || typeof bv === 'number') {
-        return dir === 'asc' ? (av || 0) - (bv || 0) : (bv || 0) - (av || 0);
-      }
-      return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
-    });
+    // v1.0.0az: special-case sort by `engagement_score`. The score
+    // isn't a column on the pipeline row (it lives in the in-state
+    // cache populated by the batch hydrator), so we read from the
+    // cache for the sort key. Rows without a cached score sort to the
+    // bottom regardless of direction — otherwise asc would push the
+    // unscored leads to the top and bury the actually-low ones.
+    if (key === 'engagement_score') {
+      const cache = state.pipeline.engagementScores || {};
+      const scoreOf = (r) => {
+        const s = cache[r.id];
+        return s && s.score != null ? s.score : null;
+      };
+      rows.sort((a, b) => {
+        const av = scoreOf(a), bv = scoreOf(b);
+        // Unscored rows sink to the bottom in both directions.
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return dir === 'asc' ? av - bv : bv - av;
+      });
+    } else {
+      rows.sort((a, b) => {
+        const av = a[key] ?? ''; const bv = b[key] ?? '';
+        if (typeof av === 'number' || typeof bv === 'number') {
+          return dir === 'asc' ? (av || 0) - (bv || 0) : (bv || 0) - (av || 0);
+        }
+        return dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+      });
+    }
 
     const tbody = $('#pipeline-table tbody');
     if (rows.length === 0) {
@@ -5710,6 +5735,13 @@
       });
       // v1.0.0av: now that scores are in, apply the engagement-band filter.
       _applyPipelineEngagementFilter();
+      // v1.0.0az: if the table is currently sorted by engagement_score,
+      // the original sort ran against an empty cache. Re-render to
+      // re-sort with the fresh scores. (Other sorts are score-independent
+      // and don't need this.)
+      if ((state.pipeline.sort?.key) === 'engagement_score') {
+        renderPipeline();
+      }
     } catch (e) {
       console.warn('engagement-scores batch fetch failed', e);
     }

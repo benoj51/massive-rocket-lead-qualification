@@ -5,6 +5,36 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0az] — 2026-05-23 — Sortable ENG column on Pipeline
+
+Tiny but high-utility: click the ENG column header on the Pipeline to
+sort by engagement score. First click → ascending (worst first, so
+the rescue list floats to the top). Second click → descending (best
+first). Pairs with the v1.0.0av engagement-band filter for a "show
+me the cold ones, sorted by score" workflow.
+
+### Changed
+
+- **`renderPipeline` sort branch**: special-case for the
+  `engagement_score` key. Reads from the in-state
+  `engagementScores` cache populated by the v1.0.0au batch
+  hydrator, not from row fields (which don't carry the score).
+  Rows without a cached score sink to the bottom regardless of
+  direction so unscored leads don't bury the actually-low ones at
+  the top of an ascending sort.
+- **`_hydratePipelineEngagementScores` re-render**: if the current
+  sort is `engagement_score` and the scores arrive after the
+  initial paint, re-trigger `renderPipeline` so the table re-sorts
+  with the fresh data. Other sort keys are score-independent and
+  don't need this.
+- **ENG `<th>` made sortable**: added `data-sort="engagement_score"`
+  so the existing pipeline header-click handler picks it up
+  automatically. No new wiring needed.
+
+No new tests — pure frontend wiring against an already-tested
+endpoint. The existing pipeline sort tests cover the regression
+surface; the new branch is small and well-isolated.
+
 ## [1.0.0ay] — 2026-05-23 — Saved filter presets for partner contacts
 
 The partner contacts table has 8 filter dimensions (territory, region,
