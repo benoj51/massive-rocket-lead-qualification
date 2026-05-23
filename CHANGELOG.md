@@ -5,6 +5,50 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0au] — 2026-05-23 — Engagement score in Pipeline + Home rows
+
+v1.0.0at gave every account an engagement score and surfaced it in
+the lead drawer. v1.0.0au pushes it into the surfaces AEs scan most:
+the Pipeline table and the Home "Active leads" card. One glance,
+spot the stale accounts.
+
+### Added
+
+- **`GET /api/engagement-scores?lead_ids=a,b,c`** — batch endpoint.
+  Returns `{scores: {lead_id: {score, band}, ...}}`. Score + band
+  only (no signals — the drawer tooltip pulls the full breakdown via
+  the single-lead endpoint). Capped at 200 ids per call. Per-lead
+  failures land as `{score: null, error: "..."}` rather than
+  500ing the whole batch — one bad lead can't blank the pipeline.
+- **`_compute_engagement_for_lead` shared helper** in server.py.
+  Single-lead and batch endpoints both delegate to it; no risk of
+  the two endpoints drifting apart.
+- **ENG column in the Pipeline table** between ICP and Status.
+  Header tooltip: "Engagement score 0–100 — how well we're working
+  this account". Each cell paints green/yellow/orange/red based on
+  band. Filled post-render via `_hydratePipelineEngagementScores`
+  so the table paints without blocking on the batch fetch.
+- **ENG chip in Home → "Your active leads"** rows. Inline next to
+  the ICP score, same colour scheme. Hover for "Engagement 75/100
+  (strong)".
+
+### Tests
+
+- **`tests/test_engagement_score.py`** — 4 new endpoint tests:
+  - empty query returns empty map (no 400)
+  - returns `score + band` per lead, no signals (contract check)
+  - unknown lead id returns `{score: 0, band: "cold"}` (UI gets a
+    rendered chip, not a missing key)
+  - 250 ids → server clamps to 200
+
+### Why the chips, not just the column
+
+I considered just the Pipeline column. Decided to add Home too
+because the active-leads card is where AEs spend the most
+attention — that's where engagement-state matters most. The
+Pipeline column is for the cross-account scan; the Home chip is
+for the "what should I do next" decision.
+
 ## [1.0.0at] — 2026-05-23 — Account engagement score
 
 ICP score tells you how good a lead is intrinsically (revenue, employees,

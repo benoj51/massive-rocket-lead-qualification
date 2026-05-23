@@ -1311,6 +1311,10 @@
           <tr>
             <th data-sort="company">Company</th>
             <th data-sort="icp_normalised">ICP</th>
+            <!-- v1.0.0au: engagement-score column. Populated post-render
+                 via the batch /api/engagement-scores endpoint so the
+                 initial table paint isn't blocked. -->
+            <th title="Engagement score 0–100 — how well we're working this account">ENG</th>
             <th data-sort="status">Status</th>
             <th data-sort="sales_stage">Stage</th>
             <th data-sort="vertical">Vertical</th>
@@ -5508,6 +5512,9 @@
         <tr class="pipeline-row-clickable${opts.child ? ' pipeline-row-child' : ''}" data-page-id="${escapeAttr(r.id || '')}">
           <td class="openlink">${indent}${escapeHtml(r.company || '—')}${parentBadge}</td>
           <td><strong class="num ${cls}" style="font-size:14px;font-family:var(--mono);">${score ?? '—'}</strong></td>
+          <!-- v1.0.0au: engagement chip placeholder. Filled after the
+               batch fetch in _hydratePipelineEngagementScores. -->
+          <td data-engagement-cell="${escapeAttr(r.id || '')}" style="font-family:var(--mono);font-size:12px;color:var(--text-muted);">—</td>
           <td>${escapeHtml(r.status || '—')}</td>
           <td>${escapeHtml(r.sales_stage || '—')}</td>
           <td>${escapeHtml(r.vertical || '—')}</td>
@@ -5602,6 +5609,67 @@
     // v1.0.0r: hydrate + wire the inline MR owner dropdowns in every row.
     hydrateOwnerSelects(tbody);
     wireInlineOwnerCells(tbody);
+    // v1.0.0au: fan out a batch fetch for engagement scores. Fires
+    // after the table paints so the rest of the row data is visible
+    // immediately and the chip fills in shortly after.
+    _hydratePipelineEngagementScores(tbody);
+  }
+
+  // v1.0.0au: same batch-fetch pattern for Home active-leads chips.
+  async function _hydrateHomeEngagementScores(container, leadIds) {
+    if (!container || !leadIds || !leadIds.length) return;
+    const ids = leadIds.filter(Boolean);
+    if (!ids.length) return;
+    try {
+      const data = await jsonFetch(
+        `/api/engagement-scores?lead_ids=${encodeURIComponent(ids.join(','))}`);
+      const scores = data.scores || {};
+      container.querySelectorAll('[data-home-eng-cell]').forEach(cell => {
+        const id = cell.dataset.homeEngCell;
+        const s = scores[id];
+        if (!s || s.score == null) { cell.textContent = 'ENG —'; return; }
+        const colour =
+          s.band === 'strong' ? 'var(--green)' :
+          s.band === 'warm'   ? 'var(--yellow)' :
+          s.band === 'weak'   ? 'var(--orange,#f59e0b)' :
+                                 'var(--red)';
+        cell.innerHTML = `<span style="color:${colour};">ENG ${s.score}</span>`;
+        cell.title = `Engagement ${s.score}/100 (${s.band})`;
+      });
+    } catch (e) {
+      console.warn('home engagement-scores fetch failed', e);
+    }
+  }
+
+  // v1.0.0au: collect every lead id in the rendered tbody, hit the
+  // batch /api/engagement-scores endpoint once, then populate the
+  // ENG cell on each row. Quiet failure — the column just stays "—".
+  async function _hydratePipelineEngagementScores(tbody) {
+    const cells = tbody.querySelectorAll('[data-engagement-cell]');
+    const ids = [];
+    cells.forEach(c => {
+      const id = c.dataset.engagementCell;
+      if (id) ids.push(id);
+    });
+    if (!ids.length) return;
+    try {
+      const data = await jsonFetch(
+        `/api/engagement-scores?lead_ids=${encodeURIComponent(ids.join(','))}`);
+      const scores = data.scores || {};
+      cells.forEach(cell => {
+        const id = cell.dataset.engagementCell;
+        const s = scores[id];
+        if (!s || s.score == null) return;
+        const colour =
+          s.band === 'strong' ? 'var(--green)' :
+          s.band === 'warm'   ? 'var(--yellow)' :
+          s.band === 'weak'   ? 'var(--orange,#f59e0b)' :
+                                 'var(--red)';
+        cell.innerHTML = `<span style="color:${colour};font-weight:600;" title="Engagement ${s.score}/100 (${s.band})">${s.score}</span>`;
+      });
+    } catch (e) {
+      console.warn('engagement-scores batch fetch failed', e);
+    }
   }
 
   // Populate the Group filter dropdown from the current pipeline's parents.
@@ -8525,7 +8593,11 @@
               <div class="muted" style="font-size:10px;">${escapeHtml(l.sales_stage || l.status || '')}${l.next_steps ? ' · ' + escapeHtml(l.next_steps) : ''}</div>
             </div>
             <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
-              <div style="font-size:13px;font-weight:600;color:${scoreColor};font-family:var(--mono);">${score != null ? score + '/10' : '—'}</div>
+              <div style="display:flex;align-items:baseline;gap:6px;">
+                <span style="font-size:13px;font-weight:600;color:${scoreColor};font-family:var(--mono);">${score != null ? score + '/10' : '—'}</span>
+                <!-- v1.0.0au: engagement chip filled by batch hydrator below. -->
+                <span data-home-eng-cell="${escapeAttr(l.id)}" style="font-size:10px;font-family:var(--mono);color:var(--text-muted);" title="Engagement score loading…">ENG —</span>
+              </div>
               <!-- v1.0.0an: + todo button for active leads. -->
               <button class="btn ghost" type="button"
                       data-home-add-todo-lead="${escapeAttr(l.id)}"
@@ -8550,6 +8622,8 @@
           });
         });
       });
+      // v1.0.0au: batch-fetch engagement scores for the visible leads.
+      _hydrateHomeEngagementScores(leadsList, leads.map(l => l.id));
     }
 
     // Team snapshot

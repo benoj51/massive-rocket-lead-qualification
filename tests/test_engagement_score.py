@@ -299,6 +299,47 @@ class EngagementScoreEndpointTests(unittest.TestCase):
         self.assertEqual(body["signals"]["coverage_pct"], 100)
         self.assertGreaterEqual(body["signals"]["events_30d"], 1)
 
+    # v1.0.0au: batch endpoint tests ----------------------------------
+
+    def test_batch_empty_query_returns_empty_map(self):
+        r = self.client.get("/api/engagement-scores")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json(), {"scores": {}})
+
+    def test_batch_returns_score_and_band_per_lead(self):
+        import contacts_store
+        # Seed two leads so the batch has something to return.
+        contacts_store.save_contact("acme-1", {"name": "A",
+                                                 "is_primary": True})
+        contacts_store.save_contact("acme-2", {"name": "B"})
+        r = self.client.get("/api/engagement-scores?lead_ids=acme-1,acme-2")
+        body = r.get_json()
+        self.assertIn("acme-1", body["scores"])
+        self.assertIn("acme-2", body["scores"])
+        # Each entry has only score + band (no signals — that's the
+        # contract; UI fetches the full breakdown when the drawer opens).
+        for lid, entry in body["scores"].items():
+            self.assertIn("score", entry)
+            self.assertIn("band", entry)
+            self.assertNotIn("signals", entry)
+
+    def test_batch_unknown_lead_returns_zero_cold(self):
+        """A lead id with no saved data scores 0 (cold). Doesn't 404 —
+        the pipeline view feeds in raw Notion ids that may not have
+        local cache yet, and we want the column to render rather than
+        skip the row."""
+        r = self.client.get("/api/engagement-scores?lead_ids=does-not-exist")
+        body = r.get_json()
+        self.assertEqual(body["scores"]["does-not-exist"]["score"], 0)
+        self.assertEqual(body["scores"]["does-not-exist"]["band"], "cold")
+
+    def test_batch_clamps_at_200(self):
+        ids = ",".join(f"lead-{i}" for i in range(250))
+        r = self.client.get(f"/api/engagement-scores?lead_ids={ids}")
+        body = r.get_json()
+        # Server caps at 200 — the extra 50 silently drop.
+        self.assertLessEqual(len(body["scores"]), 200)
+
 
 if __name__ == "__main__":
     unittest.main()

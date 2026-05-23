@@ -567,19 +567,12 @@ def api_lead_engagement_timeline(lead_id: str):
 # hover. Same shape as the engagement-timeline stats so the surfaces
 # stay consistent.
 
-@app.route("/api/lead/<lead_id>/engagement-score", methods=["GET"])
-def api_lead_engagement_score(lead_id: str):
-    """Compute the engagement score for an account.
-
-    Cheap: one contacts read + one calls read + per-contact note reads.
-    Result is uncached — engagement changes minute-to-minute (a new
-    note shifts the score immediately), and the per-call cost is
-    already <100ms for typical accounts.
-    """
+def _compute_engagement_for_lead(lead_id: str) -> dict:
+    """Internal helper: pull contacts + events for one lead and run
+    the scorer. Returns the same shape as /engagement-score (with
+    the lead_id embedded so the batch endpoint can route results)."""
     contacts = [contacts_store.annotate_touch_state(dict(c))
                 for c in contacts_store.list_contacts(lead_id)]
-    # Gather every engagement event's timestamp for the activity-volume
-    # signal. We don't need content — just dates.
     event_isos: list[str] = []
     for c in contacts:
         try:
@@ -594,12 +587,56 @@ def api_lead_engagement_score(lead_id: str):
                 event_isos.append(k["created_at"])
     except Exception:
         pass
-
     result = engagement.compute_engagement_score(
-        contacts=contacts,
-        recent_event_isos=event_isos,
-    )
-    return jsonify(result)
+        contacts=contacts, recent_event_isos=event_isos)
+    result["lead_id"] = lead_id
+    return result
+
+
+# v1.0.0au: batch engagement-score endpoint --------------------------------
+# The pipeline view needs 50+ scores at once. Per-lead round-trips
+# would dominate the page load; this batches them in a single call.
+
+@app.route("/api/engagement-scores", methods=["GET"])
+def api_engagement_scores_batch():
+    """Compute engagement scores for many leads at once.
+
+    Query: lead_ids — comma-separated list of lead/page ids (max 200).
+
+    Returns:
+      { scores: { lead_id_1: {score, band}, lead_id_2: {...}, ... } }
+
+    Only score + band are returned per lead (the full signal breakdown
+    would balloon the response for a 50-row pipeline). UI calls the
+    single-lead endpoint for the tooltip when the user opens a drawer.
+    """
+    raw = (request.args.get("lead_ids") or "").strip()
+    if not raw:
+        return jsonify({"scores": {}})
+    ids = [x.strip() for x in raw.split(",") if x.strip()]
+    if len(ids) > 200:
+        ids = ids[:200]
+    scores: dict[str, dict] = {}
+    for lid in ids:
+        try:
+            r = _compute_engagement_for_lead(lid)
+            scores[lid] = {"score": r["score"], "band": r["band"]}
+        except Exception as e:
+            # Log but don't fail the whole batch — one bad lead
+            # shouldn't blank out the whole pipeline.
+            log.warning("Batch engagement score failed for %s: %s", lid, e)
+            scores[lid] = {"score": None, "band": None,
+                            "error": str(e)[:120]}
+    return jsonify({"scores": scores})
+
+
+@app.route("/api/lead/<lead_id>/engagement-score", methods=["GET"])
+def api_lead_engagement_score(lead_id: str):
+    """Compute the engagement score for one account. Returns the full
+    {score, band, signals} so the drawer tooltip can show the
+    breakdown. Delegates to the shared helper used by the batch
+    endpoint above — single source of truth for the score math."""
+    return jsonify(_compute_engagement_for_lead(lead_id))
 
 
 # v1.0.0p: incumbent + previous agencies per lead -----------------------------
