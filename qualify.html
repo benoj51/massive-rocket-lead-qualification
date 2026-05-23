@@ -870,6 +870,26 @@
           style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;gap:6px;">
     <span data-icon="search" data-icon-size="14"></span><span style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-left:6px;">⌘K</span>
   </button>
+  <!-- v1.0.0al: notification bell. Click toggles a dropdown panel
+       below; the red dot + count badge reflect unread_count from
+       /api/notifications. Hidden until a profile is set (no
+       recipient = no notifications to fetch). -->
+  <div id="notif-wrap" style="position:relative;margin-left:8px;display:none;">
+    <button id="notif-bell" type="button" title="Notifications"
+            aria-label="Notifications"
+            style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;line-height:1;display:inline-flex;align-items:center;position:relative;">
+      <span data-icon="bell" data-icon-size="14"></span>
+      <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--mr-red,#e82b23);color:#fff;font-size:9px;line-height:1;padding:3px 5px;border-radius:8px;font-weight:600;min-width:14px;text-align:center;">0</span>
+    </button>
+    <div id="notif-panel" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);width:340px;max-height:480px;overflow:hidden;z-index:50;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);">
+        <strong style="font-size:13px;">Notifications</strong>
+        <button class="btn ghost" id="notif-mark-all" type="button"
+                style="padding:3px 8px;font-size:10px;">Mark all read</button>
+      </div>
+      <div id="notif-list" style="max-height:420px;overflow-y:auto;"></div>
+    </div>
+  </div>
   <button id="theme-toggle" type="button" title="Toggle light / dark theme"
           aria-label="Toggle light / dark theme"
           style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;"><span data-icon="moon" data-icon-size="14"></span></button>
@@ -906,6 +926,19 @@
       </div>
     </div>
     <div id="home-role-extra" style="margin-top:14px;"></div>
+    <!-- v1.0.0al: notifications panel on Home. Rendered from
+         home.notifications.recent so users see assignments without
+         hunting for the bell. Hidden when there's nothing to show. -->
+    <div class="card" id="home-notif-card" style="margin-top:14px;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Recent assignments</h3>
+          <div class="muted" id="home-notif-sub" style="font-size:11px;margin-top:2px;">When you get assigned a contact or lead, it lands here.</div>
+        </div>
+        <button id="home-notif-open" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">See all →</button>
+      </div>
+      <div id="home-notif-list" style="margin-top:12px;"></div>
+    </div>
     <div class="card" id="home-team-snapshot" style="margin-top:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div>
@@ -7089,7 +7122,12 @@
     // v1.0.0ah: ensure we know who the user is, then fire the Home
     // load. The picker modal appears on first ever visit; subsequent
     // visits pull from localStorage and skip straight to Home.
-    ensureProfileSelected().then(() => { if (homeState.profile) loadHome(); });
+    // v1.0.0al: also kick off the notifications poll once we know who
+    // the user is.
+    ensureProfileSelected().then(() => {
+      if (homeState.profile) loadHome();
+      _initNotifications();
+    });
     // v0.10.0q: theme toggle. Inline-rendered button (set in markup);
     // here we sync its icon to the current theme + wire click to flip.
     const _themeBtn = $('#theme-toggle');
@@ -7509,7 +7547,196 @@
       _saveProfile(selected);
       homeState.profile = selected;
       loadHome();
+      // v1.0.0al: re-bind notifications for the newly-picked profile.
+      _initNotifications();
     });
+  }
+
+  // =============================================================
+  //  Notifications (v1.0.0al) — bell + dropdown panel
+  // =============================================================
+  const notifState = {
+    items:       [],
+    unreadCount: 0,
+    pollTimer:   null,
+    panelOpen:   false,
+  };
+
+  function _currentRecipient() {
+    return (homeState.profile?.name || _readSavedProfile()?.name || '').trim();
+  }
+
+  async function _initNotifications() {
+    const wrap = $('#notif-wrap');
+    if (!wrap) return;
+    const recipient = _currentRecipient();
+    if (!recipient) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'inline-flex';
+    // Wire once — subsequent profile changes only refresh, don't re-bind.
+    if (!wrap.dataset.wired) {
+      wrap.dataset.wired = '1';
+      $('#notif-bell').addEventListener('click', _toggleNotifPanel);
+      $('#notif-mark-all').addEventListener('click', _markAllRead);
+      // Close on outside click.
+      document.addEventListener('click', (e) => {
+        if (!notifState.panelOpen) return;
+        if (wrap.contains(e.target)) return;
+        _closeNotifPanel();
+      });
+    }
+    await _refreshNotifications();
+    // Poll every 60s — cheap (file read + count) and keeps the badge
+    // honest without WebSockets.
+    if (notifState.pollTimer) clearInterval(notifState.pollTimer);
+    notifState.pollTimer = setInterval(_refreshUnreadCount, 60_000);
+  }
+
+  async function _refreshNotifications() {
+    const recipient = _currentRecipient();
+    if (!recipient) return;
+    try {
+      const data = await jsonFetch(
+        `/api/notifications?recipient=${encodeURIComponent(recipient)}&limit=20`);
+      notifState.items = data.items || [];
+      notifState.unreadCount = data.unread_count || 0;
+      _renderNotifBadge();
+      if (notifState.panelOpen) _renderNotifList();
+    } catch (e) {
+      console.warn('notifications fetch failed', e);
+    }
+  }
+
+  async function _refreshUnreadCount() {
+    const recipient = _currentRecipient();
+    if (!recipient) return;
+    try {
+      const data = await jsonFetch(
+        `/api/notifications/unread-count?recipient=${encodeURIComponent(recipient)}`);
+      notifState.unreadCount = data.unread_count || 0;
+      _renderNotifBadge();
+    } catch (_) { /* silent — badge stays at last known value */ }
+  }
+
+  function _renderNotifBadge() {
+    const badge = $('#notif-badge');
+    if (!badge) return;
+    if (notifState.unreadCount > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = notifState.unreadCount > 99 ? '99+' : String(notifState.unreadCount);
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function _toggleNotifPanel() {
+    if (notifState.panelOpen) _closeNotifPanel();
+    else _openNotifPanel();
+  }
+
+  async function _openNotifPanel() {
+    notifState.panelOpen = true;
+    $('#notif-panel').style.display = 'block';
+    // Always re-fetch on open so we render the freshest state.
+    await _refreshNotifications();
+    _renderNotifList();
+  }
+
+  function _closeNotifPanel() {
+    notifState.panelOpen = false;
+    $('#notif-panel').style.display = 'none';
+  }
+
+  function _renderNotifList() {
+    const list = $('#notif-list');
+    if (!list) return;
+    if (!notifState.items.length) {
+      list.innerHTML = `<div class="muted" style="padding:18px 14px;text-align:center;font-size:12px;">No notifications yet</div>`;
+      return;
+    }
+    list.innerHTML = notifState.items.map(n => {
+      const ago = _fmtAgoShort(n.created_at);
+      const isUnread = !n.read_at;
+      const bg = isUnread ? 'background:var(--surface-2);' : '';
+      const dot = isUnread
+        ? `<span style="display:inline-block;width:6px;height:6px;background:var(--mr-red,#e82b23);border-radius:50%;margin-right:8px;flex-shrink:0;"></span>`
+        : `<span style="display:inline-block;width:6px;margin-right:8px;flex-shrink:0;"></span>`;
+      return `
+        <div data-notif-id="${escapeAttr(n.id)}"
+             style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;${bg}display:flex;align-items:flex-start;gap:0;"
+             title="${escapeAttr(n.body || '')}">
+          ${dot}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:${isUnread ? '600' : '400'};">${escapeHtml(n.title)}</div>
+            ${n.body ? `<div class="muted" style="font-size:10px;margin-top:2px;">${escapeHtml(n.body)}</div>` : ''}
+            <div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(ago)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('[data-notif-id]').forEach(row => {
+      row.addEventListener('click', () => _handleNotifClick(row.dataset.notifId));
+    });
+  }
+
+  function _fmtAgoShort(iso) {
+    if (!iso) return '';
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return iso;
+    const mins = Math.max(0, Math.floor((Date.now() - then) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  async function _handleNotifClick(id) {
+    const n = notifState.items.find(x => x.id === id);
+    if (!n) return;
+    // Mark read first so the dot clears immediately.
+    if (!n.read_at) {
+      try {
+        await jsonFetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipient: _currentRecipient() }),
+        });
+        n.read_at = new Date().toISOString();
+        notifState.unreadCount = Math.max(0, notifState.unreadCount - 1);
+        _renderNotifBadge();
+        _renderNotifList();
+      } catch (_) { /* render still happens below */ }
+    }
+    // Navigate to the linked entity.
+    const link = n.link || {};
+    _closeNotifPanel();
+    if (link.kind === 'partner_contact' && link.partner_id) {
+      switchView('partners');
+      setTimeout(() => openPartnerDetail(link.partner_id), 50);
+    } else if (link.kind === 'lead' && link.lead_id) {
+      switchView('pipeline');
+      setTimeout(() => openLeadDrawer(link.lead_id), 50);
+    }
+  }
+
+  async function _markAllRead() {
+    const recipient = _currentRecipient();
+    if (!recipient) return;
+    try {
+      await jsonFetch('/api/notifications/read-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient }),
+      });
+      notifState.unreadCount = 0;
+      notifState.items.forEach(n => { if (!n.read_at) n.read_at = new Date().toISOString(); });
+      _renderNotifBadge();
+      _renderNotifList();
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   async function loadHome() {
@@ -7656,6 +7883,60 @@
       `;
     } else {
       extraEl.innerHTML = '';
+    }
+
+    // v1.0.0al: Home notifications panel — fed by data.notifications,
+    // which the /api/home endpoint includes. Hidden when there are no
+    // notifications so the card doesn't add chrome for nothing.
+    _renderHomeNotifications(data.notifications || {});
+  }
+
+  function _renderHomeNotifications(notifData) {
+    const card = $('#home-notif-card');
+    const list = $('#home-notif-list');
+    const sub  = $('#home-notif-sub');
+    if (!card || !list) return;
+    const items = notifData.recent || [];
+    if (!items.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    const unread = notifData.unread_count || 0;
+    if (sub) {
+      sub.textContent = unread
+        ? `${unread} unread · click any item to open it.`
+        : 'All caught up — your last 5 assignments are below for reference.';
+    }
+    list.innerHTML = items.map(n => {
+      const ago = _fmtAgoShort(n.created_at);
+      const isUnread = !n.read_at;
+      const bg = isUnread ? 'background:var(--surface-2);' : '';
+      return `
+        <div data-home-notif="${escapeAttr(n.id)}"
+             style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;${bg}">
+          <div style="font-size:12px;font-weight:${isUnread ? '600' : '400'};">${escapeHtml(n.title)}</div>
+          ${n.body ? `<div class="muted" style="font-size:10px;margin-top:2px;">${escapeHtml(n.body)}</div>` : ''}
+          <div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(ago)}</div>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('[data-home-notif]').forEach(row => {
+      row.addEventListener('click', () => {
+        // Re-use the bell's click handler so the navigation + mark-read
+        // logic stays in one place. The bell state may not have these
+        // items yet (Home preloads its own 5); pull them in.
+        const id = row.dataset.homeNotif;
+        const found = notifState.items.find(x => x.id === id);
+        if (!found) notifState.items.unshift(items.find(x => x.id === id));
+        _handleNotifClick(id);
+      });
+    });
+    const openAll = $('#home-notif-open');
+    if (openAll && !openAll.dataset.wired) {
+      openAll.dataset.wired = '1';
+      openAll.addEventListener('click', () => {
+        // Defer slightly so the click doesn't immediately close the
+        // panel via the outside-click handler.
+        setTimeout(_openNotifPanel, 0);
+      });
     }
   }
 

@@ -50,6 +50,7 @@ import contacts_store
 import criteria_store
 import hubspot_sync
 import lead_summary_store
+import notifications_store
 import packages
 import pricing
 import pricing_store
@@ -1048,11 +1049,45 @@ def api_lead_update(page_id: str):
     body = request.get_json(silent=True) or {}
     if not body:
         return jsonify({"error": "no edits supplied"}), 400
+    # v1.0.0al: capture the old owner so we can detect a change after
+    # the Notion write lands. Done BEFORE update_page so we compare
+    # like-for-like.
+    old_owner_for_notify = None
+    if "owner" in body:
+        try:
+            sync_peek = NotionSync()
+            prev = sync_peek.get_page(page_id) or {}
+            old_owner_for_notify = (prev.get("owner") or "").strip() or None
+        except Exception as e:
+            log.warning("notify_assignment (lead) owner-peek failed: %s", e)
     try:
         sync = NotionSync()
         result = sync.update_page(page_id, body)
         audit.log_event("lead_updated", actor=_actor(), page_id=page_id,
                         fields=sorted([k for k in body.keys() if k != "id"]))
+        # v1.0.0al: fire an "assigned to you" notification if owner
+        # changed. Guarded — never blocks the save on a notify error.
+        try:
+            new_lead = result.get("lead") or {}
+            new_owner = (new_lead.get("owner") or "").strip()
+            actor = _actor()
+            if new_owner and new_owner != (old_owner_for_notify or "") and new_owner != actor:
+                company = new_lead.get("company") or page_id
+                body_lines = []
+                if old_owner_for_notify:
+                    body_lines.append(f"Reassigned from {old_owner_for_notify}")
+                if actor:
+                    body_lines.append(f"by {actor}")
+                notifications_store.notify_assignment(
+                    new_owner,
+                    kind="assigned_lead",
+                    title=f"You were assigned {company}",
+                    body=" ".join(body_lines),
+                    link={"kind": "lead", "lead_id": page_id},
+                    actor=actor or None,
+                )
+        except Exception as e:
+            log.warning("notify_assignment (lead) fire failed: %s", e)
 
         # Re-score if scoring-relevant fields changed.
         scoring_changed = set(body.keys()) & _SCORING_FIELDS
@@ -2282,6 +2317,34 @@ def api_partner_contacts_update(partner_id: str, contact_id: str):
         saved = partner_contacts_store.save_contact(partner_id, merged)
     except partner_contacts_store.PartnerContactsStoreError as e:
         return jsonify({"error": str(e)}), 400
+    # v1.0.0al: notify the new owner if mr_owner changed. Wrapped in
+    # try/except so a notifications glitch never blocks the save —
+    # notifications are a convenience layer, not a correctness one.
+    try:
+        old_owner = (existing.get("mr_owner") or "").strip()
+        new_owner = (saved.get("mr_owner") or "").strip()
+        actor = _actor()
+        if new_owner and new_owner != old_owner and new_owner != actor:
+            partner = partners_store.get_partner(partner_id) or {}
+            partner_name = partner.get("name") or partner_id
+            contact_name = saved.get("name") or "(unnamed)"
+            body_lines = []
+            if old_owner:
+                body_lines.append(f"Reassigned from {old_owner}")
+            if actor:
+                body_lines.append(f"by {actor}")
+            notifications_store.notify_assignment(
+                new_owner,
+                kind="assigned_partner_contact",
+                title=f"You were assigned {contact_name} ({partner_name})",
+                body=" ".join(body_lines),
+                link={"kind": "partner_contact",
+                       "partner_id": partner_id,
+                       "contact_id": contact_id},
+                actor=actor or None,
+            )
+    except Exception as e:
+        log.warning("notify_assignment (partner contact) failed: %s", e)
     return jsonify({"contact": saved})
 
 
@@ -3069,6 +3132,11 @@ def api_home():
             ),
         }
 
+    # v1.0.0al: surface recent notifications + unread count on Home so
+    # users see assignments without hunting for the bell.
+    notifs_recent = notifications_store.list_for(owner_name, limit=5)
+    notifs_unread = notifications_store.unread_count(owner_name)
+
     return jsonify({
         "owner": {
             "name":   owner["name"],
@@ -3087,7 +3155,74 @@ def api_home():
         "active_leads":     active_leads_top,
         "team_snapshot":    team_snapshot,
         "role_extras":      role_extras,
+        "notifications":    {
+            "recent":        notifs_recent,
+            "unread_count":  notifs_unread,
+        },
         "generated_at":     team["generated_at"],
+    })
+
+
+# v1.0.0al: Notifications API ----------------------------------------------
+# Per-user notifications, fired when ownership of an entity changes.
+# Bell-icon in the nav reads `unread_count`; the dropdown reads `list`.
+
+@app.route("/api/notifications", methods=["GET"])
+def api_notifications_list():
+    """List notifications for a recipient. Query params:
+      recipient — required, the owner's display name
+      unread    — '1' or 'true' to filter to unread-only
+      limit     — int (default 50, clamped 1..200)
+    """
+    recipient = (request.args.get("recipient") or "").strip()
+    if not recipient:
+        return jsonify({"error": "recipient required"}), 400
+    unread_only = (request.args.get("unread") or "").lower() in {"1", "true", "yes"}
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", "50"))))
+    except ValueError:
+        limit = 50
+    items = notifications_store.list_for(recipient,
+                                           unread_only=unread_only,
+                                           limit=limit)
+    return jsonify({
+        "items":        items,
+        "unread_count": notifications_store.unread_count(recipient),
+    })
+
+
+@app.route("/api/notifications/unread-count", methods=["GET"])
+def api_notifications_unread_count():
+    """Lightweight poll endpoint — just the unread count for a recipient."""
+    recipient = (request.args.get("recipient") or "").strip()
+    if not recipient:
+        return jsonify({"error": "recipient required"}), 400
+    return jsonify({"unread_count": notifications_store.unread_count(recipient)})
+
+
+@app.route("/api/notifications/<notification_id>/read", methods=["POST"])
+def api_notifications_mark_read(notification_id: str):
+    body = request.get_json(silent=True) or {}
+    recipient = (body.get("recipient") or request.args.get("recipient") or "").strip()
+    if not recipient:
+        return jsonify({"error": "recipient required"}), 400
+    ok = notifications_store.mark_read(notification_id, recipient=recipient)
+    return jsonify({
+        "updated":      ok,
+        "unread_count": notifications_store.unread_count(recipient),
+    })
+
+
+@app.route("/api/notifications/read-all", methods=["POST"])
+def api_notifications_mark_all_read():
+    body = request.get_json(silent=True) or {}
+    recipient = (body.get("recipient") or request.args.get("recipient") or "").strip()
+    if not recipient:
+        return jsonify({"error": "recipient required"}), 400
+    n = notifications_store.mark_all_read(recipient)
+    return jsonify({
+        "marked":       n,
+        "unread_count": notifications_store.unread_count(recipient),
     })
 
 

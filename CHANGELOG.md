@@ -5,6 +5,72 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0al] — 2026-05-23 — Notifications system (bell + Home panel)
+
+Ben asked: "Should be notifications as well. When contacts or accounts
+are being assigned to a person."
+
+This adds a first-class notification surface for ownership changes —
+when someone reassigns a partner contact or lead to you, you find
+out without having to refresh the table.
+
+### Added
+
+- **`notifications_store.py`** — JSON-file-per-recipient store with
+  `notify_assignment()`, `list_for()`, `unread_count()`, `mark_read()`,
+  `mark_all_read()`. Ring-buffer cap of 200 per recipient so files
+  stay small. Thread-safe via module-level lock. Empty recipient is
+  a no-op (avoids crashing the trigger path when an unowned entity
+  gets touched).
+- **Trigger points** in `server.py`:
+  - Partner contact PATCH detects `mr_owner` change and fires
+    `assigned_partner_contact`. First-time assignment doesn't fire
+    (only changes do); self-assignment doesn't fire.
+  - Lead PATCH peeks the previous `owner` via `NotionSync.get_page`
+    before the update, then fires `assigned_lead` if it changed.
+  - Both wrapped in try/except — a notifications glitch never
+    blocks the underlying save.
+- **API**:
+  - `GET /api/notifications?recipient=&unread=&limit=` — list +
+    unread count
+  - `GET /api/notifications/unread-count?recipient=` — lightweight
+    badge poll (60s interval from the UI)
+  - `POST /api/notifications/<id>/read` — single mark-read
+  - `POST /api/notifications/read-all` — bulk mark-read
+- **UI — bell in the nav**: red badge with unread count; click for
+  a dropdown panel showing the last 20 with status dots, time-ago,
+  and click-through navigation that marks-read + opens the entity
+  (partner detail or lead drawer). "Mark all read" wipes the badge.
+  Hidden until a profile is set.
+- **UI — Home "Recent assignments" panel**: rendered from
+  `home.notifications.recent` (top 5). Hidden when there's nothing.
+  Click any row to open and mark-read; "See all →" opens the bell
+  dropdown for the full list.
+
+### Tests
+
+- **`tests/test_notifications.py`** — 18 tests covering: normalised
+  shape, empty-recipient no-op, sort order (newest first with
+  same-second tiebreak), unread filtering, unread_count, mark_read
+  idempotency, mark_all_read, ring-buffer cap (210 written → 200
+  retained, newest preserved), per-recipient isolation, wrong-recipient
+  mark_read silent fail, and 6 endpoint tests including the
+  partner-contact reassignment fires-notification path + the
+  no-change-no-notification path.
+
+### Implementation notes
+
+- **Polling, not WebSockets**: 60s `setInterval` on
+  `unread-count` is cheap (single file read + integer count) and
+  side-steps the operational complexity of a long-lived connection
+  on Railway's stateless web tier. Open the dropdown for an
+  immediate full refresh.
+- **Sort stability**: file order is append-on-write (oldest first),
+  but multiple notifications can land in the same second. The list
+  reverses BEFORE the descending sort so same-second ties fall
+  newest-first naturally; otherwise stable sort would keep them
+  oldest-first inside the tied group.
+
 ## [1.0.0ak] — 2026-05-23 — Inline rename for partners + project name clarity
 
 Ben asked to "edit company names" — v1.0.0aa fixed the lead drawer,
