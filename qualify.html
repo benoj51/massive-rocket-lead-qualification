@@ -1465,6 +1465,10 @@
       </p>
       <div class="btn-row">
         <button id="pb-preview-project" class="btn ghost" type="button"><span data-icon="eye" data-icon-size="12"></span>Preview project briefing</button>
+        <!-- v1.0.0ai: Preview SOW = dry run (no version saved). Lets
+             the AE iterate against the training-brief compliance panel
+             before committing a version. -->
+        <button id="pb-preview-sow" class="btn ghost" type="button"><span data-icon="eye" data-icon-size="12"></span>Preview SOW</button>
         <button id="pb-draft-sow" class="btn" type="button"><span data-icon="note" data-icon-size="12"></span>Draft SOW</button>
         <span id="pb-sow-status" class="muted"></span>
       </div>
@@ -6491,6 +6495,40 @@
     }
   }
 
+  // v1.0.0ai: dry-run preview — renders current state without saving
+  // a version. Lets the AE iterate against the training-brief
+  // compliance side panel before committing.
+  async function previewSowDryRun(leadId) {
+    if (!leadId) return;
+    const btn = $('#pb-preview-sow');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Building preview…'; }
+    try {
+      const resp = await fetch(`/api/sow/${encodeURIComponent(leadId)}/preview`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: 12 }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+      const html = await resp.text();
+      _docPreviewState.html = html;
+      _docPreviewState.leadId = leadId;
+      _docPreviewState.version = 0;
+      _docPreviewState.filename = `sow_preview_${Date.now()}.html`;
+      $('#doc-preview-title').textContent = `Statement of Work — preview (no version saved)`;
+      $('#doc-preview-subtitle').textContent = `Lead: ${leadId} · ${new Date().toLocaleString()} · Click Draft SOW to commit a version.`;
+      const iframe = $('#doc-preview-iframe');
+      iframe.srcdoc = html;
+      openDocPreview();
+    } catch (e) {
+      toast(`Preview failed: ${e.message}`, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = `${icon('eye', { size: 12 })}Preview SOW`; }
+    }
+  }
+
   function openDocPreview() {
     const ov = $('#doc-preview-overlay');
     if (!ov) return;
@@ -7114,6 +7152,17 @@
     $('#pb-reject').addEventListener('click', () => pbTransition('rejected'));
     $('#pb-reopen').addEventListener('click', () => pbTransition('draft'));
     $('#pb-draft-sow').addEventListener('click', pbDraftSow);
+    // v1.0.0ai: dry-run SOW preview button.
+    const pbPreviewSowBtn = document.getElementById('pb-preview-sow');
+    if (pbPreviewSowBtn) {
+      pbPreviewSowBtn.addEventListener('click', () => {
+        if (!pbState.currentLeadId) {
+          toast('Pick a lead in the dropdown above first', 'error');
+          return;
+        }
+        previewSowDryRun(pbState.currentLeadId);
+      });
+    }
     $('#pb-preview-project').addEventListener('click', () => {
       if (!pbState.currentLeadId) { toast('Open a project first', 'error'); return; }
       previewProject(pbState.currentLeadId);

@@ -1801,6 +1801,49 @@ def api_sow_get_html(lead_id: str, version: int):
     return Response(html, mimetype="text/html; charset=utf-8")
 
 
+# v1.0.0ai: dry-run preview — render the SOW against current state
+# WITHOUT saving a version. Lets the AE iterate (fix TBC values,
+# tweak scope, edit pricing) before committing a version, and see
+# brief-compliance warnings live.
+@app.route("/api/sow/<lead_id>/preview", methods=["GET", "POST"])
+def api_sow_preview(lead_id: str):
+    """Render a SOW from current state without persisting a version.
+    Accepts the same body shape as /api/sow/<lead_id> POST so the AE
+    can pass MSA date / start date / currency overrides."""
+    body = request.get_json(silent=True) or {}
+    try:
+        snapshot = sow.build_snapshot(
+            lead_id,
+            months=int(body.get("months", 12)),
+            msa_date=body.get("msa_date") or None,
+            start_date=body.get("start_date") or None,
+            currency=body.get("currency") or None,
+            company_legal_name=body.get("company_legal_name") or None,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in accept:
+        return jsonify({"snapshot": snapshot,
+                         "compliance": snapshot.get("compliance")})
+    # Default: render the HTML so the preview modal can show it directly.
+    # "Preview" tag in the toolbar so the AE knows it's not a saved version.
+    html = sow.render_html(snapshot, version=0)
+    return Response(html, mimetype="text/html; charset=utf-8")
+
+
+@app.route("/api/sow/<lead_id>/compliance", methods=["GET"])
+def api_sow_compliance(lead_id: str):
+    """JSON-only compliance check for the current state. Same data as
+    `/preview` but lighter — used by the Project Build view to surface
+    warnings inline without rendering the full HTML."""
+    try:
+        snapshot = sow.build_snapshot(lead_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(snapshot.get("compliance", {}))
+
+
 # v0.10.0v: Project briefing preview ----------------------------------------
 # Renders the full current Project Build state as a single printable HTML
 # document. Same modal-preview UX as SOW, but earlier in the cycle — an

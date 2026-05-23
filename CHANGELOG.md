@@ -5,6 +5,130 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ai] — 2026-05-23 — SOW generator rewritten to MR Training Brief
+
+Ben shared the MR SOW Training Brief (May 2026) and asked the SOW
+draft to demonstrate a preview. The brief is comprehensive: master
+structure with 13 required body sections, specific clauses with
+required verbatim text, naming convention, and a Section 5 pre-export
+checklist. The previous generator was missing most of it.
+
+### Now produced in every SOW snapshot
+
+**Required body sections** (brief Section 2.3):
+1. Document Status table (Draft / Next steps Company / Next steps MR)
+   — visible in preview, hidden on print, includes a "remove before
+   export" reminder
+2. Opening Clause — references MSA date + names both legal entities
+   (Massive Rocket Limited + Company). Flags placeholder if MSA
+   date isn't supplied.
+3. Timing & Fees — currency (GBP/EUR/USD), commencement date, duration
+4. Executive Summary — client-specific, includes Project Timeline table
+5. Engagement Overview — industry, region, revenue, employees, streams
+6. Services In Scope — by stream, with qualifying-vs-confirmed pills
+7. Services Out of Scope — includes brief-required items (Platform
+   Training, Creative Services, Engineering, External Documentation)
+8. Commercial Summary — totals + monthly schedule + 3 verbatim clauses:
+   - **80% consumption notification** (with 100% pause right)
+   - **10% contingency buffer** (with Annex 1 reference)
+   - **Blended rate statement** (£150/€175/$200 — by currency)
+9. Project Management — agile cadence, weekly reviews, Jira sign-offs
+10. Monitoring Progress — risk + delay notification obligations
+11. Company's Participation — platform access SLAs, project owner,
+    sign-off windows
+12. Variations & Change in Scope — references Annex 1, rules out
+    verbal/Slack agreements
+13. Changes of Date — Company-caused delay handling
+14. General Notes & Assumptions — LinkedIn case-study clause,
+    software licence exclusion, 10% annual fee increase clause
+15. Signatures — Thierry Sequeira (Director) for MR + Company block
+16. **Annex 1: Change Order template** — 11-field template, always
+    included, even if unused
+
+**Non-binding appendices** (when present): Roadmap, Beyond Year 1
+extended engagement, Team & Phases. Banner explicitly labels them
+non-binding, per brief Section 2.4.
+
+### Naming convention (brief Section 2.1)
+
+Every SOW's title is now `Appendix A — [Client] — Statement of
+Work — DD MMM YYYY` (current date). Matches the regex the brief
+mandates.
+
+### Brief-compliance side panel
+
+Every SOW preview now ships with a side panel (right of the page,
+hidden on print) showing:
+- **Warning list** with severity tags — TBC in scope values, missing
+  MSA date, missing currency, empty start date, empty out-of-scope,
+  no commercial totals, missing Project Timeline
+- **Pre-export checklist** — 23 items from brief Section 5, each
+  marked passed (✓ green) or failed (✗ red)
+- **Compliance score** — "Brief compliance · 21/23" at the top
+
+This is the user's "preview demonstrate" — the AE sees both the SOW
+content AND the brief-compliance audit in one view, before deciding
+to draft a version.
+
+### Dry-run Preview button
+
+New **"Preview SOW"** button next to "Draft SOW" in Project Build.
+Hits the new `GET/POST /api/sow/<id>/preview` endpoint which renders
+the SOW from current state **without saving a version**. Lets the AE
+iterate (fix scope, add MSA date, change currency) and see the
+compliance panel live before committing.
+
+Also new `GET /api/sow/<id>/compliance` JSON endpoint for any
+caller that wants the warnings + checklist without rendering HTML.
+
+### Configurable inputs
+
+`build_snapshot` now takes optional kwargs:
+- `msa_date` — pass the MSA date to populate the Opening Clause
+- `start_date` — pass commencement date to populate Timing & Fees
+- `currency` — GBP / EUR / USD (drives blended-rate clause)
+- `company_legal_name` — override the project's company_name with
+  the full registered legal entity
+
+All four are passed through from the Preview body so the AE can
+A/B different inputs without committing.
+
+### Brief failure patterns surfaced as warnings
+
+Cross-referenced from brief Section 3:
+- **TBC in commercials / scope** (Section 3.1) → high-severity warning,
+  cites the brief
+- **Missing MSA date** → high-severity, with `[MSA DATE PENDING]`
+  placeholder visible in the rendered SOW so it's impossible to miss
+- **Empty Services In Scope** → high-severity (Section 3.1 fallback)
+- **Empty currency / start date** → high-severity (Section 4.1)
+
+### Files touched
+- `sow.py` — full rewrite (~750 lines). New constants for all required
+  boilerplate clauses (verbatim per brief), `compliance_check()`
+  function, restructured `build_snapshot` + `render_html`. Side panel
+  + Document Status table CSS added to the print stylesheet.
+- `server.py` — `/api/sow/<id>/preview` (dry-run, GET+POST) +
+  `/api/sow/<id>/compliance` (JSON-only) endpoints
+- `qualify.html` — new "Preview SOW" button + `previewSowDryRun()`
+  handler; wired into Project Build view
+- `tests/test_sow_brief.py` (new, 32 tests) — locks in brief
+  structure, required clauses, naming convention, blended rate by
+  currency, signatory block, compliance check behaviour, dry-run
+  preview semantics
+
+### Tests
+- 612 total (+32). Existing 16 SOW tests still pass — the new
+  structure adds fields without removing any.
+
+### What you'll see
+- Click **Preview SOW** in Project Build → modal opens with the full
+  brief-compliant SOW + a side panel showing compliance score (e.g.
+  "21/23 passed") + a checklist of every section, with warnings
+  highlighted in red for things like missing MSA date.
+- Click **Draft SOW** as before → commits a version. The preview
+  modal auto-opens after the draft, same as today.
+
 ## [1.0.0ah] — 2026-05-23 — Personalised Home view as the default landing
 
 Ben asked: "Personalised Dashboard based on their role should be the
