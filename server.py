@@ -2579,6 +2579,120 @@ def api_partner_contacts_update(partner_id: str, contact_id: str):
     return jsonify({"contact": saved})
 
 
+# v1.0.0ax: bulk update endpoint for partner contacts.
+# After v1.0.0ac added tier/sentiment/seniority, existing contacts often
+# need batch field updates. One-at-a-time edits are painful; this lets
+# the UI select N rows + apply the same field changes in a single call.
+#
+# Allow-listed field set is narrow on purpose: free-text fields (name,
+# email, title) make no sense to bulk-set, and we don't want a misclick
+# to wipe 50 names. Only the dimensions you'd realistically want to
+# set across a batch are accepted.
+
+_BULK_PARTNER_CONTACT_FIELDS = frozenset({
+    "mr_owner",          # reassign owner
+    "tier",              # batch-tier
+    "partner_sentiment", # bulk sentiment update
+    "seniority",         # rare but cheap
+    "status",            # mark a batch as dormant / left after re-org
+    "cadence_days",      # tighten/loosen touch cadence for a segment
+})
+
+
+@app.route("/api/partners/<partner_id>/contacts/bulk-update", methods=["POST"])
+def api_partner_contacts_bulk_update(partner_id: str):
+    """Apply the same field updates to many contacts at once.
+
+    Body:
+      {
+        "contact_ids": ["id1", "id2", ...],   # required, max 200
+        "updates":     {"mr_owner": "Ben"},   # required, allow-listed fields only
+      }
+
+    Returns:
+      {
+        "updated":  int,             # count successfully saved
+        "errors":   [{contact_id, error}, ...],
+        "notified": int,             # how many assigned_partner_contact notifications fired
+      }
+
+    Honours the same notification contract as the single-PATCH endpoint —
+    a bulk reassign fires one notification per newly-owned contact,
+    which is what you want when the new owner opens the bell and sees
+    each one they've inherited.
+    """
+    body = request.get_json(silent=True) or {}
+    contact_ids = body.get("contact_ids") or []
+    updates = body.get("updates") or {}
+    if not isinstance(contact_ids, list) or not contact_ids:
+        return jsonify({"error": "contact_ids (non-empty list) required"}), 400
+    if len(contact_ids) > 200:
+        return jsonify({"error": "max 200 contacts per call"}), 400
+    if not isinstance(updates, dict) or not updates:
+        return jsonify({"error": "updates (non-empty object) required"}), 400
+    bad = set(updates.keys()) - _BULK_PARTNER_CONTACT_FIELDS
+    if bad:
+        return jsonify({
+            "error": f"fields not allowed in bulk update: {sorted(bad)}. "
+                     f"Allowed: {sorted(_BULK_PARTNER_CONTACT_FIELDS)}",
+        }), 400
+
+    actor = _actor()
+    partner = partners_store.get_partner(partner_id) or {}
+    partner_name = partner.get("name") or partner_id
+
+    updated = 0
+    errors: list[dict] = []
+    notified = 0
+    new_owner = (updates.get("mr_owner") or "").strip() or None
+
+    for cid in contact_ids:
+        existing = partner_contacts_store.get_contact(partner_id, cid)
+        if not existing:
+            errors.append({"contact_id": cid, "error": "not_found"})
+            continue
+        merged = {**existing, **updates, "id": cid,
+                  "partner_id": existing["partner_id"]}
+        try:
+            saved = partner_contacts_store.save_contact(partner_id, merged)
+        except partner_contacts_store.PartnerContactsStoreError as e:
+            errors.append({"contact_id": cid, "error": str(e)[:200]})
+            continue
+        updated += 1
+        # Fire a per-contact reassign notification when mr_owner actually
+        # changed for THIS contact. Skip if the contact already had this
+        # owner (idempotent bulk-set is common — don't spam).
+        if new_owner and new_owner != actor:
+            old_owner = (existing.get("mr_owner") or "").strip()
+            if old_owner != new_owner:
+                try:
+                    notifications_store.notify_assignment(
+                        new_owner,
+                        kind="assigned_partner_contact",
+                        title=f"You were assigned {saved.get('name') or '(unnamed)'} ({partner_name})",
+                        body=(f"Bulk-reassigned from {old_owner}" if old_owner
+                                else "Bulk-assigned") + (f" by {actor}" if actor else ""),
+                        link={"kind": "partner_contact",
+                                "partner_id": partner_id,
+                                "contact_id": cid},
+                        actor=actor or None,
+                    )
+                    notified += 1
+                except Exception as e:
+                    log.warning("Bulk notify_assignment failed for %s: %s",
+                                  cid, e)
+
+    audit.log_event("partner_contacts_bulk_updated",
+                    actor=actor, partner_id=partner_id,
+                    n_updated=updated, n_errors=len(errors),
+                    fields=sorted(updates.keys()))
+    return jsonify({
+        "updated":  updated,
+        "errors":   errors,
+        "notified": notified,
+    })
+
+
 @app.route("/api/partners/<partner_id>/contacts/<contact_id>", methods=["DELETE"])
 def api_partner_contacts_delete(partner_id: str, contact_id: str):
     ok = partner_contacts_store.delete_contact(partner_id, contact_id)

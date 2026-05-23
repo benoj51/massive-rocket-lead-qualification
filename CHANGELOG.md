@@ -5,6 +5,62 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ax] — 2026-05-23 — Bulk operations on partner contacts
+
+After v1.0.0ac added tier/sentiment/seniority, existing rows often
+need batch field updates (set 30 contacts to "Tier 2", reassign 20
+to a new owner after a re-org, mark a chunk dormant when a team
+restructures). Doing them one at a time is painful. This ships
+multi-select + a bulk-update flow that does it in one round-trip.
+
+### Added
+
+- **`POST /api/partners/<id>/contacts/bulk-update`** — body
+  `{contact_ids: [...], updates: {field: value}}`. Allowlisted
+  fields: `mr_owner`, `tier`, `partner_sentiment`, `seniority`,
+  `status`, `cadence_days`. Free-text fields (name, email, title)
+  deliberately excluded to prevent accidental wipeouts. Returns
+  `{updated, errors: [{contact_id, error}], notified}`. Cap 200
+  contacts per call.
+- **Notification contract preserved**: an `mr_owner` change fires
+  one `assigned_partner_contact` notification per contact, mirroring
+  the single-PATCH path. Idempotent — if a contact already has the
+  new owner, no notification fires (no spam on bulk re-set).
+- **Selection checkboxes** on every partner contacts table row +
+  a select-all checkbox in the header that respects the current
+  filter chips. Indeterminate state when partial selection.
+- **Floating action bar** appears at the bottom of the partner
+  detail when any row is selected. Shows count + "X hidden by
+  filters" warning if relevant. Buttons: Reassign owner / Set tier
+  / Set sentiment / Set status / Clear. Each opens a tiny prompt-
+  based picker, runs the bulk update, toasts the result count +
+  notification count + any failures.
+- **Audit event** `partner_contacts_bulk_updated` so the v1.0.0ap
+  team-activity feed picks up the bulk action.
+
+### Tests
+
+- **`tests/test_partner_contacts_bulk_update.py`** — 11 tests:
+  - 5 validation: missing/empty contact_ids → 400, missing updates
+    → 400, disallowed field (name) → 400, >200 contacts → 400
+  - 3 happy paths: bulk-set tier on 3 contacts, bulk-set status
+    dormant on 2 (third untouched), partial fan-out lands bad ids
+    in errors while good ones still save
+  - 3 notifications: bulk reassign fires per-contact notifications
+    with correct link contact_id and "Bulk-reassigned from..."
+    body, already-owned skips re-notify, non-owner update fires
+    no notifications
+
+### Why a prompt-based picker for the action bar
+
+Considered a proper dropdown modal. Held back: dropdown options
+already live in the enum settings, the AE knows them, and a prompt
+keeps the action bar lightweight. The trade-off is the picker UX
+isn't as polished as a custom modal, but the speed (open prompt,
+type a number, done) beats a multi-step picker for the common
+case. If usage shows this matters, swap the prompt for a dropdown
+in a follow-up.
+
 ## [1.0.0aw] — 2026-05-23 — Engagement leaderboard on Dashboard
 
 The engagement score closed the loop for the individual AE (at → av).

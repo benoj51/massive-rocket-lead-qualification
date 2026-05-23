@@ -9384,6 +9384,14 @@
     viewMode: 'table',
   };
 
+  // v1.0.0ax: bulk-selection state. Persists across re-renders within
+  // the same partner detail; cleared when openPartnerDetail re-runs
+  // (different partner = different selection scope).
+  const bulkState = {
+    selected: new Set(),  // contact_id set
+    partnerId: null,      // scope-guard so a stale render doesn't cross partners
+  };
+
   async function initPartners() {
     if (!partnersState.enums) {
       try {
@@ -9813,6 +9821,13 @@
 
   async function openPartnerDetail(partnerId) {
     partnersState.selectedId = partnerId;
+    // v1.0.0ax: clear bulk selection if we're switching partners. Keep
+    // the set intact when re-opening the SAME partner (e.g. after a
+    // touch or rename refresh).
+    if (bulkState.partnerId !== partnerId) {
+      bulkState.selected.clear();
+      bulkState.partnerId = partnerId;
+    }
     const el = $('#ptn-detail');
     el.style.display = 'block';
     el.innerHTML = '<div class="muted" style="font-size:12px;">Loading…</div>';
@@ -9823,6 +9838,175 @@
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
+  }
+
+  // =============================================================
+  //  Partner contacts bulk-select (v1.0.0ax)
+  // =============================================================
+  // Wire row + header checkboxes, render/update a floating action
+  // bar at the bottom of the partner-detail card whenever something
+  // is selected. Re-runs on every contacts-table render so the
+  // header "select all" reflects what's currently visible.
+  function _wirePartnerBulkSelection(wrap, partner, visible) {
+    const visibleIds = new Set(visible.map(c => c.id));
+    // Row checkboxes.
+    wrap.querySelectorAll('[data-bulk-row]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const id = cb.dataset.bulkRow;
+        if (cb.checked) bulkState.selected.add(id);
+        else bulkState.selected.delete(id);
+        _renderBulkActionBar(partner, visibleIds);
+        _syncBulkSelectAll(wrap, visibleIds);
+      });
+    });
+    // Header "select all" → toggles every visible row.
+    const sa = wrap.querySelector('[data-bulk-select-all]');
+    if (sa) {
+      sa.addEventListener('change', () => {
+        visibleIds.forEach(id => {
+          if (sa.checked) bulkState.selected.add(id);
+          else bulkState.selected.delete(id);
+        });
+        // Re-paint each row checkbox to reflect the new state.
+        wrap.querySelectorAll('[data-bulk-row]').forEach(cb => {
+          cb.checked = bulkState.selected.has(cb.dataset.bulkRow);
+        });
+        _renderBulkActionBar(partner, visibleIds);
+      });
+    }
+    _syncBulkSelectAll(wrap, visibleIds);
+    _renderBulkActionBar(partner, visibleIds);
+  }
+
+  function _syncBulkSelectAll(wrap, visibleIds) {
+    const sa = wrap.querySelector('[data-bulk-select-all]');
+    if (!sa) return;
+    if (!visibleIds.size) { sa.checked = false; sa.indeterminate = false; return; }
+    let selectedVisible = 0;
+    visibleIds.forEach(id => { if (bulkState.selected.has(id)) selectedVisible++; });
+    if (selectedVisible === 0) { sa.checked = false; sa.indeterminate = false; }
+    else if (selectedVisible === visibleIds.size) { sa.checked = true; sa.indeterminate = false; }
+    else { sa.checked = false; sa.indeterminate = true; }
+  }
+
+  function _renderBulkActionBar(partner, visibleIds) {
+    let bar = $('#ptn-bulk-bar');
+    const count = bulkState.selected.size;
+    if (count === 0) {
+      if (bar) bar.remove();
+      return;
+    }
+    // How many of the selected are currently visible (helpful when the
+    // filter chips cut some out — user might be acting on hidden rows).
+    let visibleSelected = 0;
+    bulkState.selected.forEach(id => { if (visibleIds.has(id)) visibleSelected++; });
+    const hiddenCount = count - visibleSelected;
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'ptn-bulk-bar';
+      bar.style.cssText = `
+        position: sticky; bottom: 12px; margin-top: 12px;
+        background: var(--surface); border: 1px solid var(--accent);
+        border-radius: 8px; padding: 10px 14px;
+        box-shadow: 0 4px 16px rgba(0,0,0,.18);
+        display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+        z-index: 5;
+      `;
+      const wrap = $('#ptn-contacts-table');
+      if (wrap && wrap.parentElement) wrap.parentElement.appendChild(bar);
+    }
+    bar.innerHTML = `
+      <strong style="font-size:13px;">${count} selected</strong>
+      ${hiddenCount > 0 ? `<span class="muted" style="font-size:11px;">(${hiddenCount} hidden by filters)</span>` : ''}
+      <span style="flex:1;"></span>
+      <button class="btn ghost" type="button" data-bulk-action="mr_owner" style="padding:5px 12px;font-size:11px;">Reassign owner</button>
+      <button class="btn ghost" type="button" data-bulk-action="tier" style="padding:5px 12px;font-size:11px;">Set tier</button>
+      <button class="btn ghost" type="button" data-bulk-action="partner_sentiment" style="padding:5px 12px;font-size:11px;">Set sentiment</button>
+      <button class="btn ghost" type="button" data-bulk-action="status" style="padding:5px 12px;font-size:11px;">Set status</button>
+      <button class="btn ghost" type="button" data-bulk-cancel style="padding:5px 12px;font-size:11px;">Clear</button>
+    `;
+    bar.querySelectorAll('[data-bulk-action]').forEach(b => {
+      b.addEventListener('click', () => _runBulkAction(partner, b.dataset.bulkAction));
+    });
+    const cancelBtn = bar.querySelector('[data-bulk-cancel]');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        bulkState.selected.clear();
+        openPartnerDetail(partner.id);  // re-render clears checkboxes + bar
+      });
+    }
+  }
+
+  async function _runBulkAction(partner, field) {
+    const enums = partnersState.enums || {};
+    let value = null;
+    if (field === 'mr_owner') {
+      // MR owners come from /api/mr_owners (already loaded for the
+      // inline owner cells); use a simple prompt for now to avoid
+      // building yet another modal.
+      const name = window.prompt(
+        `Reassign ${bulkState.selected.size} contact(s) to which MR owner?\n\n` +
+        `(Type the full name. Type "Unassigned" to clear ownership.)`,
+        homeState.profile?.name || '');
+      if (name === null) return;
+      value = name.trim() || null;
+    } else if (field === 'tier') {
+      value = _bulkPickFromEnum('Pick a tier', enums.tiers || []);
+      if (value === undefined) return;
+    } else if (field === 'partner_sentiment') {
+      value = _bulkPickFromEnum('Pick a sentiment', enums.partner_sentiments || []);
+      if (value === undefined) return;
+    } else if (field === 'status') {
+      value = _bulkPickFromEnum('Pick a status', enums.statuses || ['active', 'dormant', 'left']);
+      if (value === undefined) return;
+    }
+    const ids = Array.from(bulkState.selected);
+    if (!ids.length) return;
+    try {
+      const result = await jsonFetch(
+        `/api/partners/${encodeURIComponent(partner.id)}/contacts/bulk-update`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact_ids: ids,
+            updates: { [field]: value },
+          }),
+        });
+      const errs = (result.errors || []).length;
+      const notif = result.notified ? ` · ${result.notified} notified` : '';
+      const errStr = errs ? ` · ${errs} failed` : '';
+      toast(`Updated ${result.updated} contact${result.updated === 1 ? '' : 's'}${notif}${errStr}`,
+            errs ? 'error' : 'success');
+      bulkState.selected.clear();
+      await openPartnerDetail(partner.id);
+    } catch (e) {
+      toast(`Bulk update failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  // Tiny picker via prompt() to avoid building a custom modal. Returns
+  // undefined when the user cancels, null when they choose "(clear)",
+  // or the picked string. Good enough for v1; can upgrade to a
+  // proper dropdown later.
+  function _bulkPickFromEnum(question, options) {
+    if (!options.length) {
+      toast('No options configured. Add some in Settings first.', 'error');
+      return undefined;
+    }
+    const numbered = options.map((o, i) => `${i + 1}. ${o}`).join('\n');
+    const raw = window.prompt(
+      `${question}\n\n${numbered}\n0. (clear / set to none)\n\nType the number:`,
+      '1');
+    if (raw === null) return undefined;
+    const n = parseInt(raw.trim(), 10);
+    if (Number.isNaN(n)) return undefined;
+    if (n === 0) return null;
+    if (n < 1 || n > options.length) {
+      toast(`Pick a number 0–${options.length}`, 'error');
+      return undefined;
+    }
+    return options[n - 1];
   }
 
   // v1.0.0ak: Inline partner-rename. Mirrors the v1.0.0aa lead-drawer
@@ -10161,10 +10345,16 @@
                 : `<span class="muted">${c.cadence_days}d cadence</span>`);
       return `<span style="font-size:11px;white-space:nowrap;">${escapeHtml(label)} <span class="muted">·</span> ${status}</span>`;
     };
+    // v1.0.0ax: pre-check rows that are already in the selection set
+    // (persists across re-renders within the same partner detail).
+    const sel = bulkState.selected;
     wrap.innerHTML = `
       <table class="stakeholders" style="width:100%;font-size:12px;">
         <thead>
           <tr>
+            <!-- v1.0.0ax: select-all column. The header checkbox sets
+                 the select state of every visible row. -->
+            <th style="width:24px;"><input type="checkbox" data-bulk-select-all title="Select all visible" /></th>
             <th>Name</th>
             <th>Title</th>
             <th>Tier</th>
@@ -10182,6 +10372,7 @@
         <tbody>
           ${filtered.map(c => `
             <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
+              <td><input type="checkbox" data-bulk-row="${escapeAttr(c.id)}" ${sel.has(c.id) ? 'checked' : ''} /></td>
               <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}<br><span style="font-size:10px;">${linkedinCell(c.linkedin_url, c.name, partner.name)}</span></td>
               <td>${escapeHtml(c.title || '—')}</td>
               <td>${c.tier ? `<span class="tag signal" style="font-size:10px;">${escapeHtml(c.tier)}</span>` : '—'}</td>
@@ -10207,6 +10398,8 @@
       </table>
       <div class="muted" style="font-size:10px;margin-top:6px;">${filtered.length} of ${all.length} contact${all.length === 1 ? '' : 's'}${filtered.filter(c => c.overdue).length ? ` · ${filtered.filter(c => c.overdue).length} overdue` : ''}</div>
     `;
+    // v1.0.0ax: wire bulk-select checkboxes + render the action bar.
+    _wirePartnerBulkSelection(wrap, partner, filtered);
     // v1.0.0an: + todo on a contact row.
     wrap.querySelectorAll('[data-contact-todo]').forEach(b => {
       b.addEventListener('click', () => {
