@@ -926,6 +926,19 @@
       </div>
     </div>
     <div id="home-role-extra" style="margin-top:14px;"></div>
+    <!-- v1.0.0av: "Needs attention" card. Surfaces leads on your book
+         with cold/weak engagement (<50). Sorted coldest first so the
+         most-neglected accounts float to the top. Hidden when
+         there's nothing at risk — empty state would just add noise. -->
+    <div class="card" id="home-atrisk-card" style="margin-top:14px;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Needs attention</h3>
+          <div class="muted" style="font-size:11px;margin-top:2px;">Your leads with low engagement — pick one to rescue today.</div>
+        </div>
+      </div>
+      <div id="home-atrisk-list" style="margin-top:12px;"></div>
+    </div>
     <!-- v1.0.0am: per-user todo list. Always visible (even when
          empty) because this is the primary place to capture personal
          follow-ups. Backed by /api/todos; persists across sessions. -->
@@ -1298,6 +1311,17 @@
         </select>
         <select id="pipe-filter-group" style="padding: 5px 10px; font-size: 12px; min-width: 170px;">
           <option value="">Any group</option>
+        </select>
+        <!-- v1.0.0av: filter by engagement band. The band is filled
+             into each row after the batch hydrator runs, so this
+             filter waits for that data to land before it bites. -->
+        <select id="pipe-filter-engagement" style="padding: 5px 10px; font-size: 12px; min-width: 170px;"
+                title="Filter by engagement band">
+          <option value="">Any engagement</option>
+          <option value="strong">Strong only (75+)</option>
+          <option value="warm_plus">Warm+ (50+)</option>
+          <option value="weak_or_cold">Needs attention (&lt;50)</option>
+          <option value="cold">Cold only (&lt;25)</option>
         </select>
         <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:6px;">
           <button class="chip" data-view-mode="flat" type="button" style="border-radius:0;border:0;font-size:11px;padding:5px 10px;">Flat</button>
@@ -2203,7 +2227,12 @@
     currentResult: null,     // last qualify() payload
     overrides: {},           // user edits to discovered fields
     chart: null,
-    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', groupFilter: '', viewMode: 'flat', expandedGroups: new Set(), sort: { key: 'icp_normalised', dir: 'desc' } },
+    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', groupFilter: '',
+                 // v1.0.0av: engagement-band filter + per-lead-id score cache.
+                 // The cache lets the filter re-apply on chip changes without
+                 // re-fetching, and lets us hide rows whose band doesn't match.
+                 engagementFilter: '', engagementScores: {},
+                 viewMode: 'flat', expandedGroups: new Set(), sort: { key: 'icp_normalised', dir: 'desc' } },
     authRequired: null,      // unknown until /api/health checked
     authToken: null,
     lastSavedPageId: null,   // set after Push to Notion succeeds
@@ -5644,6 +5673,9 @@
   // v1.0.0au: collect every lead id in the rendered tbody, hit the
   // batch /api/engagement-scores endpoint once, then populate the
   // ENG cell on each row. Quiet failure — the column just stays "—".
+  // v1.0.0av: also caches scores into state.pipeline.engagementScores
+  // so the engagement-band filter has data to work with, and applies
+  // the filter to hide rows that don't match.
   async function _hydratePipelineEngagementScores(tbody) {
     const cells = tbody.querySelectorAll('[data-engagement-cell]');
     const ids = [];
@@ -5656,6 +5688,9 @@
       const data = await jsonFetch(
         `/api/engagement-scores?lead_ids=${encodeURIComponent(ids.join(','))}`);
       const scores = data.scores || {};
+      // Merge into the in-state cache so the filter survives across
+      // re-renders that don't re-fetch.
+      Object.assign(state.pipeline.engagementScores, scores);
       cells.forEach(cell => {
         const id = cell.dataset.engagementCell;
         const s = scores[id];
@@ -5667,9 +5702,39 @@
                                  'var(--red)';
         cell.innerHTML = `<span style="color:${colour};font-weight:600;" title="Engagement ${s.score}/100 (${s.band})">${s.score}</span>`;
       });
+      // v1.0.0av: now that scores are in, apply the engagement-band filter.
+      _applyPipelineEngagementFilter();
     } catch (e) {
       console.warn('engagement-scores batch fetch failed', e);
     }
+  }
+
+  // v1.0.0av: show/hide pipeline rows based on the current engagement
+  // band filter. Reads from the in-state score cache so it doesn't
+  // refire the network. Called both after the hydrator lands and when
+  // the user changes the filter dropdown.
+  function _applyPipelineEngagementFilter() {
+    const f = state.pipeline.engagementFilter || '';
+    const tbody = $('#pipeline-table tbody');
+    if (!tbody) return;
+    const cache = state.pipeline.engagementScores || {};
+    const matches = (band, score) => {
+      if (!f) return true;
+      if (f === 'strong')       return band === 'strong';
+      if (f === 'warm_plus')    return score != null && score >= 50;
+      if (f === 'weak_or_cold') return score != null && score < 50;
+      if (f === 'cold')         return band === 'cold';
+      return true;
+    };
+    tbody.querySelectorAll('[data-page-id]').forEach(tr => {
+      const id = tr.dataset.pageId;
+      const s = cache[id];
+      // If scores haven't loaded yet for this row, keep it visible —
+      // hiding rows on a yet-to-resolve fetch would feel buggy. Once
+      // the batch lands, this filter re-fires.
+      if (!s || s.score == null) { tr.style.display = ''; return; }
+      tr.style.display = matches(s.band, s.score) ? '' : 'none';
+    });
   }
 
   // Populate the Group filter dropdown from the current pipeline's parents.
@@ -7924,6 +7989,16 @@
       state.pipeline.groupFilter = e.target.value;
       renderPipeline();
     });
+    // v1.0.0av: engagement-band filter. Doesn't re-render the table —
+    // just hides rows whose cached band doesn't match. The hydrator
+    // re-applies the filter when the batch fetch lands.
+    const engSel = $('#pipe-filter-engagement');
+    if (engSel) {
+      engSel.addEventListener('change', (e) => {
+        state.pipeline.engagementFilter = e.target.value;
+        _applyPipelineEngagementFilter();
+      });
+    }
     document.querySelectorAll('[data-view-mode]').forEach(b => {
       b.addEventListener('click', () => {
         state.pipeline.viewMode = b.dataset.viewMode;
@@ -8675,6 +8750,11 @@
     // notifications so the card doesn't add chrome for nothing.
     _renderHomeNotifications(data.notifications || {});
 
+    // v1.0.0av: needs-attention card — leads on the AE's book with
+    // engagement <50. Rendered from data.at_risk_leads (computed
+    // server-side so the score math stays in one place).
+    _renderAtRiskLeads(data.at_risk_leads || []);
+
     // v1.0.0am: Home todos panel — fed by data.todos. Always rendered
     // (even when empty) so the input is always discoverable.
     _renderHomeTodos(data.todos || { items: [] });
@@ -8683,6 +8763,69 @@
     // payload stays focused on personal data. Fire-and-forget; the
     // panel updates whenever the activity API responds.
     _loadActivityFeed();
+  }
+
+  // v1.0.0av: render the "Needs attention" card. Each row shows the
+  // company + ENG/ICP chips + days since touch + an + todo button so
+  // the AE can capture a follow-up without leaving Home.
+  function _renderAtRiskLeads(items) {
+    const card = $('#home-atrisk-card');
+    const list = $('#home-atrisk-list');
+    if (!card || !list) return;
+    if (!items.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    list.innerHTML = items.map(l => {
+      const band = l.engagement_band || 'cold';
+      const engColor =
+        band === 'strong' ? 'var(--green)' :
+        band === 'warm'   ? 'var(--yellow)' :
+        band === 'weak'   ? 'var(--orange,#f59e0b)' :
+                             'var(--red)';
+      const icp = l.icp_normalised;
+      const icpCls = icp >= 7 ? 'var(--green)' : icp >= 5 ? 'var(--yellow)' : 'var(--red)';
+      const touchLabel = l.days_since_touch == null
+        ? '<span style="color:var(--red);font-size:10px;">never touched</span>'
+        : `<span class="muted" style="font-size:10px;">${l.days_since_touch}d since touch</span>`;
+      const overdueChip = (l.overdue_count || 0) > 0
+        ? `<span style="color:var(--red);font-size:10px;margin-left:6px;">${l.overdue_count} overdue contact${l.overdue_count === 1 ? '' : 's'}</span>`
+        : '';
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;"
+             data-home-atrisk-row="${escapeAttr(l.id)}">
+          <div data-home-atrisk-open="${escapeAttr(l.id)}" style="min-width:0;flex:1;cursor:pointer;">
+            <div style="font-size:13px;font-weight:500;">${escapeHtml(l.company || '—')}</div>
+            <div style="font-size:10px;margin-top:2px;">
+              ${touchLabel}${overdueChip}
+              <span class="muted" style="margin-left:6px;">${escapeHtml(l.status || '')}</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">
+            <div style="display:flex;gap:6px;align-items:baseline;">
+              <span style="font-family:var(--mono);font-size:13px;font-weight:600;color:${engColor};" title="Engagement ${l.engagement_score}/100 (${band})">${l.engagement_score}</span>
+              <span style="font-family:var(--mono);font-size:10px;color:${icpCls};">ICP ${icp ?? '—'}</span>
+            </div>
+            <button class="btn ghost" type="button"
+                    data-home-atrisk-todo="${escapeAttr(l.id)}"
+                    data-label="${escapeAttr(l.company || '')}"
+                    style="padding:2px 8px;font-size:10px;" title="Add as a todo">+ todo</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('[data-home-atrisk-open]').forEach(b => {
+      b.addEventListener('click', () => openLeadDrawer(b.dataset.homeAtriskOpen));
+    });
+    list.querySelectorAll('[data-home-atrisk-todo]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _addLinkedTodo({
+          kind: 'lead',
+          lead_id: b.dataset.homeAtriskTodo,
+          label: b.dataset.label,
+          suggestedText: `Rescue ${b.dataset.label} — engagement slipping`,
+        });
+      });
+    });
   }
 
   // =============================================================

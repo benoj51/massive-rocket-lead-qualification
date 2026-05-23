@@ -3330,6 +3330,44 @@ def api_home():
         "last_edited":   r.get("last_edited"),
     } for r in leads_owned[:5]]
 
+    # v1.0.0av: at-risk leads — the AE's owned active leads with cold
+    # or weak engagement (<50). Sorted ascending by score so the
+    # coldest float to the top. Limited to 5 to keep the Home card
+    # focused on "what should I rescue today", not an audit dump.
+    # Capped scan at the first 40 active leads (recency-sorted above)
+    # so the I/O fan-out stays bounded — heavy books still see their
+    # most-recent at-risk accounts without scanning ancient ones.
+    at_risk_leads: list[dict] = []
+    try:
+        for r in leads_owned[:40]:
+            lid = r.get("id")
+            if not lid:
+                continue
+            try:
+                eng = _compute_engagement_for_lead(lid)
+            except Exception as e:
+                log.warning("Home at_risk score for %s failed: %s", lid, e)
+                continue
+            score = eng.get("score", 0)
+            band = eng.get("band", "cold")
+            if score >= 50:
+                continue
+            sig = eng.get("signals") or {}
+            at_risk_leads.append({
+                "id":               lid,
+                "company":          r.get("company"),
+                "status":           r.get("status"),
+                "engagement_score": score,
+                "engagement_band":  band,
+                "icp_normalised":   r.get("icp_normalised"),
+                "days_since_touch": sig.get("days_since_touch"),
+                "overdue_count":    sig.get("overdue_count", 0),
+            })
+        at_risk_leads.sort(key=lambda x: x["engagement_score"])
+        at_risk_leads = at_risk_leads[:5]
+    except Exception as e:
+        log.warning("Home at_risk_leads computation failed: %s", e)
+
     # Team snapshot — un-scoped totals across the same window so a
     # user can compare their book vs the team.
     team = dashboard.build_dashboard(
@@ -3439,6 +3477,9 @@ def api_home():
         },
         "overdue_contacts": overdue_top,
         "active_leads":     active_leads_top,
+        # v1.0.0av: leads on the AE's book scoring <50 engagement, sorted
+        # coldest first. Drives the "Needs attention" Home card.
+        "at_risk_leads":    at_risk_leads,
         "team_snapshot":    team_snapshot,
         "role_extras":      role_extras,
         "notifications":    {

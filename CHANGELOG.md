@@ -5,6 +5,51 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0av] — 2026-05-23 — Engagement-driven workflow: "Needs attention" + pipeline filter
+
+v1.0.0at made the score; v1.0.0au showed it everywhere; v1.0.0av
+makes it drive decisions. The AE opens Home and sees the leads that
+are slipping. They open Pipeline and can filter to just the cold
+ones.
+
+### Added
+
+- **`at_risk_leads` field on `/api/home`** — computes the engagement
+  score for each of the user's owned active leads (cap 40 scanned
+  for cost), filters to those scoring <50, sorts ascending
+  (coldest first), returns top 5. Each entry carries
+  `engagement_score`, `engagement_band`, `icp_normalised`,
+  `days_since_touch`, `overdue_count` so the UI renders without a
+  second fetch.
+- **"Needs attention" card on Home** — shows the at-risk leads
+  inline with ENG + ICP chips, days-since-touch, overdue-contact
+  count. Click any row to open the drawer; "+ todo" pre-fills
+  "Rescue {company} — engagement slipping" and creates a linked
+  todo. Hidden when nothing is at risk (empty state would be noise).
+- **Engagement-band dropdown in Pipeline filters** — "Any
+  engagement / Strong only (75+) / Warm+ (50+) / Needs attention
+  (<50) / Cold only (<25)". Reads from the in-state cache populated
+  by the v1.0.0au batch hydrator; doesn't re-fetch, just hides
+  non-matching rows. Re-fires after the hydrator lands so the
+  filter applies as soon as scores arrive.
+
+### Tests
+
+- **`tests/test_home_at_risk.py`** — 7 tests with NotionSync patched
+  so we can feed any pipeline shape: no owned leads → empty,
+  lead-with-no-engagement appears (score=0 < 50), high-engagement
+  lead excluded, multi-lead ordering (coldest first), cap-at-5,
+  disqualified leads excluded, other-owners' leads excluded.
+
+### Why a separate "Needs attention" card, not a filter on Active Leads
+
+The Active Leads card answers "what have I touched recently"
+(sorted by `last_edited`). Needs Attention answers "what should I
+touch next" (sorted by engagement ascending). Different questions,
+different ordering, side-by-side serves both. Folding them into
+one filterable list would force the AE to switch between the two
+modes — a tax on the most common action.
+
 ## [1.0.0au] — 2026-05-23 — Engagement score in Pipeline + Home rows
 
 v1.0.0at gave every account an engagement score and surfaced it in
