@@ -5,6 +5,29 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0be] — 2026-05-23 — Tech stack chips in lead drawer
+
+After v1.0.0bb's auto-merge wrote new tools into the lead's
+comma-separated `tech_stack` field, the raw input got hard to scan.
+This renders each entry as a removable chip below the input.
+
+### Added
+
+- **Chip rendering** below the Tech Stack input. Comma-separated
+  value parsed, case-insensitively deduped, each shown as a
+  `<span>` with a × button. Click × → input updates → dirty
+  tracker fires (so Save lights up) → chips re-render.
+- **Live update on typing** — the chip list reforms as the AE
+  types commas, so they see the structure they're building.
+
+### Why chips, not multi-select
+
+The Notion `Tech Stack` field is a `rich_text` column; the platform
+treats it as a comma-separated string. Switching to a true
+multi-select would require a Notion schema change and migrate
+every existing lead. Chips give the AE the multi-select feel
+without changing the storage contract.
+
 ## [1.0.0bd] — 2026-05-23 — Pipeline filter presets
 
 v1.0.0ay shipped filter presets for partner contacts. The Pipeline

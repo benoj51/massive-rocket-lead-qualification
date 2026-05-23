@@ -2008,7 +2008,14 @@
             <input type="date" data-ld="expected_close_date" />
           </div>
         </div>
-        <div class="field"><label>Tech Stack</label><input type="text" data-ld="tech_stack" /></div>
+        <div class="field">
+          <label>Tech Stack <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;font-size:10px;">— comma-separated</span></label>
+          <input type="text" data-ld="tech_stack" />
+          <!-- v1.0.0be: render each comma-separated entry as a chip
+               below the input so it's scannable at a glance. AI-added
+               entries (from call extraction) tag a discrete badge. -->
+          <div id="ld-tech-stack-chips" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;"></div>
+        </div>
         <div class="field"><label>Complexity</label><input type="text" data-ld="complexity" /></div>
       </div>
     </details>
@@ -3690,6 +3697,50 @@
     return contacts;
   }
 
+  // v1.0.0be: render the comma-separated tech_stack value as visible
+  // chips below the input. Each chip has a × button that removes the
+  // entry; the input + chips stay in sync. Live-updates on input
+  // typing so the AE sees the chip list reform as they edit.
+  function _renderTechStackChips(rawValue) {
+    const wrap = $('#ld-tech-stack-chips');
+    if (!wrap) return;
+    const items = String(rawValue || '')
+      .replace(/\n/g, ',')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (!items.length) { wrap.innerHTML = ''; return; }
+    // Dedup case-insensitively, keep first occurrence.
+    const seen = new Set();
+    const unique = [];
+    for (const t of items) {
+      const k = t.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      unique.push(t);
+    }
+    wrap.innerHTML = unique.map(t => `
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;">
+        ${escapeHtml(t)}
+        <button type="button" data-tech-remove="${escapeAttr(t)}"
+                style="background:transparent;border:0;color:var(--text-muted);font-size:13px;line-height:1;cursor:pointer;padding:0;margin:0;"
+                title="Remove">×</button>
+      </span>
+    `).join('');
+    wrap.querySelectorAll('[data-tech-remove]').forEach(b => {
+      b.addEventListener('click', () => {
+        const target = b.dataset.techRemove.toLowerCase();
+        const inp = $('#lead-drawer [data-ld="tech_stack"]');
+        if (!inp) return;
+        const cleaned = unique.filter(t => t.toLowerCase() !== target);
+        inp.value = cleaned.join(', ');
+        // Fire input event so the drawer's dirty-tracker picks it up.
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        _renderTechStackChips(inp.value);
+      });
+    });
+  }
+
   // v1.0.0bc: shared helper for the trend arrow shown next to ENG
   // scores. Returns an HTML span (or empty string).
   function _engagementArrow(direction) {
@@ -5130,6 +5181,8 @@
         el.value = value;
       });
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
+      // v1.0.0be: tech-stack chips below the input.
+      _renderTechStackChips(lead.tech_stack || '');
       // v0.10.0t: smart default for the drawer's Apollo-search country
       // dropdown. The lead's region looks like "NAM (United States)" —
       // we extract the country in parens, match against the dropdown
@@ -8017,6 +8070,11 @@
       if (e.target.matches('[data-ld]') || e.target.id === 'ld-new-call-content'
           || e.target.id === 'ld-new-call-title') {
         updateDirtyState();
+      }
+      // v1.0.0be: live-update the tech-stack chip list as the AE types
+      // commas. The render is cheap (small string split + DOM swap).
+      if (e.target.matches('[data-ld="tech_stack"]')) {
+        _renderTechStackChips(e.target.value);
       }
     });
     document.addEventListener('change', (e) => {
