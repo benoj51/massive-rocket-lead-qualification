@@ -5,6 +5,37 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bu] — 2026-05-24 — Fix: inline Tier cells rendering blank
+
+Ben caught a v1.0.0bt regression: the Tier column was showing as an
+empty pill instead of the value. Three bugs compounding:
+
+1. **Inline `style="background:..."` was a shorthand**, which CSS-resets
+   `background-image` to none. That killed the dropdown-arrow gradient
+   defined in the stylesheet. (Sentiment hid it under its coloured
+   pill so the bug only stood out on Tier's plain styling.)
+2. **No `min-width` on the cell** — in a narrow column the select
+   shrunk until the text got clipped to invisible. The same pattern
+   `select.inline-owner-cell` solved this with `min-width: 130px`;
+   we'd just forgotten to copy it.
+3. **Legacy values weren't surfaced** — if a contact's tier wasn't in
+   the current enum list (e.g. an admin removed an option, or the
+   value was set before the enum was tightened), the select rendered
+   blank. Now the helper detects the mismatch and injects a synthetic
+   `<option>` labelled "(legacy)" so the value stays visible and the
+   user can keep or replace it.
+
+Fixes:
+- CSS: `background-color` (not `background`) in the inline style +
+  `min-width: 90px` + `text-overflow: ellipsis` + `overflow: hidden`.
+- JS: synthetic legacy option, change handler also uses `backgroundColor`
+  not `background`, hover tooltip refreshes on save.
+
+Full suite: **1069 passing**, same coverage as v1.0.0bt — the bug
+was purely in styling/rendering, not behaviour.
+
+---
+
 ## [1.0.0bt] — 2026-05-24 — Inline-edit Tier / Sentiment / Seniority in Partners table
 
 ### Reported

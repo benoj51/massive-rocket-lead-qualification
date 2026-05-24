@@ -273,10 +273,14 @@
      At-rest the select looks like the old static badge: small,
      coloured per-kind, no chrome. On hover/focus we add a subtle
      outline so users discover the cell is editable. Empty option
-     renders as "—" (no value) which doubles as a clear action. */
+     renders as "—" which doubles as a clear action.
+     v1.0.0bu: min-width + ellipsis so the text doesn't get clipped
+     in narrow columns; explicit background-color (not shorthand) so
+     inline styles can't wipe the dropdown-arrow background-image. */
   .inline-enum-cell {
     appearance: none; -webkit-appearance: none; -moz-appearance: none;
-    background: transparent; color: var(--text-muted);
+    background-color: transparent;
+    color: var(--text-muted);
     border: 1px solid transparent; border-radius: 12px;
     padding: 2px 18px 2px 8px;
     font-size: 10px; font-family: inherit; cursor: pointer;
@@ -286,7 +290,15 @@
     background-size: 4px 4px, 4px 4px;
     background-repeat: no-repeat;
     transition: border-color .12s, background-color .12s, color .12s;
+    /* Without min-width, narrow columns shrunk the select to ~10px
+       and the text got clipped to nothing — the bug Ben caught in
+       v1.0.0bt. 90px holds the longest tier label ("T1 — Critical")
+       in the cell's 10px font. */
+    min-width: 90px;
     max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .inline-enum-cell:hover {
     border-color: var(--border);
@@ -12768,22 +12780,37 @@
                                     field, opts) {
     opts = opts || {};
     const kind = opts.kind || 'plain';
+    const optList = options || [];
+    // v1.0.0bu: if the contact's current value isn't in the enum list
+    // (legacy data, or an admin removed the option), inject it as a
+    // synthetic option so it still displays + the user can keep or
+    // change it. Without this the select would render blank and the
+    // value would silently disappear from view — the Tier bug Ben
+    // caught after v1.0.0bt shipped.
+    const knownOption = value && optList.some(o => o === value);
+    const legacyOption = (value && !knownOption)
+      ? `<option value="${escapeAttr(value)}" selected>${escapeHtml(value)} (legacy)</option>`
+      : '';
     // Empty option labelled "—" so a select with no current value
     // visibly reads as dashes (matching the old static cell). It
     // also doubles as the "clear" action.
     const optHtml = [`<option value=""${value ? '' : ' selected'}>—</option>`]
-      .concat((options || []).map(o =>
+      .concat(legacyOption ? [legacyOption] : [])
+      .concat(optList.map(o =>
         `<option value="${escapeAttr(o)}" ${o === value ? 'selected' : ''}>${escapeHtml(o)}</option>`))
       .join('');
     // Inline-style the select so its at-rest appearance matches the
     // surrounding cell typography. Kind drives the colour.
+    // CRITICAL: use background-COLOR (not the `background` shorthand)
+    // — the shorthand wipes background-image, killing the stylesheet's
+    // dropdown-arrow gradient. v1.0.0bt regression Ben caught.
     let cellStyle = '';
     if (kind === 'sentiment' && value) {
       const pal = _sentimentPalette(value);
-      cellStyle = `background:${pal.bg};color:${pal.text};border-color:${pal.border};`;
+      cellStyle = `background-color:${pal.bg};color:${pal.text};border-color:${pal.border};`;
     } else if (kind === 'plain' && value) {
       // Tier — use the same `tag signal` look the old static cell had.
-      cellStyle = 'background:var(--surface-2);color:var(--text);border-color:var(--border);';
+      cellStyle = 'background-color:var(--surface-2);color:var(--text);border-color:var(--border);';
     }
     return `
       <select class="inline-enum-cell"
@@ -12791,6 +12818,7 @@
               data-pc-partner="${escapeAttr(partnerId)}"
               data-pc-contact="${escapeAttr(contactId)}"
               data-has-value="${value ? '1' : '0'}"
+              title="${escapeAttr(value || '(no value — click to set)')}"
               style="${cellStyle}">
         ${optHtml}
       </select>`;
@@ -14048,28 +14076,32 @@
           sel.dataset.previousValue = newValue || '';
           sel.dataset.hasValue = newValue ? '1' : '0';
           // Re-style for sentiment (kind drives the badge colour).
+          // v1.0.0bu: backgroundColor (not background) so we don't
+          // wipe the dropdown-arrow background-image from CSS.
           if (field === 'partner_sentiment') {
             if (newValue) {
               const pal = _sentimentPalette(newValue);
-              sel.style.background = pal.bg;
+              sel.style.backgroundColor = pal.bg;
               sel.style.color = pal.text;
               sel.style.borderColor = pal.border;
             } else {
-              sel.style.background = '';
+              sel.style.backgroundColor = '';
               sel.style.color = '';
               sel.style.borderColor = '';
             }
           } else if (field === 'tier') {
             if (newValue) {
-              sel.style.background = 'var(--surface-2)';
+              sel.style.backgroundColor = 'var(--surface-2)';
               sel.style.color = 'var(--text)';
               sel.style.borderColor = 'var(--border)';
             } else {
-              sel.style.background = '';
+              sel.style.backgroundColor = '';
               sel.style.color = '';
               sel.style.borderColor = '';
             }
           }
+          // Refresh the title attr (hover tooltip) too.
+          sel.title = newValue || '(no value — click to set)';
           // Subtle confirmation toast; the user just changed a field,
           // they don't need a popup but they DO want acknowledgment.
           toast(`Saved`, 'success');
