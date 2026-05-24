@@ -58,6 +58,8 @@ import account_news
 import account_news_store
 import account_watchlist_store
 import filter_presets_store
+import live_project_okrs_store
+import live_projects_store
 import lead_summary_store
 import notifications_store
 import packages
@@ -4255,6 +4257,217 @@ def api_watchlist_status(lead_id: str):
     if not user:
         return jsonify({"error": "user required"}), 400
     return jsonify({"watching": account_watchlist_store.is_watching(user, lead_id)})
+
+
+# v1.0.0bk: Live Projects API ---------------------------------------------
+# Post-sale account management surface. Lead → won → live project →
+# OKR tracking + delivery. Distinct from the pre-sale ProjectScope
+# (scope.py) which handles SOW/pricing.
+
+@app.route("/api/live-projects", methods=["GET"])
+def api_live_projects_list():
+    """List live projects. Query: status (optional filter).
+
+    Enriches each row with the lead's company name (best-effort
+    Notion lookup) + OKR summary so the index renders without
+    further fetches.
+    """
+    status = (request.args.get("status") or "").strip() or None
+    projects = live_projects_store.list_all(status=status)
+    # Enrich with company names.
+    name_by_id: dict[str, str] = {}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                name_by_id[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("Live projects list: pipeline enrich failed: %s", e)
+    out = []
+    for p in projects:
+        okrs = live_project_okrs_store.list_for_project(p["id"])
+        # Aggregate OKR health across this project's current OKRs.
+        total_krs = sum(len(o.get("key_results") or []) for o in okrs)
+        agg_summary = {"total_okrs": len(okrs), "total_krs": total_krs}
+        if total_krs:
+            on_track = sum(
+                sum(1 for k in (o.get("key_results") or [])
+                    if k.get("status") in ("on_track", "done"))
+                for o in okrs)
+            agg_summary["health_pct"] = round(100 * on_track / total_krs)
+        else:
+            agg_summary["health_pct"] = None
+        out.append({
+            **p,
+            "company": name_by_id.get(p.get("lead_id")) or p.get("lead_id"),
+            "okr_summary": agg_summary,
+        })
+    return jsonify({"items": out})
+
+
+@app.route("/api/live-projects/<project_id>", methods=["GET"])
+def api_live_projects_get(project_id: str):
+    """Full detail: project + every OKR + per-OKR summary."""
+    project = live_projects_store.get(project_id)
+    if not project:
+        return jsonify({"error": "not_found"}), 404
+    okrs = live_project_okrs_store.list_for_project(project_id)
+    okrs_with_summary = [
+        {**o, "summary": live_project_okrs_store.summarise(o)}
+        for o in okrs
+    ]
+    # Enrich with the lead's display name.
+    company = project.get("lead_id")
+    try:
+        lead = NotionSync().get_page(project.get("lead_id")) or {}
+        company = lead.get("company") or company
+    except Exception:
+        pass
+    return jsonify({
+        "project": {**project, "company": company},
+        "okrs":    okrs_with_summary,
+    })
+
+
+@app.route("/api/live-projects/<project_id>", methods=["PATCH"])
+def api_live_projects_update(project_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        updated = live_projects_store.update(project_id, **body)
+    except live_projects_store.LiveProjectsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if updated is None:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("live_project_updated", actor=_actor(),
+                    project_id=project_id,
+                    fields=sorted(body.keys()))
+    return jsonify({"project": updated})
+
+
+@app.route("/api/live-projects/<project_id>", methods=["DELETE"])
+def api_live_projects_delete(project_id: str):
+    """Hard-delete. Use status=archived to preserve history instead."""
+    ok = live_projects_store.delete(project_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("live_project_deleted", actor=_actor(),
+                    project_id=project_id)
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/lead/<lead_id>/promote-to-live", methods=["POST"])
+def api_promote_lead_to_live(lead_id: str):
+    """Convert a lead into a live project. Body:
+      name    — optional, defaults to lead's company name
+      owner   — optional, defaults to lead's current owner
+      summary — optional starting summary
+      started_at — optional YYYY-MM-DD; defaults to today
+
+    The live project doesn't COPY contacts/agencies/tech_stack —
+    it references the lead, so any updates over there flow through
+    automatically. One less place for drift.
+    """
+    body = request.get_json(silent=True) or {}
+    # If a live project already exists for this lead, idempotent-return it.
+    existing = live_projects_store.get_by_lead(lead_id)
+    if existing:
+        return jsonify({"project": existing,
+                         "created": False,
+                         "message": "Lead already has a live project."}), 200
+    # Pull lead context for sensible defaults.
+    company = None
+    lead_owner = None
+    try:
+        lead = NotionSync().get_page(lead_id) or {}
+        company = (lead.get("company") or "").strip() or None
+        lead_owner = (lead.get("owner") or "").strip() or None
+    except Exception as e:
+        log.warning("promote-to-live: lead lookup failed: %s", e)
+    name = (body.get("name") or company or lead_id).strip()
+    owner = (body.get("owner") or lead_owner or _actor() or "").strip() or None
+    started_at = (body.get("started_at") or "").strip() or None
+    summary = (body.get("summary") or "").strip() or None
+    try:
+        project = live_projects_store.create(
+            lead_id=lead_id, name=name, owner=owner,
+            started_at=started_at, summary=summary,
+            tags=body.get("tags") or [])
+    except live_projects_store.LiveProjectsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("live_project_created", actor=_actor(),
+                    project_id=project["id"], lead_id=lead_id,
+                    name=name)
+    return jsonify({"project": project, "created": True}), 201
+
+
+# ---- OKRs nested under a project -----------------------------------------
+
+@app.route("/api/live-projects/<project_id>/okrs", methods=["POST"])
+def api_okrs_create(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not live_projects_store.get(project_id):
+        return jsonify({"error": "project not found"}), 404
+    try:
+        okr = live_project_okrs_store.create(
+            project_id=project_id,
+            quarter=body.get("quarter") or "",
+            objective=body.get("objective") or "",
+            key_results=body.get("key_results") or [])
+    except live_project_okrs_store.LiveProjectOkrsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("live_project_okr_created", actor=_actor(),
+                    project_id=project_id, okr_id=okr["id"],
+                    quarter=okr["quarter"])
+    return jsonify({"okr": okr}), 201
+
+
+@app.route("/api/okrs/<okr_id>", methods=["PATCH"])
+def api_okrs_update(okr_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        updated = live_project_okrs_store.update(okr_id, **body)
+    except live_project_okrs_store.LiveProjectOkrsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if updated is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"okr": updated})
+
+
+@app.route("/api/okrs/<okr_id>", methods=["DELETE"])
+def api_okrs_delete(okr_id: str):
+    ok = live_project_okrs_store.delete(okr_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/okrs/<okr_id>/key-results", methods=["POST"])
+def api_okr_kr_add(okr_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        kr = live_project_okrs_store.add_key_result(okr_id, body)
+    except live_project_okrs_store.LiveProjectOkrsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"key_result": kr}), 201
+
+
+@app.route("/api/okrs/<okr_id>/key-results/<kr_id>", methods=["PATCH"])
+def api_okr_kr_update(okr_id: str, kr_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        kr = live_project_okrs_store.update_key_result(okr_id, kr_id, **body)
+    except live_project_okrs_store.LiveProjectOkrsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if kr is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"key_result": kr})
+
+
+@app.route("/api/okrs/<okr_id>/key-results/<kr_id>", methods=["DELETE"])
+def api_okr_kr_delete(okr_id: str, kr_id: str):
+    ok = live_project_okrs_store.delete_key_result(okr_id, kr_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
 
 
 # v1.0.0bj: account news --------------------------------------------------

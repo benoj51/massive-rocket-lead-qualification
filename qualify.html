@@ -863,6 +863,7 @@
     <button id="nav-forecast" type="button"><span data-icon="chart-line"></span>Forecast</button>
     <button id="nav-dashboard" type="button"><span data-icon="chart-bar"></span>Dashboard</button>
     <button id="nav-build" type="button">Project Build</button>
+    <button id="nav-live" type="button">Live</button>
     <button id="nav-partners" type="button">Partners</button>
   </nav>
   <button id="global-search-open" type="button" title="Search all contacts (⌘K)"
@@ -1671,6 +1672,34 @@
     </div>
   </section>
 
+  <!-- LIVE PROJECTS VIEW (v1.0.0bk) ============================ -->
+  <!-- Accounts that have moved past sales into delivery. Linked
+       back to the source lead by lead_id so contacts / agencies /
+       tech-stack stay shared. Quarterly OKRs per project with
+       measurable key results. -->
+  <section id="view-live" class="view">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h2 style="margin:0;">Live Projects</h2>
+          <p class="muted" style="margin:4px 0 0;">Accounts in active delivery. Set quarterly OKRs, track progress, manage the engagement.</p>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button id="lv-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
+        </div>
+      </div>
+      <div style="margin:14px 0 6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Status:</span>
+        <button class="chip active" data-lv-filter="active" type="button" style="font-size:11px;padding:4px 10px;">Active</button>
+        <button class="chip" data-lv-filter="paused" type="button" style="font-size:11px;padding:4px 10px;">Paused</button>
+        <button class="chip" data-lv-filter="completed" type="button" style="font-size:11px;padding:4px 10px;">Completed</button>
+        <button class="chip" data-lv-filter="" type="button" style="font-size:11px;padding:4px 10px;">All</button>
+      </div>
+      <div id="lv-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
+    </div>
+    <div id="lv-detail" class="card" style="display:none;margin-top:14px;"></div>
+  </section>
+
   <!-- PARTNERS VIEW =========================================== -->
   <section id="view-partners" class="view">
     <!-- v0.10.0z: overdue contacts panel — surfaces stale relationships
@@ -1819,6 +1848,10 @@
               style="padding:7px 12px;font-size:12px;display:none;background:rgba(239,68,68,.10);color:var(--red);border-color:rgba(239,68,68,.4);"
               title="Local cache is empty for this lead — restore notes/projects/contacts from Notion backup">⟲ Restore</button>
       <button id="ld-rescore" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;" title="Recompute ICP score from current Notion values">↻ Rescore</button>
+      <!-- v1.0.0bk: Promote to Live Projects. Hidden until status loads;
+           toggles button label based on whether a live project already
+           exists for this lead. -->
+      <button id="ld-promote-live" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;display:none;" title="Move this account into Live Projects">Promote to Live →</button>
       <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
       </button>
@@ -3788,6 +3821,425 @@
     return '';
   }
 
+  // =============================================================
+  //  Live Projects view (v1.0.0bk)
+  // =============================================================
+  const liveProjectsState = {
+    items: [],
+    filter: 'active',
+    selectedId: null,
+  };
+
+  async function loadLiveProjects() {
+    const el = $('#lv-list');
+    if (!el) return;
+    el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>';
+    try {
+      const qs = liveProjectsState.filter
+        ? `?status=${encodeURIComponent(liveProjectsState.filter)}`
+        : '';
+      const data = await jsonFetch(`/api/live-projects${qs}`);
+      liveProjectsState.items = data.items || [];
+      _renderLiveProjectsList();
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderLiveProjectsList() {
+    const el = $('#lv-list');
+    if (!el) return;
+    const items = liveProjectsState.items;
+    if (!items.length) {
+      el.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No live projects yet. Open a lead in Pipeline → click <strong>Promote to Live →</strong> to start tracking.</div>`;
+      return;
+    }
+    const statusChip = (s) => {
+      const colorBg = {
+        active:    'rgba(74,222,128,.12)', paused: 'rgba(245,158,11,.12)',
+        completed: 'rgba(96,165,250,.12)', archived: 'var(--surface-2)',
+      }[s] || 'var(--surface-2)';
+      const colorTx = {
+        active:    'var(--green)',  paused: 'var(--yellow)',
+        completed: 'var(--blue)',   archived: 'var(--text-muted)',
+      }[s] || 'var(--text-muted)';
+      return `<span style="background:${colorBg};color:${colorTx};font-size:10px;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;">${escapeHtml(s)}</span>`;
+    };
+    const healthBar = (pct) => {
+      if (pct == null) {
+        return `<span class="muted" style="font-size:10px;">no OKRs yet</span>`;
+      }
+      const color = pct >= 75 ? 'var(--green)' : pct >= 50 ? 'var(--yellow)' : 'var(--red)';
+      return `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="width:60px;height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${color};"></div>
+          </div>
+          <span style="font-size:10px;color:${color};font-family:var(--mono);">${pct}%</span>
+        </div>
+      `;
+    };
+    el.innerHTML = `
+      <table class="stakeholders" style="width:100%;font-size:12px;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Owner</th>
+            <th>Started</th>
+            <th>OKR health</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(p => `
+            <tr data-lv-row="${escapeAttr(p.id)}" style="cursor:pointer;">
+              <td><strong>${escapeHtml(p.name || '—')}</strong>
+                <div class="muted" style="font-size:10px;">${escapeHtml(p.company || p.lead_id || '')}</div>
+              </td>
+              <td>${statusChip(p.status)}</td>
+              <td>${escapeHtml(p.owner || '—')}</td>
+              <td class="muted" style="font-size:11px;font-family:var(--mono);">${escapeHtml(p.started_at || '—')}</td>
+              <td>${healthBar(p.okr_summary?.health_pct)}
+                <div class="muted" style="font-size:10px;margin-top:2px;">${p.okr_summary?.total_okrs || 0} OKR${p.okr_summary?.total_okrs === 1 ? '' : 's'} · ${p.okr_summary?.total_krs || 0} KR${p.okr_summary?.total_krs === 1 ? '' : 's'}</div>
+              </td>
+              <td style="text-align:right;"><button class="btn ghost" type="button" data-lv-open="${escapeAttr(p.id)}" style="padding:3px 10px;font-size:10px;">Open →</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    el.querySelectorAll('[data-lv-row]').forEach(tr => {
+      tr.addEventListener('click', () => openLiveProjectDetail(tr.dataset.lvRow));
+    });
+    el.querySelectorAll('[data-lv-open]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLiveProjectDetail(b.dataset.lvOpen);
+      });
+    });
+  }
+
+  async function openLiveProjectDetail(projectId) {
+    liveProjectsState.selectedId = projectId;
+    const el = $('#lv-detail');
+    el.style.display = 'block';
+    el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;">Loading…</div>';
+    try {
+      const data = await jsonFetch(`/api/live-projects/${encodeURIComponent(projectId)}`);
+      _renderLiveProjectDetail(data.project, data.okrs || []);
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderLiveProjectDetail(project, okrs) {
+    const el = $('#lv-detail');
+    const statusSel = `<select id="lv-d-status" style="padding:4px 8px;font-size:11px;">
+      ${['active','paused','completed','archived'].map(s => `<option value="${s}"${s === project.status ? ' selected' : ''}>${s}</option>`).join('')}
+    </select>`;
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+        <div style="min-width:0;flex:1;">
+          <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+            <span id="lv-d-name">${escapeHtml(project.name || '—')}</span>
+            <button class="btn ghost" id="lv-d-edit" type="button" style="padding:2px 8px;font-size:10px;">edit</button>
+          </h3>
+          <div class="muted" style="font-size:11px;margin-top:4px;">
+            ${escapeHtml(project.company || project.lead_id || '')} · started ${escapeHtml(project.started_at || '—')}${project.ended_at ? ' · ended ' + escapeHtml(project.ended_at) : ''}
+          </div>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button class="btn ghost" id="lv-d-open-lead" type="button" style="padding:4px 10px;font-size:11px;">Open lead →</button>
+          <button class="btn ghost" id="lv-d-close" type="button" style="padding:4px 10px;font-size:11px;">✕</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div>
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Status</label>
+          ${statusSel}
+        </div>
+        <div>
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Owner</label>
+          <input id="lv-d-owner" type="text" value="${escapeAttr(project.owner || '')}" style="padding:4px 8px;font-size:12px;width:100%;" />
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Summary</label>
+        <textarea id="lv-d-summary" rows="3" style="padding:8px 10px;font-size:12px;width:100%;font-family:inherit;">${escapeHtml(project.summary || '')}</textarea>
+      </div>
+      <div style="margin-bottom:12px;">
+        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Quarterly OKRs</h4>
+        <div id="lv-d-okrs"></div>
+        <button class="btn ghost" id="lv-d-add-okr" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add OKR</button>
+      </div>
+    `;
+    $('#lv-d-close').addEventListener('click', () => {
+      el.style.display = 'none';
+      liveProjectsState.selectedId = null;
+    });
+    $('#lv-d-open-lead').addEventListener('click', () => {
+      if (project.lead_id) openLeadDrawer(project.lead_id);
+    });
+    // Save handlers (debounced via change).
+    const patch = async (fields) => {
+      try {
+        const res = await jsonFetch(`/api/live-projects/${encodeURIComponent(project.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields),
+        });
+        return res.project;
+      } catch (e) {
+        toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+      }
+    };
+    $('#lv-d-status').addEventListener('change', async (e) => {
+      const updated = await patch({ status: e.target.value });
+      if (updated) {
+        toast(`Status → ${updated.status}`, 'success');
+        loadLiveProjects();
+      }
+    });
+    $('#lv-d-owner').addEventListener('change', (e) =>
+      patch({ owner: e.target.value }).then(u =>
+        u && toast(`Owner → ${u.owner || 'unassigned'}`, 'success')));
+    $('#lv-d-summary').addEventListener('change', (e) =>
+      patch({ summary: e.target.value }).then(u =>
+        u && toast('Summary saved', 'success')));
+    $('#lv-d-edit').addEventListener('click', async () => {
+      const newName = window.prompt('Rename project:', project.name);
+      if (newName === null) return;
+      const updated = await patch({ name: newName.trim() });
+      if (updated) {
+        $('#lv-d-name').textContent = updated.name;
+        loadLiveProjects();
+      }
+    });
+    $('#lv-d-add-okr').addEventListener('click', () => _addNewOkr(project.id));
+    _renderOkrs(project.id, okrs);
+  }
+
+  function _renderOkrs(projectId, okrs) {
+    const wrap = $('#lv-d-okrs');
+    if (!wrap) return;
+    if (!okrs.length) {
+      wrap.innerHTML = '<div class="muted" style="font-size:11px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;text-align:center;">No OKRs yet. Click + Add OKR to start.</div>';
+      return;
+    }
+    const krStatusChip = (s) => {
+      const colors = {
+        on_track: ['rgba(74,222,128,.15)', 'var(--green)'],
+        at_risk:  ['rgba(245,158,11,.15)', 'var(--yellow)'],
+        missed:   ['rgba(239,68,68,.15)',  'var(--red)'],
+        done:     ['rgba(96,165,250,.15)', 'var(--blue)'],
+      };
+      const [bg, fg] = colors[s] || ['var(--surface-2)', 'var(--text-muted)'];
+      return `<span style="background:${bg};color:${fg};font-size:9px;padding:1px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;">${escapeHtml(s.replace('_', ' '))}</span>`;
+    };
+    wrap.innerHTML = okrs.map(okr => {
+      const sum = okr.summary || {};
+      return `
+        <div data-okr-card="${escapeAttr(okr.id)}" style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;">${escapeHtml(okr.quarter || '')}</div>
+              <div style="font-size:13px;font-weight:500;margin-top:2px;">${escapeHtml(okr.objective || '')}</div>
+              <div class="muted" style="font-size:10px;margin-top:3px;">${sum.total_krs || 0} KRs · ${sum.health_pct}% on track${sum.at_risk ? ' · ' + sum.at_risk + ' at risk' : ''}${sum.missed ? ' · ' + sum.missed + ' missed' : ''}</div>
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button class="btn ghost" type="button" data-okr-edit="${escapeAttr(okr.id)}" style="padding:2px 8px;font-size:10px;">edit</button>
+              <button class="btn ghost" type="button" data-okr-del="${escapeAttr(okr.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+            </div>
+          </div>
+          <table class="stakeholders" style="width:100%;font-size:11px;margin-bottom:6px;">
+            <thead><tr><th>Key result</th><th>Target</th><th>Current</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              ${(okr.key_results || []).map(kr => `
+                <tr data-kr-row="${escapeAttr(kr.id)}">
+                  <td>${escapeHtml(kr.description || '')}</td>
+                  <td style="font-family:var(--mono);">${escapeHtml(kr.target || '—')}${kr.unit ? ' ' + escapeHtml(kr.unit) : ''}</td>
+                  <td style="font-family:var(--mono);">${escapeHtml(kr.current || '—')}${kr.unit ? ' ' + escapeHtml(kr.unit) : ''}</td>
+                  <td>${krStatusChip(kr.status || 'on_track')}</td>
+                  <td style="text-align:right;">
+                    <button class="btn ghost" type="button" data-kr-edit="${escapeAttr(okr.id)}|${escapeAttr(kr.id)}" style="padding:1px 6px;font-size:10px;">edit</button>
+                    <button class="btn ghost" type="button" data-kr-del="${escapeAttr(okr.id)}|${escapeAttr(kr.id)}" style="padding:1px 6px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <button class="btn ghost" type="button" data-kr-add="${escapeAttr(okr.id)}" style="padding:3px 10px;font-size:10px;">+ Add KR</button>
+        </div>
+      `;
+    }).join('');
+    // Wire OKR + KR handlers.
+    wrap.querySelectorAll('[data-okr-edit]').forEach(b => {
+      b.addEventListener('click', () => _editOkr(projectId, b.dataset.okrEdit));
+    });
+    wrap.querySelectorAll('[data-okr-del]').forEach(b => {
+      b.addEventListener('click', () => _deleteOkr(projectId, b.dataset.okrDel));
+    });
+    wrap.querySelectorAll('[data-kr-add]').forEach(b => {
+      b.addEventListener('click', () => _addKr(projectId, b.dataset.krAdd));
+    });
+    wrap.querySelectorAll('[data-kr-edit]').forEach(b => {
+      const [oid, kid] = b.dataset.krEdit.split('|');
+      b.addEventListener('click', () => _editKr(projectId, oid, kid));
+    });
+    wrap.querySelectorAll('[data-kr-del]').forEach(b => {
+      const [oid, kid] = b.dataset.krDel.split('|');
+      b.addEventListener('click', () => _deleteKr(projectId, oid, kid));
+    });
+  }
+
+  async function _addNewOkr(projectId) {
+    const quarter = window.prompt('Quarter (e.g. "Q2 2026"):', 'Q2 2026');
+    if (quarter === null || !quarter.trim()) return;
+    const objective = window.prompt('Objective for this quarter:', '');
+    if (objective === null || !objective.trim()) return;
+    try {
+      await jsonFetch(`/api/live-projects/${encodeURIComponent(projectId)}/okrs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quarter: quarter.trim(), objective: objective.trim() }),
+      });
+      toast('OKR added', 'success');
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _editOkr(projectId, okrId) {
+    const quarter = window.prompt('New quarter label:');
+    if (quarter === null) return;
+    const objective = window.prompt('New objective:');
+    if (objective === null) return;
+    const updates = {};
+    if (quarter.trim()) updates.quarter = quarter.trim();
+    if (objective.trim()) updates.objective = objective.trim();
+    if (!Object.keys(updates).length) return;
+    try {
+      await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _deleteOkr(projectId, okrId) {
+    if (!window.confirm('Delete this OKR and all its key results?')) return;
+    try {
+      await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}`, { method: 'DELETE' });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _addKr(projectId, okrId) {
+    const description = window.prompt('Key result (what gets measured):');
+    if (description === null || !description.trim()) return;
+    const target = window.prompt('Target value (e.g. "10%", "$5M", "50 users"):', '');
+    if (target === null) return;
+    const current = window.prompt('Current value (optional):', '');
+    if (current === null) return;
+    try {
+      await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}/key-results`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: description.trim(),
+          target: target.trim() || null,
+          current: current.trim() || null,
+          status: 'on_track',
+        }),
+      });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _editKr(projectId, okrId, krId) {
+    const current = window.prompt('Update current value (or status: on_track/at_risk/missed/done):');
+    if (current === null || !current.trim()) return;
+    const STATUSES = ['on_track', 'at_risk', 'missed', 'done'];
+    const update = STATUSES.includes(current.trim())
+      ? { status: current.trim() }
+      : { current: current.trim() };
+    try {
+      await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}/key-results/${encodeURIComponent(krId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _deleteKr(projectId, okrId, krId) {
+    if (!window.confirm('Delete this key result?')) return;
+    try {
+      await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}/key-results/${encodeURIComponent(krId)}`,
+        { method: 'DELETE' });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  // v1.0.0bk: refresh the Promote-to-Live drawer button. If a live
+  // project already exists, the button becomes "Open Live Project →".
+  async function _refreshPromoteToLiveButton(leadId, leadCompany) {
+    const btn = $('#ld-promote-live');
+    if (!btn) return;
+    btn.style.display = 'inline-flex';
+    // Check if this lead already has a live project (list with filter).
+    let existing = null;
+    try {
+      const data = await jsonFetch(`/api/live-projects?status=`);
+      existing = (data.items || []).find(p => p.lead_id === leadId);
+    } catch (_) { /* silent */ }
+    // Rewire (clone+replace to drop any previous handler).
+    const fresh = btn.cloneNode(true);
+    btn.parentNode.replaceChild(fresh, btn);
+    if (existing) {
+      fresh.textContent = '→ Live Project';
+      fresh.title = 'This lead is already a live project — open it';
+      fresh.addEventListener('click', () => {
+        switchView('live');
+        loadLiveProjects().then(() => openLiveProjectDetail(existing.id));
+      });
+    } else {
+      fresh.textContent = 'Promote to Live →';
+      fresh.title = 'Move this account into Live Projects';
+      fresh.addEventListener('click', () => _promoteLeadToLive(leadId, leadCompany));
+    }
+  }
+
+  // v1.0.0bk: Promote-to-Live action on the lead drawer.
+  async function _promoteLeadToLive(leadId, leadCompany) {
+    if (!leadId) return;
+    const name = window.prompt(
+      'Live project name:', leadCompany || leadId);
+    if (name === null || !name.trim()) return;
+    try {
+      const data = await jsonFetch(
+        `/api/lead/${encodeURIComponent(leadId)}/promote-to-live`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (data.created) {
+        toast(`Promoted to Live Projects`, 'success');
+      } else {
+        toast(data.message || 'Already a live project', 'info');
+      }
+      // Switch to Live view and open the detail.
+      switchView('live');
+      await loadLiveProjects();
+      openLiveProjectDetail(data.project.id);
+    } catch (e) {
+      toast(`Promote failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
   // v1.0.0bi: load + wire the watchlist toggle in the drawer header.
   // Hidden when no profile is set. Click flips the state via POST /
   // DELETE and re-renders the button.
@@ -5454,6 +5906,10 @@
       // v1.0.0bi: watchlist toggle. Reads the current is-watching
       // state for this lead + this user.
       loadLeadWatchToggle(pageId);
+      // v1.0.0bk: Promote-to-Live button. Hidden by default; shown
+      // with appropriate label based on whether a live project
+      // already exists.
+      _refreshPromoteToLiveButton(pageId, lead.company);
       // Reset dirty state — freshly loaded data is the new baseline.
       updateDirtyState();
     } catch (e) {
@@ -8169,6 +8625,24 @@
       // v1.0.0bd: lazy-init the pipeline preset picker the first
       // time the user opens the view.
       _initPipelinePresets();
+    });
+    // v1.0.0bk: Live Projects view.
+    const navLive = $('#nav-live');
+    if (navLive) {
+      navLive.addEventListener('click', () => {
+        switchView('live');
+        loadLiveProjects();
+      });
+    }
+    const lvRefresh = $('#lv-refresh');
+    if (lvRefresh) lvRefresh.addEventListener('click', loadLiveProjects);
+    document.querySelectorAll('[data-lv-filter]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('[data-lv-filter]').forEach(x =>
+          x.classList.toggle('active', x === b));
+        liveProjectsState.filter = b.dataset.lvFilter;
+        loadLiveProjects();
+      });
     });
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
     // v1.0.0t: Dashboard view wiring.

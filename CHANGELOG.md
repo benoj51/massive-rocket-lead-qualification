@@ -5,6 +5,90 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bk] — 2026-05-24 — Live Projects (post-sale delivery + OKRs)
+
+Ben asked for a "live projects" section — accounts that have moved
+past sales into active delivery, with quarterly measurable OKRs,
+contacts carried over, stakeholders, other agencies. This commit
+ships the spine: live projects + OKRs + the promote-from-lead flow.
+v1.0.0bl follows with the stakeholder map + concurrent agencies.
+
+### Added
+
+- **`live_projects_store.py`** — one JSON file per project. Fields:
+  id, lead_id (link back), name, status (active|paused|completed|
+  archived), owner, started_at, ended_at, summary, tags. Enforces
+  one-live-project-per-lead. Status transitions auto-set ended_at
+  on completed/archived; clear it on active/paused.
+- **`live_project_okrs_store.py`** — per-project quarterly OKRs.
+  Each OKR: quarter (free-form label like "Q2 2026"), objective,
+  key_results [{description, metric, unit, target, current, status
+  (on_track|at_risk|missed|done), notes}]. Per-KR addressable via
+  helpers so the UI can add/edit/remove individually.
+  `summarise(okr)` returns `{total_krs, on_track, at_risk, missed,
+  done, health_pct}` for the UI.
+- **API surface** (~10 endpoints):
+  - `GET /api/live-projects?status=` — list with company-name
+    enrichment + OKR health roll-up per project
+  - `GET /api/live-projects/<id>` — detail with full OKR list
+  - `PATCH /api/live-projects/<id>` — partial update
+  - `DELETE /api/live-projects/<id>` — hard delete
+  - `POST /api/lead/<lead_id>/promote-to-live` — convert a lead;
+    defaults name from lead's company, owner from lead's owner.
+    Idempotent (second call returns the existing project, 200 not
+    409). Doesn't copy contacts/agencies — references the lead so
+    the data stays single-source.
+  - `POST /api/live-projects/<id>/okrs` — add an OKR
+  - `PATCH /api/okrs/<id>` — update an OKR (quarter / objective /
+    full key_results array)
+  - `DELETE /api/okrs/<id>` — drop an OKR
+  - `POST /api/okrs/<id>/key-results` — add a KR
+  - `PATCH /api/okrs/<id>/key-results/<kr_id>` — update a KR
+    (status flip, current-value update, edit description)
+  - `DELETE /api/okrs/<id>/key-results/<kr_id>` — drop a KR
+- **Live Projects nav button** + view: list with status chips,
+  owner, started_at, OKR health bar + counts. Click any row to
+  open the detail card (sticky below the list).
+- **Project detail** with:
+  - In-place editable name, owner, summary, status
+  - Per-quarter OKR sections with KR table (target/current/status
+    chip), add/edit/delete buttons for both OKRs and KRs
+  - "Open lead" button — jumps back to the source lead drawer
+- **"Promote to Live →" button** in the lead drawer header.
+  Becomes "→ Live Project" once promoted (one-click jump back to
+  the live project detail). Reflects state on every drawer open.
+- **Audit events**: `live_project_created`, `live_project_updated`,
+  `live_project_deleted`, `live_project_okr_created`. Picked up by
+  the team activity feed automatically.
+
+### Tests
+
+- **`tests/test_live_projects.py`** — 27 tests across the three
+  layers:
+  - **13 live_projects_store units**: create + get, today default
+    for started_at, one-live-per-lead enforcement, get_by_lead,
+    status filter, status→ended_at auto-set + back-to-active clear,
+    validation (enum / date / unknown field / required fields),
+    delete + delete-missing.
+  - **9 OKRs store units**: create with KRs, summarise (all 4
+    statuses + empty), add/update/delete KR, sort by quarter,
+    enum + required validation.
+  - **5 endpoint tests**: promote-to-live creates with sensible
+    defaults from Notion lead, promote idempotent (201 first,
+    200 second, same id), status filter on list, end-to-end OKR
+    lifecycle (create project → add OKR → add KR → update KR →
+    delete KR), unknown project → 404.
+
+### Coming in v1.0.0bl
+
+- **Stakeholder map**: extend `contacts_store` with role / influence
+  / interest fields; render the influence×interest matrix per
+  account.
+- **Concurrent agencies**: extend `lead_agencies_store` with
+  TYPE_CONCURRENT (sibling to incumbent / previous / competitor) +
+  per-agency scope field + contact entries. UI surface on both the
+  lead drawer and the live project detail.
+
 ## [1.0.0bj] — 2026-05-24 — News fetcher + AI relevance + watcher notifications
 
 Completes the watch-list system Ben asked for. Watched accounts now
