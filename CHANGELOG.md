@@ -5,6 +5,94 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bj] — 2026-05-24 — News fetcher + AI relevance + watcher notifications
+
+Completes the watch-list system Ben asked for. Watched accounts now
+get real news scanned against them; Claude scores each headline
+against MR's specific offer; watchers get a bell notification when
+something material lands.
+
+### Added
+
+- **`account_news.py`** — fetcher + AI relevance scorer:
+  - `fetch_for_company(company_name, since_iso=, limit=)` pulls
+    Google News RSS (no API key, free, returns ~30 days), parses
+    items in-house (no `feedparser` dep — RSS is well-formed
+    enough that a regex parser is reliable for one feed).
+  - `score_relevance(items, company_name)` runs each through
+    Claude with an MR-specific rubric: 9-10 = directly material
+    (loyalty programme, CMO hire, data platform RFP), 6-8 =
+    indirectly relevant (marketing spend commentary, mobile app),
+    4-5 = tangentially interesting, 0-3 = noise. **Drops anything
+    below 4** so the AE only sees signal. Each surviving item gets
+    `why_relevant` (one line) + `mr_action_hint` (optional concrete
+    next move). Tunable threshold via `_RELEVANCE_THRESHOLD`.
+- **`account_news_store.py`** — JSON-per-lead persistence with
+  dedup by item id (sha1 of title+link). `upsert_many` reports
+  added vs updated vs new_items so the sweep knows which to
+  notify on. Ring-cap 100 items per lead.
+- **API endpoints**:
+  - `GET /api/lead/<id>/news` — return persisted items (cheap,
+    no LLM call, no Google News hit)
+  - `POST /api/lead/<id>/news/refresh` — fetch+score+persist on
+    demand; skips already-seen ids to save tokens
+  - `POST /api/admin/watchlist/sweep` — daily-cron-shaped endpoint
+    that scans every watched account, fans notifications out to
+    every watcher (`kind: news_alert`), bumps each watcher's
+    `last_news_seen_at` high-water mark. Optional `?lead_id=`
+    scopes to one lead (testing / per-lead refresh).
+- **News card in the lead drawer** under the hero, listing items
+  newest-first with the relevance score, the AI's "why this
+  matters", and a clickable headline link. Refresh button triggers
+  the per-lead refresh endpoint.
+
+### Notifications
+
+- New `kind: news_alert` follows the existing notifications
+  contract — bell badge bumps, click opens the lead drawer (the
+  link uses the standard `{kind: "lead", lead_id}` shape so
+  `_openTodoLink` routes it correctly without any new UI work).
+- Dedup is per-watcher: each user gets notified once per article
+  per lead, not once per sweep.
+
+### Tests
+
+- **`tests/test_account_news.py`** — 18 tests across three layers:
+  - **9 fetcher/scorer units** (Anthropic SDK stubbed inline,
+    `requests.get` patched): RSS parse extracts items with
+    source/date/snippet, deterministic item_id, HTTP failure → empty,
+    since_iso filters, no-filter returns all, scoring drops below
+    threshold, returns empty when Anthropic off, handles malformed
+    JSON, sorts highest-first.
+  - **5 store units**: upsert adds + dedup updates, list newest-
+    first by published_at, ids_already_seen for sweep dedup,
+    per-lead isolation.
+  - **4 sweep endpoint tests** (NotionSync + fetch + scorer all
+    stubbed): no-watchers returns zero, two watchers on same lead
+    → both get notified, second sweep on same news dedupes
+    (notifications_fired=0), `?lead_id=` scopes to one lead.
+
+### How to use
+
+1. Open any lead → click the **Watch** toggle next to the ENG chip.
+2. The Watched accounts card on Home now lists it.
+3. Click **Refresh** on the news card in the drawer for an
+   on-demand scan.
+4. Trigger `POST /api/admin/watchlist/sweep` daily (or on-demand)
+   to scan all watched accounts in one shot and fire bell
+   notifications to all watchers. A cron service or Railway
+   scheduled job can fire this nightly.
+
+### What's not in this commit
+
+- Annual report parsing (PDF fetch + Claude summarisation). The
+  rubric example called this out. It needs a separate path because
+  annual reports are PDFs not RSS items, and the Claude prompt
+  for "summarise this 200-page PDF against MR's offer" is bigger
+  than the per-headline scorer. Reasonable v1.0.0bk if you want it.
+- Auto-cron on Railway. The sweep endpoint works; you'd wire a
+  Railway scheduled job (or external scheduler) to POST it daily.
+
 ## [1.0.0bi] — 2026-05-24 — Account watch list (foundation)
 
 Ben: "I'd like the team to be able to create an account watch list

@@ -1843,6 +1843,10 @@
            agencies the AI surfaced from call notes. Hidden until there's
            something to show. -->
       <div id="ld-discovered" style="margin-top:10px;"></div>
+      <!-- v1.0.0bj: News card — recent material news scored by AI for
+           MR relevance. Hidden until news exists or the user clicks
+           Refresh. -->
+      <div id="ld-news-card" style="margin-top:10px;"></div>
     </div>
 
     <!-- Calls & Notes — open by default, most-touched section -->
@@ -4851,6 +4855,9 @@
       // tools + competitive agencies extracted by the AI across every
       // call. Hidden when there's nothing to show.
       _renderDiscoveredInCalls(leadId, data.rolling || {});
+      // v1.0.0bj: load + render the news card (fresh news for watched
+      // accounts). Fires in parallel so the calls render isn't blocked.
+      _loadLeadNews(leadId);
       if (!calls.length) {
         const emptyBanner = aiIsOn()
           ? ''
@@ -4933,6 +4940,97 @@
       });
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  // v1.0.0bj: load + render the "Recent news" card. Lists persisted
+  // scored items for this lead + a Refresh button that triggers a
+  // fresh Google News fetch + AI relevance scoring.
+  async function _loadLeadNews(leadId) {
+    const el = $('#ld-news-card');
+    if (!el || !leadId) return;
+    try {
+      const data = await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/news`);
+      _renderLeadNews(leadId, data.items || []);
+    } catch (e) {
+      console.warn('news fetch failed', e);
+      el.innerHTML = '';
+    }
+  }
+
+  function _renderLeadNews(leadId, items) {
+    const el = $('#ld-news-card');
+    if (!el) return;
+    const colourFor = (s) =>
+      s >= 8 ? 'var(--green)' :
+      s >= 6 ? 'var(--yellow)' :
+                'var(--text-muted)';
+    const head = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
+          Recent news${items.length ? ` (${items.length})` : ''}
+          <span class="muted" style="text-transform:none;letter-spacing:0;margin-left:6px;">— AI-scored for MR relevance</span>
+        </div>
+        <button class="btn ghost" id="ld-news-refresh" type="button" style="padding:3px 10px;font-size:11px;">↻ Refresh</button>
+      </div>
+    `;
+    const body = items.length ? items.slice(0, 8).map(n => `
+      <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;background:var(--surface);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <a href="${escapeAttr(n.link || '#')}" target="_blank" rel="noopener"
+               style="font-size:12px;font-weight:500;color:var(--text);text-decoration:none;">
+              ${escapeHtml(n.title || '')}
+            </a>
+            <div class="muted" style="font-size:10px;margin-top:2px;">
+              ${escapeHtml(n.source || '')}${n.published_at ? ' · ' + escapeHtml(_fmtAgoShort(n.published_at)) : ''}
+            </div>
+            ${n.why_relevant ? `
+              <div style="font-size:11px;color:var(--text-dim);margin-top:4px;font-style:italic;">
+                Why: ${escapeHtml(n.why_relevant)}
+              </div>
+            ` : ''}
+            ${n.mr_action_hint ? `
+              <div style="font-size:11px;color:var(--accent-text);margin-top:3px;">
+                → ${escapeHtml(n.mr_action_hint)}
+              </div>
+            ` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;font-family:var(--mono);font-size:13px;font-weight:600;color:${colourFor(n.relevance_score || 0)};"
+               title="MR relevance ${n.relevance_score || 0}/10">
+            ${n.relevance_score || 0}
+          </div>
+        </div>
+      </div>
+    `).join('') : `<div class="muted" style="font-size:11px;padding:10px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No news scored yet. Click Refresh to scan Google News.</div>`;
+    el.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;">
+        ${head}
+        ${body}
+      </div>
+    `;
+    const refreshBtn = $('#ld-news-refresh');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<span class="spinner"></span> Scanning…';
+        try {
+          const data = await jsonFetch(
+            `/api/lead/${encodeURIComponent(leadId)}/news/refresh`,
+            { method: 'POST' });
+          _renderLeadNews(leadId, data.items || []);
+          const msg = data.added > 0
+            ? `Added ${data.added} new item${data.added === 1 ? '' : 's'}`
+            : (data.raw === 0
+                ? 'No news found on Google News'
+                : 'No new material items');
+          toast(msg, data.added > 0 ? 'success' : 'info');
+        } catch (e) {
+          toast(`News refresh failed: ${e.body?.error || e.message}`, 'error');
+          refreshBtn.disabled = false;
+          refreshBtn.innerHTML = '↻ Refresh';
+        }
+      });
     }
   }
 

@@ -18,9 +18,11 @@ from __future__ import annotations
 import csv
 import hmac
 import io
+import json
 import logging
 import os
 import traceback
+from typing import Any
 
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
@@ -52,6 +54,8 @@ import criteria_store
 import engagement
 import engagement_snapshots_store
 import hubspot_sync
+import account_news
+import account_news_store
 import account_watchlist_store
 import filter_presets_store
 import lead_summary_store
@@ -4251,6 +4255,147 @@ def api_watchlist_status(lead_id: str):
     if not user:
         return jsonify({"error": "user required"}), 400
     return jsonify({"watching": account_watchlist_store.is_watching(user, lead_id)})
+
+
+# v1.0.0bj: account news --------------------------------------------------
+# Fetch + score + persist + notify. The lead drawer hits
+# /api/lead/<id>/news to render the news card; /api/admin/watchlist/sweep
+# scans every watched account and fires notifications for new
+# relevant items.
+
+@app.route("/api/lead/<lead_id>/news", methods=["GET"])
+def api_lead_news_list(lead_id: str):
+    """Return persisted scored news for a lead. Does NOT fetch new
+    items — that happens via the explicit refresh endpoint below or
+    the sweep. List-only is cheap so the drawer can render it on
+    every open without polling Google News."""
+    return jsonify({
+        "items": account_news_store.list_for(lead_id, limit=20),
+    })
+
+
+@app.route("/api/lead/<lead_id>/news/refresh", methods=["POST"])
+def api_lead_news_refresh(lead_id: str):
+    """Fetch fresh news for this lead, score via Claude, persist.
+    Returns the updated list. UI calls this when the AE clicks
+    Refresh on the news card."""
+    # Need the company name to query Google News. Pull from Notion.
+    try:
+        lead = NotionSync().get_page(lead_id) or {}
+    except Exception as e:
+        return jsonify({"error": f"Couldn't resolve lead: {e}"}), 502
+    company = (lead.get("company") or "").strip()
+    if not company:
+        return jsonify({"error": "lead has no company name"}), 400
+    raw = account_news.fetch_for_company(company, limit=15)
+    if not raw:
+        return jsonify({
+            "items": account_news_store.list_for(lead_id, limit=20),
+            "added": 0, "scored": 0,
+            "message": "No news found",
+        })
+    # Skip items we've already scored to save tokens + dedup notifications.
+    seen = account_news_store.ids_already_seen(lead_id)
+    fresh = [i for i in raw if i["id"] not in seen]
+    scored = account_news.score_relevance(fresh, company) if fresh else []
+    result = account_news_store.upsert_many(lead_id, scored)
+    return jsonify({
+        "items":  account_news_store.list_for(lead_id, limit=20),
+        "added":  result["added"],
+        "scored": len(scored),
+        "raw":    len(raw),
+    })
+
+
+@app.route("/api/admin/watchlist/sweep", methods=["POST"])
+def api_watchlist_sweep():
+    """Scan every watched account: fetch news, score, persist new
+    items, fire `news_alert` notifications to each watcher for items
+    they haven't seen yet. Designed to be called daily (cron / cloud
+    scheduler) but works on-demand too.
+
+    Optional query:
+      lead_id — restrict to one lead (testing / debugging)
+    """
+    only = (request.args.get("lead_id") or "").strip() or None
+    summary: dict[str, Any] = {
+        "leads_scanned": 0,
+        "items_added":   0,
+        "notifications_fired": 0,
+        "errors": [],
+    }
+    # Build the set of leads to scan: every lead that any user is watching.
+    lead_to_watchers: dict[str, list[str]] = {}
+    try:
+        for f in account_watchlist_store._store_dir().glob("*.json"):
+            try:
+                rows = json.loads(f.read_text())
+                if not isinstance(rows, list):
+                    continue
+                user = f.stem  # slug — notifications_store accepts it
+                for r in rows:
+                    lid = (r.get("lead_id") or "").strip()
+                    if not lid or (only and lid != only):
+                        continue
+                    lead_to_watchers.setdefault(lid, []).append(user)
+            except (OSError, ValueError):
+                continue
+    except Exception as e:
+        summary["errors"].append(f"watchlist scan: {e}")
+        return jsonify(summary), 500
+
+    # Resolve company names for every lead in one Notion call.
+    company_by_id: dict[str, str] = {}
+    try:
+        sync = NotionSync()
+        for r in sync.list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                company_by_id[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("Sweep: pipeline name lookup failed: %s", e)
+
+    for lid, watchers in lead_to_watchers.items():
+        company = company_by_id.get(lid) or lid
+        try:
+            raw = account_news.fetch_for_company(company, limit=15)
+            seen = account_news_store.ids_already_seen(lid)
+            fresh = [i for i in raw if i["id"] not in seen]
+            scored = account_news.score_relevance(fresh, company) if fresh else []
+            result = account_news_store.upsert_many(lid, scored)
+            summary["leads_scanned"] += 1
+            summary["items_added"]   += result["added"]
+            # Notify each watcher for each NEW item (not updated).
+            for item in result.get("new_items") or []:
+                for user in watchers:
+                    try:
+                        notifications_store.notify_assignment(
+                            user,
+                            kind="news_alert",
+                            title=f"{company}: {item.get('title', '')[:120]}",
+                            body=(item.get("why_relevant") or
+                                    item.get("snippet") or "")[:240],
+                            link={"kind": "lead", "lead_id": lid},
+                            actor=None,
+                        )
+                        summary["notifications_fired"] += 1
+                    except Exception as e:
+                        summary["errors"].append(
+                            f"notify {user} for {lid}: {e}")
+            # Bump the high-water mark per watcher.
+            for user in watchers:
+                try:
+                    account_watchlist_store.mark_news_seen(user, lid)
+                except Exception:
+                    pass
+        except Exception as e:
+            summary["errors"].append(f"sweep {lid}: {e}")
+            log.exception("Sweep error for %s", lid)
+
+    audit.log_event("watchlist_sweep_ran", actor=_actor(),
+                    leads_scanned=summary["leads_scanned"],
+                    items_added=summary["items_added"],
+                    notifications_fired=summary["notifications_fired"])
+    return jsonify(summary)
 
 
 # v1.0.0t: Dashboard endpoint ----------------------------------------------
