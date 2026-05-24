@@ -269,6 +269,140 @@
   header.top .health .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
   header.top .health .pill.warn { color: var(--yellow); border-color: rgba(251,191,36,.3); }
 
+  /* v1.0.0bs: Jeff — floating chat assistant. Bottom-right button +
+     slide-up chat panel. Brand-coloured trigger so it reads as
+     "MR thing"; surface-coloured panel so it doesn't compete with
+     the content. Reachable from every view. */
+  #jeff-trigger {
+    position: fixed; bottom: 24px; right: 24px; z-index: 35;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--mr-red, #e82b23); color: #fff;
+    border: 0; cursor: pointer;
+    box-shadow: 0 8px 24px rgba(232,43,35,.35), 0 2px 6px rgba(0,0,0,.18);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; font-family: var(--mono);
+    transition: transform .15s, box-shadow .15s;
+  }
+  #jeff-trigger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(232,43,35,.45), 0 4px 10px rgba(0,0,0,.22);
+  }
+  #jeff-trigger.open {
+    background: var(--surface-2); color: var(--text);
+    box-shadow: 0 2px 6px rgba(0,0,0,.18);
+  }
+  #jeff-panel {
+    position: fixed; bottom: 92px; right: 24px; z-index: 35;
+    width: 420px; max-width: calc(100vw - 48px);
+    height: 600px; max-height: calc(100vh - 140px);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0,0,0,.28), 0 6px 14px rgba(0,0,0,.16);
+    display: none; flex-direction: column; overflow: hidden;
+  }
+  #jeff-panel.open { display: flex; }
+  #jeff-panel header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  #jeff-panel header .jeff-title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 14px;
+  }
+  #jeff-panel header .jeff-title .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--mr-red, #e82b23);
+    box-shadow: 0 0 8px var(--mr-red, #e82b23);
+  }
+  #jeff-panel header select#jeff-skill {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-dim); padding: 3px 8px; border-radius: 6px;
+    font-size: 11px; font-family: var(--mono);
+  }
+  #jeff-messages {
+    flex: 1; overflow-y: auto; padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .jeff-msg { display: flex; flex-direction: column; gap: 4px; max-width: 90%; }
+  .jeff-msg.user { align-self: flex-end; }
+  .jeff-msg.assistant { align-self: flex-start; }
+  .jeff-msg .who {
+    font-size: 10px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .jeff-msg .bubble {
+    padding: 10px 12px; border-radius: 12px; font-size: 13px;
+    line-height: 1.5;
+  }
+  .jeff-msg.user .bubble {
+    background: var(--mr-red, #e82b23); color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .jeff-msg.assistant .bubble {
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .jeff-msg .bubble p { margin: 0 0 8px; }
+  .jeff-msg .bubble p:last-child { margin-bottom: 0; }
+  .jeff-msg .bubble ul, .jeff-msg .bubble ol { margin: 4px 0 8px 18px; padding: 0; }
+  .jeff-msg .bubble code {
+    background: rgba(0,0,0,.12); padding: 1px 4px; border-radius: 3px;
+    font-family: var(--mono); font-size: 11px;
+  }
+  .jeff-msg.user .bubble code { background: rgba(255,255,255,.18); }
+  .jeff-msg .bubble h3 { margin: 0 0 6px; font-size: 13px; }
+  .jeff-msg .bubble strong { font-weight: 700; }
+  #jeff-typing {
+    align-self: flex-start; padding: 10px 12px; border-radius: 12px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    font-size: 12px; color: var(--text-muted); display: none;
+  }
+  #jeff-typing.active { display: inline-block; }
+  #jeff-input-row {
+    border-top: 1px solid var(--border); padding: 10px 12px;
+    display: flex; gap: 8px; align-items: flex-end;
+    background: var(--surface);
+  }
+  #jeff-input {
+    flex: 1; resize: none; min-height: 36px; max-height: 120px;
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text);
+    font-family: inherit; font-size: 13px; line-height: 1.4;
+  }
+  #jeff-input:focus {
+    outline: none; border-color: var(--accent);
+    background: var(--input-focus-bg, var(--surface));
+  }
+  #jeff-send {
+    background: var(--mr-red, #e82b23); color: #fff; border: 0;
+    padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    font-weight: 600; font-size: 12px;
+  }
+  #jeff-send:disabled { opacity: .5; cursor: not-allowed; }
+  #jeff-empty {
+    display: flex; flex-direction: column; gap: 10px;
+    color: var(--text-muted); font-size: 13px;
+    padding: 20px 4px;
+  }
+  #jeff-empty .jeff-suggestion {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; cursor: pointer;
+    color: var(--text-dim); font-size: 12px; text-align: left;
+    transition: background .12s, border-color .12s;
+  }
+  #jeff-empty .jeff-suggestion:hover {
+    background: var(--input-focus-bg, var(--surface));
+    border-color: var(--accent); color: var(--text);
+  }
+  #jeff-offline {
+    color: var(--yellow); font-size: 12px; padding: 12px;
+    background: rgba(251,191,36,.06); border: 1px solid rgba(251,191,36,.2);
+    border-radius: 8px; margin: 14px;
+  }
+
   main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
   .view { display: none; }
   .view.active { display: block; }
@@ -10125,11 +10259,270 @@
     });
   }
 
+  // =============================================================
+  //  Jeff (v1.0.0bs) — floating pricing + scoping assistant
+  // =============================================================
+  //
+  // Single chat panel; the server-side endpoint does all the
+  // system-prompt assembly. We only manage:
+  //   - skill level (Beginner/Intermediate/Expert) — persisted in localStorage
+  //   - conversation history — kept in memory (per-tab); a Clear
+  //     button wipes it. Per-profile persistence would be nice for
+  //     v2 but burning localStorage on every turn isn't worth it
+  //     for an assistant chat.
+  //   - the current "context" (view + open lead + pricing config) —
+  //     attached to every request so Jeff can give targeted answers.
+  const jeffState = {
+    messages: [],   // [{role, content}]
+    skill:    'intermediate',
+    open:     false,
+    busy:     false,
+  };
+  const JEFF_SKILL_KEY = 'mr-jeff-skill';
+
+  function _initJeff() {
+    const trigger = $('#jeff-trigger');
+    const panel = $('#jeff-panel');
+    if (!trigger || !panel) return;
+    // Restore skill preference if previously set.
+    try {
+      const saved = localStorage.getItem(JEFF_SKILL_KEY);
+      if (saved && ['beginner','intermediate','expert'].includes(saved)) {
+        jeffState.skill = saved;
+        $('#jeff-skill').value = saved;
+      }
+    } catch (_) { /* localStorage unavailable — defaults are fine */ }
+
+    trigger.addEventListener('click', () => {
+      jeffState.open ? _jeffClose() : _jeffOpen();
+    });
+    $('#jeff-close').addEventListener('click', _jeffClose);
+    $('#jeff-clear').addEventListener('click', _jeffClear);
+    $('#jeff-skill').addEventListener('change', (e) => {
+      jeffState.skill = e.target.value;
+      try { localStorage.setItem(JEFF_SKILL_KEY, jeffState.skill); } catch (_) {}
+    });
+    $('#jeff-send').addEventListener('click', _jeffSend);
+    const input = $('#jeff-input');
+    input.addEventListener('keydown', (e) => {
+      // Enter sends; Shift+Enter inserts a newline. Matches Slack/Linear/etc.
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        _jeffSend();
+      }
+    });
+    input.addEventListener('input', () => {
+      // Auto-grow up to the max-height CSS limit (120px).
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+    document.querySelectorAll('[data-jeff-prompt]').forEach(b => {
+      b.addEventListener('click', () => {
+        const text = b.dataset.jeffPrompt || '';
+        $('#jeff-input').value = text;
+        _jeffSend();
+      });
+    });
+    // Close on Esc when open.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && jeffState.open) _jeffClose();
+    });
+  }
+
+  function _jeffOpen() {
+    jeffState.open = true;
+    $('#jeff-panel').classList.add('open');
+    $('#jeff-trigger').classList.add('open');
+    $('#jeff-trigger').textContent = '×';
+    setTimeout(() => $('#jeff-input').focus(), 50);
+  }
+
+  function _jeffClose() {
+    jeffState.open = false;
+    $('#jeff-panel').classList.remove('open');
+    $('#jeff-trigger').classList.remove('open');
+    $('#jeff-trigger').textContent = 'J';
+  }
+
+  function _jeffClear() {
+    if (!jeffState.messages.length) return;
+    if (!window.confirm('Clear this conversation with Jeff?')) return;
+    jeffState.messages = [];
+    _jeffRender();
+  }
+
+  // Snapshot the user's current context — what view, which lead,
+  // what pricing config — so Jeff can give targeted answers rather
+  // than generic ones. Best-effort: every lookup is guarded so a
+  // missing surface (e.g. no lead open) just omits that field.
+  function _jeffContext() {
+    const ctx = {};
+    // Current view: derived from the active <section>.
+    const activeView = document.querySelector('section.view.active');
+    if (activeView && activeView.id) {
+      ctx.view = activeView.id.replace(/^view-/, '');
+    }
+    // Open lead (drawer state).
+    const lead = (typeof drawerState !== 'undefined' ? drawerState.original : null);
+    if (lead && lead.id) {
+      ctx.lead = {
+        id:               lead.id,
+        company:          lead.company,
+        vertical:         lead.vertical,
+        status:           lead.status,
+        opportunity_type: lead.opportunity_type,
+        region:           lead.region,
+        deal_size:        lead.deal_size,
+      };
+    }
+    // Pricing config in progress (Project Build view).
+    try {
+      const pb = (typeof pbState !== 'undefined') ? pbState : null;
+      if (pb && pb.currentLeadId) {
+        // Pull current form values rather than relying on the cached
+        // payload — the user may be mid-edit.
+        const pick = (id) => { const e = $(id); return e ? e.value : null; };
+        ctx.pricing = {
+          rate_card:       pick('#pb-rate-card'),
+          currency:        pick('#pb-currency'),
+          months:          pick('#pb-months'),
+          project_ops_pct: pick('#pb-project-ops-pct'),
+          contingency_pct: pick('#pb-contingency-pct'),
+        };
+      }
+    } catch (_) { /* no Project Build in scope */ }
+    return ctx;
+  }
+
+  async function _jeffSend() {
+    if (jeffState.busy) return;
+    const input = $('#jeff-input');
+    const text = (input.value || '').trim();
+    if (!text) return;
+    jeffState.messages.push({ role: 'user', content: text });
+    input.value = '';
+    input.style.height = 'auto';
+    jeffState.busy = true;
+    $('#jeff-send').disabled = true;
+    _jeffRender();
+    _jeffTyping(true);
+    try {
+      const data = await jsonFetch('/api/jeff/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: jeffState.messages,
+          skill:    jeffState.skill,
+          context:  _jeffContext(),
+        }),
+      });
+      jeffState.messages.push({ role: 'assistant', content: data.message || '' });
+    } catch (e) {
+      // Surface as an assistant message so the conversation stays
+      // coherent; toast the error too for visibility.
+      const code = e.body?.code;
+      let msg;
+      if (code === 'jeff_disabled') {
+        msg = "I'm offline — `ANTHROPIC_API_KEY` isn't set on the server. Ask whoever runs the Railway deploy to add it.";
+      } else {
+        msg = `Sorry, that didn't work: ${e.body?.error || e.message}`;
+      }
+      jeffState.messages.push({ role: 'assistant', content: msg });
+    } finally {
+      jeffState.busy = false;
+      $('#jeff-send').disabled = false;
+      _jeffTyping(false);
+      _jeffRender();
+    }
+  }
+
+  function _jeffTyping(on) {
+    const el = $('#jeff-typing');
+    if (el) el.classList.toggle('active', !!on);
+    if (on) {
+      const list = $('#jeff-messages');
+      if (list) list.scrollTop = list.scrollHeight;
+    }
+  }
+
+  // Minimal markdown renderer for Jeff bubbles: handles **bold**,
+  // *italic*, `code`, paragraphs, bullet lists. Deliberately tiny —
+  // Jeff's replies are short + simple. If we ever need tables /
+  // links / code blocks, swap in marked.js then.
+  function _jeffMarkdown(text) {
+    const escape = (s) => String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const lines = String(text || '').split('\n');
+    const out = [];
+    let ul = null;
+    const flushUl = () => { if (ul) { out.push(`<ul>${ul.join('')}</ul>`); ul = null; } };
+    const inline = (s) => escape(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+    for (const raw of lines) {
+      const line = raw.replace(/^\s+|\s+$/g, '');
+      if (/^[-*]\s+/.test(line)) {
+        ul = ul || [];
+        ul.push(`<li>${inline(line.replace(/^[-*]\s+/, ''))}</li>`);
+      } else if (!line) {
+        flushUl();
+      } else if (/^###\s+/.test(line)) {
+        flushUl();
+        out.push(`<h3>${inline(line.replace(/^###\s+/, ''))}</h3>`);
+      } else {
+        flushUl();
+        out.push(`<p>${inline(line)}</p>`);
+      }
+    }
+    flushUl();
+    return out.join('');
+  }
+
+  function _jeffRender() {
+    const list = $('#jeff-messages');
+    if (!list) return;
+    const empty = $('#jeff-empty');
+    const typing = $('#jeff-typing');
+    // Tear down + rebuild — small message counts, simpler than diffing.
+    list.innerHTML = '';
+    if (!jeffState.messages.length) {
+      if (empty) list.appendChild(empty);
+      if (typing) list.appendChild(typing);
+      return;
+    }
+    jeffState.messages.forEach((m) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'jeff-msg ' + m.role;
+      const who = document.createElement('div');
+      who.className = 'who';
+      who.textContent = m.role === 'user' ? 'You' : 'Jeff';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      // User messages are plain text (no markdown injection); Jeff
+      // gets the minimal markdown pass.
+      if (m.role === 'assistant') {
+        bubble.innerHTML = _jeffMarkdown(m.content);
+      } else {
+        bubble.textContent = m.content;
+      }
+      wrap.appendChild(who);
+      wrap.appendChild(bubble);
+      list.appendChild(wrap);
+    });
+    if (typing) list.appendChild(typing);
+    list.scrollTop = list.scrollHeight;
+  }
+
   async function _runInit() {
     // v1.0.0bq: signal "util strip is present" so the sticky header
     // can offset down by the strip's height. Done first so CSS settles
     // before any sticky elements paint.
     document.body.classList.add('has-util-strip');
+    // v1.0.0bs: wire Jeff floating chat (button + panel + handlers).
+    // Done early so the trigger is interactive even if a later init
+    // step errors out.
+    _initJeff();
     await ensureAuth();
     // v1.0.0i: fire-and-forget cache-health check. Banner appears
     // post-init if anything looks off.
@@ -13911,5 +14304,46 @@
   }
 })();
 </script>
+
+<!-- v1.0.0bs: Jeff — floating chat trigger + panel. Lives outside
+     the views so it's reachable on every screen. -->
+<button id="jeff-trigger" type="button"
+        title="Ask Jeff about pricing, scoping, best practices"
+        aria-label="Open Jeff chat">J</button>
+<div id="jeff-panel" role="dialog" aria-label="Jeff chat panel">
+  <header>
+    <div class="jeff-title"><span class="dot"></span>Jeff</div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Skill</label>
+      <select id="jeff-skill">
+        <option value="beginner">Beginner</option>
+        <option value="intermediate" selected>Intermediate</option>
+        <option value="expert">Expert</option>
+      </select>
+      <button id="jeff-clear" type="button" title="Clear conversation"
+              style="background:transparent;border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;">Clear</button>
+      <button id="jeff-close" type="button" title="Close"
+              aria-label="Close Jeff"
+              style="background:transparent;border:0;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 6px;line-height:1;">×</button>
+    </div>
+  </header>
+  <div id="jeff-messages">
+    <div id="jeff-empty">
+      <div style="color:var(--text);font-size:14px;font-weight:600;">Hi, I'm Jeff.</div>
+      <div>Ask me anything about pricing, project scoping, rate cards, or how to handle a tricky client conversation. I'll adjust based on your skill level above.</div>
+      <div style="margin-top:6px;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Try one of these</div>
+      <button class="jeff-suggestion" type="button" data-jeff-prompt="What rate card should I use for a new Shell expansion deal?">What rate card should I use for a new Shell expansion deal?</button>
+      <button class="jeff-suggestion" type="button" data-jeff-prompt="The client said our $200/hour rate is too high. How should I respond?">The client said our $200/hour rate is too high — how should I respond?</button>
+      <button class="jeff-suggestion" type="button" data-jeff-prompt="When should I add Project Ops and Contingency uplifts?">When should I add Project Ops and Contingency uplifts?</button>
+      <button class="jeff-suggestion" type="button" data-jeff-prompt="What's the difference between crm_build and crm_execute?">What's the difference between crm_build and crm_execute?</button>
+    </div>
+    <div id="jeff-typing">Jeff is thinking…</div>
+  </div>
+  <div id="jeff-input-row">
+    <textarea id="jeff-input" rows="1" placeholder="Ask Jeff…"></textarea>
+    <button id="jeff-send" type="button">Send</button>
+  </div>
+</div>
+
 </body>
 </html>

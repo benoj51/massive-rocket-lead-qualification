@@ -4545,6 +4545,149 @@ def api_okr_kr_delete(okr_id: str, kr_id: str):
     return jsonify({"deleted": True})
 
 
+# v1.0.0bs: Jeff — in-app pricing + scoping assistant -------------------
+# Floating chat panel; backend is one chat endpoint that builds a system
+# prompt from jeff_knowledge (live pricing facts + admin-edited best
+# practices doc) and calls Claude. Skill level + current view context
+# travel with each turn so Jeff can adapt verbosity and target advice.
+#
+# Why a thin server-side endpoint rather than client→Claude direct:
+# we don't want the ANTHROPIC_API_KEY in the browser, and we want the
+# system prompt assembly (which pulls from code) to live server-side.
+
+@app.route("/api/jeff/chat", methods=["POST"])
+def api_jeff_chat():
+    """Chat turn for Jeff.
+
+    Body:
+      {
+        "messages": [{"role": "user"|"assistant", "content": "..."}, ...],
+        "context":  {"view": "build", "lead": {...}, "pricing": {...}},
+        "skill":    "beginner" | "intermediate" | "expert",
+      }
+
+    Returns:
+      {"message": "<assistant reply>"} on success
+      {"error": "...", "code": "..."} on failure (with 4xx/5xx status)
+
+    The user-visible failure modes:
+      - 503 jeff_disabled: ANTHROPIC_API_KEY not set
+      - 400 invalid_request: no messages / messages malformed
+      - 502 upstream_error: Anthropic call failed
+    """
+    import jeff_knowledge
+
+    if not jeff_knowledge.is_configured():
+        return jsonify({
+            "error": "Jeff is offline — ANTHROPIC_API_KEY isn't set on the server.",
+            "code":  "jeff_disabled",
+        }), 503
+
+    body = request.get_json(silent=True) or {}
+    messages = body.get("messages") or []
+    if not isinstance(messages, list) or not messages:
+        return jsonify({
+            "error": "messages array required",
+            "code":  "invalid_request",
+        }), 400
+    # Normalise + validate. We don't trust the role string from the
+    # client — re-derive to "user"/"assistant" only.
+    clean: list[dict] = []
+    for m in messages[-20:]:  # cap context to last 20 turns
+        if not isinstance(m, dict):
+            continue
+        role = "assistant" if m.get("role") == "assistant" else "user"
+        content = str(m.get("content") or "").strip()
+        if not content:
+            continue
+        # Cap individual messages so a runaway paste can't blow context.
+        clean.append({"role": role, "content": content[:8000]})
+    if not clean:
+        return jsonify({
+            "error": "no usable message content",
+            "code":  "invalid_request",
+        }), 400
+
+    skill = (body.get("skill") or "intermediate").lower()
+    context = body.get("context") or {}
+    if not isinstance(context, dict):
+        context = {}
+
+    system = jeff_knowledge.build_system_prompt(skill=skill, context=context)
+
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        log.error("Jeff chat: anthropic SDK not installed")
+        return jsonify({
+            "error": "Anthropic SDK not installed on the server.",
+            "code":  "jeff_disabled",
+        }), 503
+
+    try:
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
+        # Sonnet for quality — sales tooling, low volume.
+        model = os.environ.get("JEFF_MODEL",
+                                 os.environ.get("ANTHROPIC_MODEL",
+                                                  "claude-sonnet-4-5"))
+        resp = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=system,
+            messages=clean,
+        )
+        # Anthropic returns content as a list of blocks; concatenate
+        # the text ones.
+        reply_parts = []
+        for block in (resp.content or []):
+            if getattr(block, "type", None) == "text":
+                reply_parts.append(getattr(block, "text", "") or "")
+        reply = "".join(reply_parts).strip() or "(Jeff returned an empty reply.)"
+    except Exception as e:
+        log.warning("Jeff chat upstream error: %s", e)
+        return jsonify({
+            "error": f"Jeff couldn't respond: {e}",
+            "code":  "upstream_error",
+        }), 502
+
+    audit.log_event("jeff_chat", actor=_actor(),
+                     skill=skill,
+                     view=(context.get("view") or "")[:32],
+                     turns=len(clean),
+                     reply_chars=len(reply))
+    return jsonify({"message": reply})
+
+
+@app.route("/api/jeff/knowledge", methods=["GET"])
+def api_jeff_knowledge_get():
+    """Read the admin-editable best-practices doc. Settings UI loads
+    this into a textarea for editing."""
+    import jeff_knowledge
+    body = jeff_knowledge.load_best_practices()
+    return jsonify({
+        "body":       body,
+        "chars":      len(body),
+        "configured": jeff_knowledge.is_configured(),
+    })
+
+
+@app.route("/api/jeff/knowledge", methods=["PUT"])
+def api_jeff_knowledge_save():
+    """Save the admin-editable best-practices doc."""
+    import jeff_knowledge
+    payload = request.get_json(silent=True) or {}
+    body = payload.get("body")
+    if not isinstance(body, str):
+        return jsonify({"error": "body string required"}), 400
+    try:
+        jeff_knowledge.save_best_practices(body)
+    except OSError as e:
+        return jsonify({"error": f"save failed: {e}"}), 500
+    audit.log_event("jeff_knowledge_updated", actor=_actor(),
+                     chars=len(body))
+    return jsonify({"saved": True, "chars": len(body)})
+
+
 # v1.0.0br: Directory ------------------------------------------------------
 # Cross-surface roster. One place to browse every account + every
 # contact across all stores (Notion pipeline, expansion targets,

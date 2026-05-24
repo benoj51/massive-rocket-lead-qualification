@@ -5,6 +5,107 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bs] — 2026-05-24 — Jeff: in-app pricing + scoping assistant
+
+### The ask
+
+Pricing is the #1 point of friction in MR's sales cycle. AEs forget
+which rate card applies, can't remember when to add Project Ops vs
+Contingency, freeze when a client pushes back on $200/hour. They
+need a "phone a friend" surface that knows MR's pricing model + the
+team's best-practice playbook + the current deal context.
+
+### Jeff
+
+A floating button (bottom-right, MR red, marked **J**) on every
+view. Click → chat panel slides up.
+
+**What Jeff knows**
+
+Two sources, by design:
+
+1. **Pricing facts** — read live from `pricing.py` + `rate_cards.py`
+   on every turn: blended rate, hours per FTE-month, default phase
+   split, available rate cards, team templates per project type.
+   The factual ground truth — drifting from it would immediately
+   make Jeff wrong, so it's never cached.
+2. **Best-practice guidance** — admin-editable markdown at
+   `knowledge/pricing_best_practices.md`. Covers project-type
+   selection, rate-card decisions, contingency policy, common client
+   objections + responses, common AE mistakes, escalation paths.
+   Editable in the UI (Settings — Jeff KB tab coming v1.0.0bt).
+
+**Skill-aware**
+
+The chat header has a Beginner / Intermediate / Expert dropdown
+(persists in localStorage). The skill level translates into a
+verbosity + jargon instruction in the system prompt:
+
+- Beginner — explains terminology, walks through step by step,
+  prefers worked examples
+- Intermediate (default) — assumes basics, focuses on tradeoffs
+  and the *why* behind recommendations
+- Expert — terse, technical, surfaces edge cases without
+  restating fundamentals
+
+**Context-aware**
+
+Jeff sees the user's current view, the open lead (company /
+vertical / opportunity type / region / deal size), and the
+in-progress pricing config from Project Build (rate card / months
+/ project ops % / contingency %). Lets him say "for THIS Shell
+deal, given you've already picked crm_build…" rather than generic
+advice.
+
+**Conversation UX**
+
+- Markdown-rendered replies (paragraphs, bold, italic, code, lists,
+  H3) — tiny in-house renderer so we don't pull a markdown lib
+- Enter sends, Shift+Enter inserts a newline
+- Esc closes the panel
+- Clear button wipes the conversation
+- 4 starter prompts shown on empty state to reduce blank-page
+  hesitation
+- History capped at the last 20 turns server-side so a long
+  conversation doesn't blow the context window
+
+**Architecture**
+
+- `jeff_knowledge.py` — system prompt builder. Pure, no I/O beyond
+  reading the KB file
+- `knowledge/pricing_best_practices.md` — seeded with MR's
+  current playbook
+- `POST /api/jeff/chat` — body: `{messages, skill, context}`,
+  returns `{message}` or error code. Honest disabled-mode response
+  (503 `jeff_disabled`) when ANTHROPIC_API_KEY isn't set
+- `GET /api/jeff/knowledge` / `PUT /api/jeff/knowledge` — admin
+  edit surface
+- Model: `claude-sonnet-4-5` (override via `JEFF_MODEL` env)
+
+**Out of scope for v1**
+
+Jeff answers; he doesn't yet *do*. Form-filling, value suggestion,
+quote generation — these are v2 surfaces once the chat shape is
+proven. Easier to add capability than walk it back.
+
+### Tests
+
+32 new tests in `test_jeff.py`:
+- Prompt builder: identity, skill framing (all 3 levels + unknown
+  fallback), pricing facts pulled from `pricing.py`, context block
+  rendering, KB merge, round-trip read/write
+- `is_configured()` truth table (missing / blank / set)
+- Chat endpoint: 503 when disabled, 400 on missing/empty messages,
+  happy path, system prompt carries skill + context, message
+  normalisation (role coercion + 8000-char cap), 502 on upstream
+  failure, last-20-turns cap
+- KB endpoints: empty default, round-trip, non-string rejection,
+  clear via empty string
+
+Full suite: **1061 passing**.
+
+---
+
 ## [1.0.0br] — 2026-05-24 — Directory: accounts + contacts cross-store roster
 
 ### Why
