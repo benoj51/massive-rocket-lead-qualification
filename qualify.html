@@ -217,6 +217,17 @@
   }
   .tab-pane { display: none; }
   .tab-pane.active { display: block; }
+  /* v1.0.0bn: overflow menu item style — matches nav dropdown look
+     for visual consistency. */
+  .ld-actions-menu-item {
+    display: block; width: 100%; text-align: left; padding: 8px 12px;
+    background: transparent; border: 0; color: var(--text-dim);
+    font-size: 13px; cursor: pointer; border-radius: 6px;
+  }
+  .ld-actions-menu-item:hover {
+    background: var(--surface-2); color: var(--text);
+  }
+  .ld-actions-menu-wrap.open #ld-actions-menu { display: block !important; }
   header.top .health { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
   header.top .health .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); margin-left: 6px; }
   header.top .health .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
@@ -1903,16 +1914,25 @@
         <span id="ld-group-chip"></span>
       </div>
     </div>
-    <div class="btn-row" style="flex-shrink:0;">
-      <!-- v1.0.0g: Restore from Notion (visible when local cache looks empty) -->
+    <div class="btn-row" style="flex-shrink:0;align-items:center;gap:6px;">
+      <!-- v1.0.0bn: Restore stays at the top level when visible
+           because it signals a data-loss recovery action — too
+           important to bury in an overflow menu. -->
       <button id="ld-restore" class="btn ghost" type="button"
               style="padding:7px 12px;font-size:12px;display:none;background:rgba(239,68,68,.10);color:var(--red);border-color:rgba(239,68,68,.4);"
               title="Local cache is empty for this lead — restore notes/projects/contacts from Notion backup">⟲ Restore</button>
-      <button id="ld-rescore" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;" title="Recompute ICP score from current Notion values">↻ Rescore</button>
-      <!-- v1.0.0bk: Promote to Live Projects. Hidden until status loads;
-           toggles button label based on whether a live project already
-           exists for this lead. -->
-      <button id="ld-promote-live" class="btn ghost" type="button" style="padding:7px 12px;font-size:12px;display:none;" title="Move this account into Live Projects">Promote to Live →</button>
+      <!-- v1.0.0bn: secondary actions (Rescore, Promote to Live)
+           moved into a ⋯ overflow menu. Save + Close stay primary. -->
+      <div class="ld-actions-menu-wrap" style="position:relative;display:inline-block;">
+        <button class="btn ghost" id="ld-actions-trigger" type="button"
+                style="padding:7px 10px;font-size:14px;line-height:1;"
+                title="More actions">⋯</button>
+        <div id="ld-actions-menu"
+             style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:4px;min-width:200px;z-index:50;">
+          <button id="ld-rescore" type="button" class="ld-actions-menu-item">↻ Rescore ICP</button>
+          <button id="ld-promote-live" type="button" class="ld-actions-menu-item" style="display:none;">Promote to Live →</button>
+        </div>
+      </div>
       <button id="ld-save" class="btn" type="button" style="padding:7px 14px;font-size:12px;">
         Save<span class="dirty-count" id="ld-dirty-count"></span>
       </button>
@@ -4095,47 +4115,60 @@
           <button class="btn ghost" id="lv-d-close" type="button" style="padding:4px 10px;font-size:11px;">✕</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
-        <div>
-          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Status</label>
-          ${statusSel}
+      <!-- v1.0.0bn: tabs replace the long stack. Same content,
+           less scroll. Overview / OKRs / Stakeholders / Agencies. -->
+      <div class="tab-strip" data-tab-group="lv-detail">
+        <button data-tab="overview" class="active" type="button">Overview</button>
+        <button data-tab="okrs" type="button">OKRs <span class="tab-count" id="tab-count-lv-okrs">${okrs.length || ''}</span></button>
+        <button data-tab="stakeholders" type="button">Stakeholders <span class="tab-count" id="tab-count-lv-stakeholders">${contacts.length || ''}</span></button>
+        <button data-tab="agencies" type="button">Agencies <span class="tab-count" id="tab-count-lv-agencies">${agencies.length || ''}</span></button>
+      </div>
+      <div class="tab-pane active" data-tab-pane="overview">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+          <div>
+            <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Status</label>
+            ${statusSel}
+          </div>
+          <div>
+            <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Owner</label>
+            <input id="lv-d-owner" type="text" value="${escapeAttr(project.owner || '')}" style="padding:4px 8px;font-size:12px;width:100%;" />
+          </div>
         </div>
         <div>
-          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Owner</label>
-          <input id="lv-d-owner" type="text" value="${escapeAttr(project.owner || '')}" style="padding:4px 8px;font-size:12px;width:100%;" />
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Summary</label>
+          <textarea id="lv-d-summary" rows="4" style="padding:8px 10px;font-size:12px;width:100%;font-family:inherit;">${escapeHtml(project.summary || '')}</textarea>
         </div>
       </div>
-      <div style="margin-bottom:14px;">
-        <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Summary</label>
-        <textarea id="lv-d-summary" rows="3" style="padding:8px 10px;font-size:12px;width:100%;font-family:inherit;">${escapeHtml(project.summary || '')}</textarea>
-      </div>
-      <div style="margin-bottom:12px;">
-        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Quarterly OKRs</h4>
+      <div class="tab-pane" data-tab-pane="okrs">
         <div id="lv-d-okrs"></div>
         <button class="btn ghost" id="lv-d-add-okr" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add OKR</button>
       </div>
-      <!-- v1.0.0bl: stakeholder map. 2×2 influence×interest matrix
-           rendered from the contacts on the underlying lead. Each
-           cell is clickable + the contact rows below let the user
-           edit role/influence/interest inline. -->
-      <div style="margin-bottom:12px;">
-        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
-          Stakeholder map
-          <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px;">— set influence + interest per contact</span>
-        </h4>
+      <div class="tab-pane" data-tab-pane="stakeholders">
+        <div class="muted" style="font-size:11px;margin-bottom:8px;">Set influence + interest per contact to build the map.</div>
         <div id="lv-d-stakeholder-matrix"></div>
-        <div id="lv-d-stakeholder-list" style="margin-top:8px;"></div>
+        <div id="lv-d-stakeholder-list" style="margin-top:12px;"></div>
       </div>
-      <!-- v1.0.0bl: concurrent agencies — other agencies working
-           alongside MR. Add/edit/remove + embedded contacts each. -->
-      <div style="margin-bottom:12px;">
-        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
-          Other agencies on this account
-        </h4>
+      <div class="tab-pane" data-tab-pane="agencies">
         <div id="lv-d-agencies"></div>
         <button class="btn ghost" id="lv-d-add-agency" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add agency</button>
       </div>
     `;
+    // v1.0.0bn: wire tab strip for this card. Mirrors _initHomeTabs
+    // pattern (idempotent via dataset.wired). Scoped to this card so
+    // we don't grab the Home tabs.
+    const lvStrip = el.querySelector('.tab-strip[data-tab-group="lv-detail"]');
+    if (lvStrip && !lvStrip.dataset.wired) {
+      lvStrip.dataset.wired = '1';
+      lvStrip.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-tab]');
+        if (!btn) return;
+        const tab = btn.dataset.tab;
+        lvStrip.querySelectorAll('button').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        el.querySelectorAll(':scope > .tab-pane').forEach(p =>
+          p.classList.toggle('active', p.dataset.tabPane === tab));
+      });
+    }
     $('#lv-d-close').addEventListener('click', () => {
       el.style.display = 'none';
       liveProjectsState.selectedId = null;
@@ -9205,9 +9238,28 @@
       }
     });
     // v0.10.0w: explicit Rescore action.
-    $('#ld-rescore').addEventListener('click', rescoreCurrentLead);
+    // v1.0.0bn: still wired, just lives inside the ⋯ overflow menu.
+    // Close the menu after the click so the user sees the action fire.
+    $('#ld-rescore').addEventListener('click', () => {
+      rescoreCurrentLead();
+      document.querySelector('.ld-actions-menu-wrap.open')?.classList.remove('open');
+    });
     // v1.0.0g: durable state restore.
     $('#ld-restore').addEventListener('click', restoreLeadFromBackup);
+    // v1.0.0bn: overflow menu trigger + outside-click close.
+    const actionsTrigger = $('#ld-actions-trigger');
+    if (actionsTrigger) {
+      actionsTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wrap = actionsTrigger.closest('.ld-actions-menu-wrap');
+        wrap.classList.toggle('open');
+      });
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.ld-actions-menu-wrap')) {
+          document.querySelector('.ld-actions-menu-wrap.open')?.classList.remove('open');
+        }
+      });
+    }
     // Global error capture — log only, no UI noise.
     window.addEventListener('error', (e) => console.error('[window error]', e.error || e.message));
     window.addEventListener('unhandledrejection', (e) => console.error('[unhandled promise]', e.reason));
@@ -9727,7 +9779,9 @@
       const today = new Date().toISOString().slice(0, 10);
       const overdue = d < today;
       const soon = !overdue && d <= new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
-      const color = overdue ? 'var(--mr-red,#e82b23)' : soon ? '#f59e0b' : 'var(--text-muted)';
+      // v1.0.0bn: overdue is an alarm signal — switch to var(--red)
+      // so it's distinct from the MR-red brand surfaces.
+      const color = overdue ? 'var(--red)' : soon ? 'var(--yellow)' : 'var(--text-muted)';
       return `<span style="font-size:10px;color:${color};margin-left:6px;">due ${escapeHtml(d)}${overdue ? ' (overdue)' : ''}</span>`;
     };
     // v1.0.0an: render a small "→ entity" chip when a todo is linked.
@@ -9756,7 +9810,7 @@
           </div>
         </div>
         <button class="btn ghost" type="button" data-todo-del
-                style="padding:3px 8px;font-size:10px;color:var(--mr-red,#e82b23);border-color:rgba(232,43,35,.3);"
+                style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);"
                 title="Delete">×</button>
       </div>
     `).join('');

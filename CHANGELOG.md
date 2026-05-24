@@ -5,6 +5,64 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bn] — 2026-05-24 — Design pass II: drawer header + live tabs + colour audit
+
+The three remaining items from the v1.0.0bm review.
+
+### Drawer header tightened
+
+Before: **5 buttons** (Restore / Rescore / Promote-to-Live / Save / Close)
+After: **Save / Close** primary + **⋯** overflow menu for secondary
+actions.
+
+- `⋯` overflow menu contains Rescore + Promote-to-Live. Mirrors the
+  nav-dropdown pattern (click trigger to open, outside click to close).
+- Restore stays at the top level because it signals data-loss
+  recovery — too important to bury. Only shows when local cache
+  looks empty for the lead, so it's rare anyway.
+- The dropdown sets `display:block` via the `.open` modifier on the
+  wrap; the inline `display:none` on `#ld-actions-menu` is the safe
+  default that the `!important` rule overrides when open.
+
+### Live Project detail wrapped in tabs
+
+Before: **6 stacked sections** (header, status/owner, summary, OKRs,
+stakeholder map, agencies). Long scroll, hard to navigate.
+
+After: **Overview / OKRs / Stakeholders / Agencies** tabs.
+- Overview = name + status + owner + summary in one focused screen
+- Tab counts on the chip labels (`OKRs 3`, `Stakeholders 8`,
+  `Agencies 2`) so the user sees weight without clicking
+- Reuses the v1.0.0bm `.tab-strip` + `.tab-pane` CSS — one design
+  vocabulary, two surfaces
+
+### MR-red colour audit
+
+The brand red was doing two jobs: brand identity AND alarm state.
+When one colour does both, neither reads as intended.
+
+**Kept MR-red** (brand identity surfaces):
+- `.nav-cta` (+ Qualify button) — primary CTA
+- `.tab-strip` active chip border + count badge — active state
+- Notification bell badge — brand touchpoint
+- Chart colours for the "CRM Build" service + the forecast "Net"
+  bar — MR's primary product surfaces
+- Notification unread dot — signals "something for you"
+- `.tile.manual`, `.btn:hover` glow, `--focus-ring`, hero radial —
+  ambient brand presence
+
+**Switched to `var(--red)`** (semantic alarm token):
+- Todo due-date overdue colour — alarm signal
+- Todo delete button — destructive action
+
+Two changes is small but precise. The brand surfaces now read as
+brand; the alarm surfaces read as alarm. Future alarm states (engagement
+drops, deletion confirms, etc) should default to `var(--red)`.
+
+### Tests
+
+No new tests — pure frontend cosmetics. All 916 tests pass unchanged.
+
 ## [1.0.0bm] — 2026-05-24 — Design pass: nav restructure + Home consolidation
 
 Ben asked for a design review. Two biggest issues:
