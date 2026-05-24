@@ -13685,7 +13685,8 @@
              profile (set in the Home view) and scopes the table to
              contacts where mr_owner matches. -->
         <button class="chip ${f.mine ? 'active' : ''}" id="ptn-filter-mine" type="button" style="font-size:11px;padding:6px 12px;">My contacts</button>
-        <button class="btn ghost" id="ptn-add-contact" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">+ Add contact</button>
+        <button class="btn ghost" id="ptn-import-csv" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">↑ Import CSV</button>
+        <button class="btn ghost" id="ptn-add-contact" type="button" style="padding:6px 12px;font-size:12px;">+ Add contact</button>
       </div>
 
       <!-- v1.0.0aj: horizontal-scroll wrapper. The contacts table now
@@ -13734,6 +13735,8 @@
       renderPartnerContactsForCurrentView(p);
     });
     $('#ptn-add-contact').addEventListener('click', () => openContactForm(p, null));
+    // v1.0.0bv: CSV import for bulk-adding contacts.
+    $('#ptn-import-csv').addEventListener('click', () => openCsvImportModal(p));
     // v1.0.0ay: load + wire the saved-preset picker. Async — populates
     // the dropdown when the fetch lands.
     _initPartnerPresets(p);
@@ -14116,6 +14119,258 @@
         }
       });
     });
+  }
+
+  // v1.0.0bv: CSV import modal for partner contacts.
+  // Flow: paste/upload CSV → click Preview → server parses + returns
+  // per-row action (add / update / error) → user clicks Import to
+  // commit. Same endpoint both passes with dry_run flag.
+  //
+  // Why a modal rather than a dedicated nav: importing IS the
+  // current-partner operation. The user is already on the partner
+  // detail page; pulling them away would break flow.
+  function openCsvImportModal(partner) {
+    let overlay = $('#csv-import-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'csv-import-overlay';
+      overlay.className = 'modal-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:60;display:none;align-items:center;justify-content:center;padding:20px;';
+      overlay.innerHTML = `
+        <div id="csv-import-modal" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:760px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.35);">
+          <header style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+            <div>
+              <h3 style="margin:0;font-size:15px;">Import contacts from CSV</h3>
+              <div class="muted" id="csv-import-partner-name" style="font-size:11px;margin-top:2px;"></div>
+            </div>
+            <button id="csv-import-close" type="button" aria-label="Close"
+                    style="background:transparent;border:0;color:var(--text-muted);font-size:20px;cursor:pointer;padding:0 6px;line-height:1;">×</button>
+          </header>
+          <div id="csv-import-body" style="padding:16px 18px;overflow-y:auto;flex:1;">
+            <!-- Step 1: upload -->
+            <div id="csv-import-step-upload">
+              <div class="muted" style="font-size:12px;margin-bottom:8px;">
+                <strong>Required headers:</strong> at least one of <code>name</code> or <code>email</code>.<br>
+                <strong>Optional:</strong> <code>title</code>, <code>country</code>, <code>city</code>, <code>region(s)</code>, <code>territory(s)</code>, <code>industries</code>, <code>tier</code>, <code>sentiment</code>, <code>seniority</code>, <code>mr_owner</code>, <code>linkedin_url</code>, <code>phone</code>, <code>tags</code>, <code>status</code>, <code>cadence_days</code>.<br>
+                <strong>Multi-tag cells</strong> (regions, industries, tags): separate with comma, pipe, or semicolon.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <input type="file" id="csv-import-file" accept=".csv,text/csv,text/plain" style="font-size:12px;" />
+                <button class="btn ghost" id="csv-import-template" type="button" style="padding:4px 10px;font-size:11px;">Download template</button>
+              </div>
+              <textarea id="csv-import-text" rows="10" placeholder="Or paste CSV here&#10;&#10;name,title,country,city,regions,seniority&#10;Jane Doe,VP Sales,United States,New York,East Coast,VP&#10;..." style="width:100%;font-family:var(--mono);font-size:11px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);box-sizing:border-box;"></textarea>
+              <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                <button class="btn ghost" id="csv-import-cancel" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+                <button class="btn" id="csv-import-preview" type="button" style="padding:6px 14px;font-size:12px;">Preview →</button>
+              </div>
+            </div>
+            <!-- Step 2: preview -->
+            <div id="csv-import-step-preview" style="display:none;">
+              <div id="csv-import-summary" style="margin-bottom:10px;"></div>
+              <div id="csv-import-warnings" style="margin-bottom:10px;"></div>
+              <div id="csv-import-rows" style="max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;"></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                <button class="btn ghost" id="csv-import-back" type="button" style="padding:6px 14px;font-size:12px;">← Back</button>
+                <button class="btn" id="csv-import-commit" type="button" style="padding:6px 14px;font-size:12px;">Import</button>
+              </div>
+            </div>
+            <!-- Step 3: result -->
+            <div id="csv-import-step-result" style="display:none;">
+              <div id="csv-import-result-summary" style="margin-bottom:10px;"></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                <button class="btn" id="csv-import-done" type="button" style="padding:6px 14px;font-size:12px;">Done</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      // One-time wiring — these handlers don't change between opens.
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) _csvImportClose();
+      });
+      $('#csv-import-close').addEventListener('click', _csvImportClose);
+      $('#csv-import-cancel').addEventListener('click', _csvImportClose);
+      $('#csv-import-template').addEventListener('click', _csvImportTemplate);
+      $('#csv-import-preview').addEventListener('click', _csvImportPreview);
+      $('#csv-import-back').addEventListener('click', _csvImportBack);
+      $('#csv-import-commit').addEventListener('click', _csvImportCommit);
+      $('#csv-import-done').addEventListener('click', _csvImportClose);
+      $('#csv-import-file').addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          $('#csv-import-text').value = ev.target.result || '';
+        };
+        reader.readAsText(f);
+      });
+    }
+    // Stash the partner for the preview/commit handlers.
+    overlay.dataset.partnerId = partner.id;
+    $('#csv-import-partner-name').textContent = `→ ${partner.name}`;
+    // Reset to step 1.
+    $('#csv-import-step-upload').style.display = 'block';
+    $('#csv-import-step-preview').style.display = 'none';
+    $('#csv-import-step-result').style.display = 'none';
+    $('#csv-import-text').value = '';
+    $('#csv-import-file').value = '';
+    overlay.style.display = 'flex';
+  }
+
+  function _csvImportClose() {
+    const o = $('#csv-import-overlay');
+    if (o) o.style.display = 'none';
+  }
+
+  function _csvImportBack() {
+    $('#csv-import-step-preview').style.display = 'none';
+    $('#csv-import-step-upload').style.display = 'block';
+  }
+
+  function _csvImportTemplate() {
+    // Tiny CSV template they can fill in. Includes one example row
+    // covering every supported field so users see the format.
+    const csv = [
+      'name,title,email,country,city,regions,territories,industries,tier,sentiment,seniority,mr_owner,linkedin_url,phone,tags,status,cadence_days',
+      '"Jane Doe","VP Sales","jane@example.com","United States","New York","East Coast","NAM","Retail|QSR","T1 — Critical","Champion","VP","Ben Ojuolape","https://linkedin.com/in/janedoe","+1-555-0100","priority,new","active",30',
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'partner_contacts_template.csv';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function _csvImportPreview() {
+    const overlay = $('#csv-import-overlay');
+    const partnerId = overlay.dataset.partnerId;
+    const csv = ($('#csv-import-text').value || '').trim();
+    if (!csv) {
+      toast('Paste CSV or upload a file first', 'error');
+      return;
+    }
+    const btn = $('#csv-import-preview');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Parsing…';
+    try {
+      const data = await jsonFetch(
+        `/api/partners/${encodeURIComponent(partnerId)}/contacts/import-csv`,
+        { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csv, dry_run: true }) });
+      _csvImportRenderPreview(data);
+    } catch (e) {
+      toast(`Parse failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Preview →';
+    }
+  }
+
+  function _csvImportRenderPreview(data) {
+    $('#csv-import-step-upload').style.display = 'none';
+    $('#csv-import-step-preview').style.display = 'block';
+    const s = data.summary || {};
+    $('#csv-import-summary').innerHTML = `
+      <div style="background:var(--surface-2);padding:10px;border-radius:6px;font-size:12px;display:flex;gap:18px;flex-wrap:wrap;">
+        <span><strong style="color:var(--green);">${s.would_add || 0}</strong> to add</span>
+        <span><strong style="color:var(--yellow);">${s.would_update || 0}</strong> to update</span>
+        <span><strong style="color:var(--red);">${s.errored || 0}</strong> errors</span>
+        <span class="muted">· ${s.total || 0} rows total</span>
+      </div>`;
+    // Unknown headers warning — likely typos the user wants to fix.
+    const unknown = (s.unknown_headers || []);
+    if (unknown.length) {
+      $('#csv-import-warnings').innerHTML = `
+        <div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);color:var(--yellow);padding:8px 10px;border-radius:6px;font-size:11px;">
+          <strong>Unknown columns ignored:</strong> ${unknown.map(escapeHtml).join(', ')}
+        </div>`;
+    } else {
+      $('#csv-import-warnings').innerHTML = '';
+    }
+    // Per-row table — tight, scrollable.
+    const rows = data.rows || [];
+    if (!rows.length) {
+      $('#csv-import-rows').innerHTML = '<div class="muted" style="padding:14px;text-align:center;font-size:12px;">No data rows.</div>';
+    } else {
+      $('#csv-import-rows').innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="background:var(--surface-2);position:sticky;top:0;">
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Row</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Action</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Name</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Title</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Country</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Regions</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);">Reason</th>
+            </tr>
+          </thead>
+          <tbody>${rows.map(r => {
+            const c = r.contact || {};
+            const colour = r.action === 'add' ? 'var(--green)' :
+                            r.action === 'update' ? 'var(--yellow)' :
+                            'var(--red)';
+            const regions = (c.regions || []).join(', ');
+            return `
+              <tr>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);">${r.row}</td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);"><span style="color:${colour};text-transform:uppercase;font-weight:600;font-size:10px;letter-spacing:.05em;">${r.action}</span></td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);">${escapeHtml(c.name || '—')}</td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);">${escapeHtml(c.title || '—')}</td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);">${escapeHtml(c.country || '—')}</td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);">${escapeHtml(regions || '—')}</td>
+                <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:10px;">${escapeHtml(r.reason || '')}</td>
+              </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+    }
+    const commit = $('#csv-import-commit');
+    const writes = (s.would_add || 0) + (s.would_update || 0);
+    commit.textContent = `Import (${writes})`;
+    commit.disabled = writes === 0;
+  }
+
+  async function _csvImportCommit() {
+    const overlay = $('#csv-import-overlay');
+    const partnerId = overlay.dataset.partnerId;
+    const csv = ($('#csv-import-text').value || '').trim();
+    if (!csv) return;
+    const btn = $('#csv-import-commit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Importing…';
+    try {
+      const data = await jsonFetch(
+        `/api/partners/${encodeURIComponent(partnerId)}/contacts/import-csv`,
+        { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csv, dry_run: false }) });
+      _csvImportRenderResult(data);
+      // Refresh the partner detail so the new rows show.
+      await openPartnerDetail(partnerId);
+    } catch (e) {
+      toast(`Import failed: ${e.body?.error || e.message}`, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Import';
+    }
+  }
+
+  function _csvImportRenderResult(data) {
+    $('#csv-import-step-preview').style.display = 'none';
+    $('#csv-import-step-result').style.display = 'block';
+    const s = data.summary || {};
+    $('#csv-import-result-summary').innerHTML = `
+      <div style="background:var(--surface-2);padding:14px;border-radius:6px;">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--green);">✓ Import complete</div>
+        <div style="font-size:12px;display:flex;gap:18px;flex-wrap:wrap;">
+          <span><strong style="color:var(--green);">${s.would_add || 0}</strong> added</span>
+          <span><strong style="color:var(--yellow);">${s.would_update || 0}</strong> updated</span>
+          <span><strong style="color:var(--red);">${s.errored || 0}</strong> errors</span>
+        </div>
+      </div>`;
+    toast(`Imported ${(s.would_add || 0) + (s.would_update || 0)} contacts`, 'success');
   }
 
   function openContactForm(partner, existing) {

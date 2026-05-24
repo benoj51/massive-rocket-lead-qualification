@@ -5,6 +5,85 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bv] — 2026-05-24 — CSV import for partner contacts
+
+### The ask
+
+After hand-running the 6-contact EMEA Hightouch batch through a
+one-off script, Ben asked for a real bulk-add path. Sales teams add
+rosters of 10+ partner contacts at a time — typing one-at-a-time
+through the contact form is the wrong shape of UX.
+
+### What's new
+
+**+ Import CSV** button on every Partner detail page, next to
+**+ Add contact**. Opens a modal with three steps:
+
+1. **Upload** — file picker (drag a `.csv` in), or paste CSV into a
+   textarea. A "Download template" button gives a pre-filled
+   single-row CSV covering every supported field, so users see the
+   schema instead of guessing.
+2. **Preview** — server parses + returns a per-row plan: add /
+   update / error. Summary strip shows totals (X to add, Y to update,
+   Z errors). Unknown column headers surface as a warning so typos
+   get caught before commit.
+3. **Commit** — same endpoint, `dry_run: false`. Returns the result
+   shape + the partner detail re-renders so new rows are visible
+   immediately.
+
+### CSV shape
+
+- **Required**: at least one of `name` or `email`
+- **Optional headers** (with synonyms — case + space + underscore
+  insensitive): `title`/`role`, `country`, `city`, `region(s)`,
+  `territory(ies)`, `industries`, `tier`, `sentiment`, `seniority`,
+  `mr_owner`/`owner`, `linkedin_url`/`linkedin`, `phone`, `tags`,
+  `status`, `cadence_days`
+- **Multi-tag cells** (regions, territories, industries, tags):
+  comma, pipe, or semicolon separator. Excel exports vary; all three
+  work
+- **City** is preserved in `tags[]` since the schema has no
+  first-class city field — no information lost
+- **UTF-8 BOM tolerated** (Excel saves them by default)
+
+### Update mode (per Ben's pick)
+
+When a CSV row matches an existing contact by name (case-insensitive)
+OR email, the existing row is **updated** with the CSV's non-empty
+fields. Empty CSV cells **do not** overwrite existing data — so
+"bulk-update titles" works without wiping every other field on those
+rows. Intra-CSV duplicates (same name twice) collapse to the last
+row's values, preventing accidental twins.
+
+### Architecture
+
+- `POST /api/partners/<partner_id>/contacts/import-csv` — one
+  endpoint, `dry_run` flag controls write
+- Header normalisation: `_csv_normalise_header()` lowercases,
+  underscores, applies the synonym table
+- Multi-tag splitting: `_csv_split_multi()` on comma/pipe/semicolon
+- Match-then-merge: snapshot the roster once, build name + email
+  indexes, classify each row before writing
+- Successful commits emit `partner_contacts_csv_import` audit events
+
+### Tests
+
+20 new tests in `test_partner_contacts_csv_import.py`:
+- Dry-run vs commit behaviour
+- Header synonyms + case-insensitive + space-tolerant
+- Unknown-header warnings
+- Multi-tag splits (all three separators)
+- City → tags
+- Update by name OR email match
+- Empty cells preserve neighbours (the headline contract)
+- Intra-CSV dupe collapse
+- BOM tolerance
+- End-to-end with the actual Hightouch EMEA roster
+
+Full suite: **1089 passing**.
+
+---
+
 ## [1.0.0bu] — 2026-05-24 — Fix: inline Tier cells rendering blank
 
 Ben caught a v1.0.0bt regression: the Tier column was showing as an

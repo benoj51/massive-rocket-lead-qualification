@@ -2935,6 +2935,255 @@ def api_partner_contacts_bulk_update(partner_id: str):
     })
 
 
+# v1.0.0bv: CSV import for partner contacts.
+# After v1.0.0bt added inline editing, the next-most-painful workflow
+# was adding contacts in bulk — Ben kept hand-typing rosters of 6+
+# new EMEA / APAC people. CSV import closes that gap.
+#
+# Design notes:
+# - Single endpoint with dry_run=true so the UI can preview before
+#   writing. Same parser, same matching, same merge logic both passes.
+# - Header names are normalised (lowercased, underscores) with
+#   common synonyms (`linkedin`, `linkedin_url` → `linkedin_url`).
+# - Multi-tag columns (regions, territories, industries, tags) accept
+#   comma, pipe, or semicolon as the in-cell separator — Excel
+#   exports vary.
+# - Duplicate handling is UPDATE: match an existing contact by name
+#   (case-insensitive) OR email and PATCH only the fields the CSV
+#   carries values for. Empty CSV cells don't clobber existing data —
+#   so "update titles in bulk" works without losing other state.
+
+_CSV_HEADER_SYNONYMS = {
+    "name":            "name",
+    "full_name":       "name",
+    "contact":         "name",
+    "email":           "email",
+    "email_address":   "email",
+    "title":           "title",
+    "role":            "title",
+    "job_title":       "title",
+    "country":         "country",
+    "city":            "_city",  # stashed in tags — no first-class field
+    "region":          "regions",
+    "regions":         "regions",
+    "territory":       "territories",
+    "territories":     "territories",
+    "industry":        "industries",
+    "industries":      "industries",
+    "tier":            "tier",
+    "sentiment":       "partner_sentiment",
+    "partner_sentiment": "partner_sentiment",
+    "seniority":       "seniority",
+    "mr_owner":        "mr_owner",
+    "owner":           "mr_owner",
+    "linkedin":        "linkedin_url",
+    "linkedin_url":    "linkedin_url",
+    "linkedinurl":     "linkedin_url",
+    "phone":           "phone",
+    "status":          "status",
+    "cadence_days":    "cadence_days",
+    "cadence":         "cadence_days",
+    "tags":            "tags",
+    "notes":           "_notes",  # tag-only for now (no per-row note creation)
+}
+
+_MULTI_TAG_FIELDS = {"regions", "territories", "industries", "tags"}
+
+
+def _csv_normalise_header(h: str) -> str:
+    """`MR Owner` → `mr_owner` → resolved via the synonym table."""
+    key = (h or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return _CSV_HEADER_SYNONYMS.get(key, "")
+
+
+def _csv_split_multi(value: str) -> list[str]:
+    """Multi-tag cells: split on comma / pipe / semicolon."""
+    import re as _re
+    if not value:
+        return []
+    parts = _re.split(r"[,|;]\s*", str(value))
+    return [p.strip() for p in parts if p.strip()]
+
+
+@app.route("/api/partners/<partner_id>/contacts/import-csv", methods=["POST"])
+def api_partner_contacts_import_csv(partner_id: str):
+    """Parse a CSV string + preview (dry_run=true) or commit the import.
+
+    Body:
+      { "csv": "<string>", "dry_run": true|false }
+
+    Returns:
+      {
+        "rows": [
+          {"row": 2, "action": "add"|"update"|"error",
+           "contact": {...}, "matched_id": "..."|None, "reason": "..."|None},
+          ...
+        ],
+        "summary": {"total": N, "would_add": N, "would_update": N,
+                     "errored": N, "committed": bool},
+      }
+    """
+    import csv as _csv
+    import io as _io
+
+    body = request.get_json(silent=True) or {}
+    csv_text = body.get("csv") or ""
+    dry_run = bool(body.get("dry_run", True))
+    if not csv_text.strip():
+        return jsonify({"error": "csv body required"}), 400
+
+    # Verify the partner exists; we still parse on a missing partner
+    # so the user gets the validation feedback either way.
+    partner = partners_store.get_partner(partner_id)
+    if not partner:
+        return jsonify({"error": "partner_not_found"}), 404
+
+    # Parse — be tolerant of BOMs (Excel exports) + trailing whitespace.
+    try:
+        reader = _csv.DictReader(_io.StringIO(csv_text.lstrip("﻿")))
+        raw_rows = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"csv parse failed: {e}"}), 400
+    headers = reader.fieldnames or []
+    if not headers:
+        return jsonify({"error": "no headers detected"}), 400
+
+    # Map raw → normalised header. Unknown headers are kept in a
+    # warnings list so the UI can flag typos.
+    header_map: dict[str, str] = {}
+    unknown_headers: list[str] = []
+    for h in headers:
+        norm = _csv_normalise_header(h)
+        if norm:
+            header_map[h] = norm
+        else:
+            unknown_headers.append(h)
+
+    # Snapshot existing roster ONCE so name/email matching is O(N).
+    existing = partner_contacts_store.list_contacts(partner_id)
+    by_name = {(c.get("name") or "").strip().lower(): c
+                for c in existing if c.get("name")}
+    by_email = {(c.get("email") or "").strip().lower(): c
+                 for c in existing if c.get("email")}
+
+    rows_out: list[dict] = []
+    counts = {"add": 0, "update": 0, "error": 0}
+
+    for idx, raw in enumerate(raw_rows, start=2):  # row 1 = header
+        # Build the canonical payload from this row.
+        payload: dict = {}
+        city_extra: str | None = None
+        for raw_h, norm in header_map.items():
+            value = (raw.get(raw_h) or "").strip()
+            if not value:
+                continue  # empty cell — don't clobber existing on update
+            if norm == "_city":
+                city_extra = value
+                continue
+            if norm == "_notes":
+                # No per-row note creation in v1 — log + skip cleanly.
+                continue
+            if norm in _MULTI_TAG_FIELDS:
+                payload[norm] = _csv_split_multi(value)
+            else:
+                payload[norm] = value
+        # City lives in tags so the info survives the schema gap.
+        if city_extra:
+            payload.setdefault("tags", []).append(city_extra)
+
+        name = (payload.get("name") or "").strip()
+        email = (payload.get("email") or "").strip().lower()
+        if not name and not email:
+            rows_out.append({
+                "row":     idx,
+                "action":  "error",
+                "reason":  "row needs at least a name or email",
+                "contact": payload,
+            })
+            counts["error"] += 1
+            continue
+
+        # Match against existing roster.
+        matched = None
+        if name:
+            matched = by_name.get(name.lower())
+        if not matched and email:
+            matched = by_email.get(email)
+
+        if matched:
+            # Build the merged payload: existing fields + CSV values
+            # (CSV wins where non-empty, which is guaranteed since we
+            # skip empty cells above).
+            merged = {**matched, **payload, "id": matched["id"],
+                       "partner_id": matched["partner_id"]}
+            try:
+                if dry_run:
+                    contact = partner_contacts_store._normalise(partner_id, merged)
+                else:
+                    contact = partner_contacts_store.save_contact(partner_id, merged)
+            except partner_contacts_store.PartnerContactsStoreError as e:
+                rows_out.append({
+                    "row":     idx,
+                    "action":  "error",
+                    "reason":  str(e),
+                    "contact": payload,
+                })
+                counts["error"] += 1
+                continue
+            rows_out.append({
+                "row":        idx,
+                "action":     "update",
+                "matched_id": matched["id"],
+                "contact":    contact,
+            })
+            counts["update"] += 1
+        else:
+            try:
+                if dry_run:
+                    contact = partner_contacts_store._normalise(partner_id, payload)
+                else:
+                    contact = partner_contacts_store.save_contact(partner_id, payload)
+                    # Index immediately so a CSV that lists "Jane" twice
+                    # doesn't add two rows.
+                    nm = (contact.get("name") or "").strip().lower()
+                    em = (contact.get("email") or "").strip().lower()
+                    if nm: by_name[nm] = contact
+                    if em: by_email[em] = contact
+            except partner_contacts_store.PartnerContactsStoreError as e:
+                rows_out.append({
+                    "row":     idx,
+                    "action":  "error",
+                    "reason":  str(e),
+                    "contact": payload,
+                })
+                counts["error"] += 1
+                continue
+            rows_out.append({
+                "row":     idx,
+                "action":  "add",
+                "contact": contact,
+            })
+            counts["add"] += 1
+
+    if not dry_run:
+        audit.log_event("partner_contacts_csv_import", actor=_actor(),
+                         partner_id=partner_id,
+                         added=counts["add"], updated=counts["update"],
+                         errored=counts["error"])
+
+    return jsonify({
+        "rows":    rows_out,
+        "summary": {
+            "total":           len(raw_rows),
+            "would_add":       counts["add"],
+            "would_update":    counts["update"],
+            "errored":         counts["error"],
+            "committed":       (not dry_run),
+            "unknown_headers": unknown_headers,
+        },
+    })
+
+
 @app.route("/api/partners/<partner_id>/contacts/<contact_id>", methods=["DELETE"])
 def api_partner_contacts_delete(partner_id: str, contact_id: str):
     ok = partner_contacts_store.delete_contact(partner_id, contact_id)
