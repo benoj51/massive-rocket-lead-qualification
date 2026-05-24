@@ -147,7 +147,7 @@
     color: var(--text); display: flex; align-items: center; gap: 10px;
   }
   header.top .brand .dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 16px var(--accent); }
-  header.top nav { display: flex; gap: 4px; margin-left: auto; }
+  header.top nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
   header.top nav button {
     background: transparent; color: var(--text-dim); border: 1px solid transparent;
     padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
@@ -155,6 +155,68 @@
   }
   header.top nav button.active { background: var(--surface); color: var(--text); border-color: var(--border); }
   header.top nav button:hover { color: var(--text); }
+  /* v1.0.0bm: nav dropdown. Click the parent button → child panel
+     appears below. Close on outside click. Active state propagates
+     up so the parent button looks selected when a child view is
+     active. */
+  header.top nav .nav-dropdown { position: relative; }
+  header.top nav .nav-dropdown-trigger::after {
+    content: '▾'; font-size: 9px; margin-left: 4px; opacity: .6;
+  }
+  header.top nav .nav-dropdown-menu {
+    display: none; position: absolute; top: calc(100% + 6px); left: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    padding: 4px; min-width: 180px; z-index: 100;
+  }
+  header.top nav .nav-dropdown.open .nav-dropdown-menu { display: block; }
+  header.top nav .nav-dropdown-menu button {
+    display: block; width: 100%; text-align: left; padding: 8px 12px;
+    background: transparent; border: 0; color: var(--text-dim);
+    font-size: 13px; cursor: pointer; border-radius: 6px;
+  }
+  header.top nav .nav-dropdown-menu button:hover {
+    background: var(--surface-2); color: var(--text);
+  }
+  header.top nav .nav-dropdown-menu button.active {
+    background: var(--surface-2); color: var(--text);
+  }
+  /* v1.0.0bm: "+ Qualify" CTA, distinct from main nav so it reads
+     as an action not a destination. Pinned to the right edge of
+     the nav. */
+  header.top nav .nav-cta {
+    background: var(--mr-red, #e82b23); color: #fff;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px;
+    cursor: pointer; font-weight: 600; border: 0; margin-left: 8px;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  header.top nav .nav-cta:hover { filter: brightness(1.08); }
+  /* v1.0.0bm: tab strip for Home (and any other tabbed surface).
+     Sits above tab content; one chip per tab; active chip gets
+     surface bg + accent underline. */
+  .tab-strip {
+    display: flex; gap: 4px; margin: 0 0 12px;
+    border-bottom: 1px solid var(--border); padding-bottom: 0;
+  }
+  .tab-strip button {
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--text-muted); padding: 8px 12px; font-size: 12px;
+    cursor: pointer; font-weight: 600; margin-bottom: -1px;
+  }
+  .tab-strip button.active {
+    color: var(--text); border-bottom-color: var(--mr-red, #e82b23);
+  }
+  .tab-strip button:hover { color: var(--text); }
+  .tab-strip button .tab-count {
+    background: var(--surface-2); color: var(--text-muted);
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    margin-left: 4px; font-weight: 500;
+  }
+  .tab-strip button.active .tab-count {
+    background: rgba(232,43,35,.12); color: var(--mr-red, #e82b23);
+  }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
   header.top .health { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
   header.top .health .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); margin-left: 6px; }
   header.top .health .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
@@ -856,15 +918,30 @@
 </script>
 <header class="top">
   <div class="brand"><span class="dot"></span> MR · Lead Qualification</div>
+  <!-- v1.0.0bm: restructured nav — 8 flat buttons → 5 main + CTA.
+       Pipeline becomes a dropdown grouping the pre-sale flow
+       (Pipeline / Project Build / Forecast). Insights groups the
+       analytics surfaces. Qualify becomes a pinned CTA on the
+       right (it's an action, not a destination). -->
   <nav>
     <button id="nav-home" class="active" type="button">Home</button>
-    <button id="nav-qualify" type="button">Qualify Lead</button>
-    <button id="nav-pipeline" type="button">Pipeline</button>
-    <button id="nav-forecast" type="button"><span data-icon="chart-line"></span>Forecast</button>
-    <button id="nav-dashboard" type="button"><span data-icon="chart-bar"></span>Dashboard</button>
-    <button id="nav-build" type="button">Project Build</button>
+    <div class="nav-dropdown" data-nav-group="pipeline">
+      <button class="nav-dropdown-trigger" id="nav-pipeline-group" type="button">Pipeline</button>
+      <div class="nav-dropdown-menu">
+        <button id="nav-pipeline"   type="button">Pipeline</button>
+        <button id="nav-build"      type="button">Project Build</button>
+        <button id="nav-forecast"   type="button">Forecast</button>
+      </div>
+    </div>
     <button id="nav-live" type="button">Live</button>
     <button id="nav-partners" type="button">Partners</button>
+    <div class="nav-dropdown" data-nav-group="insights">
+      <button class="nav-dropdown-trigger" id="nav-insights-group" type="button">Insights</button>
+      <div class="nav-dropdown-menu">
+        <button id="nav-dashboard"  type="button">Dashboard</button>
+      </div>
+    </div>
+    <button id="nav-qualify" class="nav-cta" type="button">+ Qualify</button>
   </nav>
   <button id="global-search-open" type="button" title="Search all contacts (⌘K)"
           aria-label="Search contacts"
@@ -927,109 +1004,93 @@
       <div id="home-brief-body" style="margin-top:10px;"></div>
     </div>
     <div id="home-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-      <div class="card" id="home-overdue-card">
-        <h3 style="margin:0 0 4px;font-size:14px;">Your overdue contacts</h3>
-        <div class="muted" style="font-size:11px;margin-bottom:10px;">Partner contacts on your book that have slipped past cadence. Top 5 shown.</div>
-        <div id="home-overdue-list">Loading…</div>
+    <!-- v1.0.0bm: consolidated from 10 stacked cards to 3 tabbed
+         cards. Same information, less scrolling, clearer mental
+         model: "your accounts", "your work", "your team". -->
+
+    <!-- YOUR ACCOUNTS — tabs: Needs attention · Active · Watched · Overdue contacts -->
+    <div class="card" id="home-accounts-card" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+        <h3 style="margin:0;font-size:14px;">Your accounts</h3>
       </div>
-      <div class="card" id="home-leads-card">
-        <h3 style="margin:0 0 4px;font-size:14px;">Your active leads</h3>
+      <div class="tab-strip" data-tab-group="home-accounts">
+        <button data-tab="atrisk" type="button">Needs attention <span class="tab-count" id="tab-count-atrisk"></span></button>
+        <button data-tab="active" class="active" type="button">Active leads <span class="tab-count" id="tab-count-active"></span></button>
+        <button data-tab="watched" type="button">Watched <span class="tab-count" id="tab-count-watched"></span></button>
+        <button data-tab="overdue" type="button">Overdue contacts <span class="tab-count" id="tab-count-overdue"></span></button>
+      </div>
+      <div class="tab-pane" data-tab-pane="atrisk">
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Leads with low engagement — pick one to rescue today.</div>
+        <div id="home-atrisk-list"></div>
+      </div>
+      <div class="tab-pane active" data-tab-pane="active">
         <div class="muted" style="font-size:11px;margin-bottom:10px;">Leads you own, sorted by recent activity. Top 5 shown.</div>
         <div id="home-leads-list">Loading…</div>
       </div>
+      <div class="tab-pane" data-tab-pane="watched">
+        <div class="muted" id="home-watched-sub" style="font-size:11px;margin-bottom:10px;">Click any to open. News digests land in your notifications when relevant.</div>
+        <div id="home-watched-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:6px;"></div>
+      </div>
+      <div class="tab-pane" data-tab-pane="overdue">
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Partner contacts on your book that have slipped past cadence. Top 5 shown.</div>
+        <div id="home-overdue-list">Loading…</div>
+      </div>
     </div>
+
     <div id="home-role-extra" style="margin-top:14px;"></div>
-    <!-- v1.0.0av: "Needs attention" card. Surfaces leads on your book
-         with cold/weak engagement (<50). Sorted coldest first so the
-         most-neglected accounts float to the top. Hidden when
-         there's nothing at risk — empty state would just add noise. -->
-    <div class="card" id="home-atrisk-card" style="margin-top:14px;display:none;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <h3 style="margin:0;font-size:14px;">Needs attention</h3>
-          <div class="muted" style="font-size:11px;margin-top:2px;">Your leads with low engagement — pick one to rescue today.</div>
+
+    <!-- YOUR WORK — tabs: Todos · Notifications · Activity -->
+    <div class="card" id="home-work-card" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+        <h3 style="margin:0;font-size:14px;">Your work</h3>
+        <div class="btn-row" style="display:flex;gap:6px;">
+          <button class="btn ghost" id="home-todo-clear" type="button" style="padding:6px 12px;font-size:11px;display:none;">Clear completed</button>
+          <button class="btn ghost" id="home-activity-refresh" type="button" style="padding:6px 12px;font-size:11px;display:none;">Refresh feed</button>
+          <button id="home-notif-open" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;display:none;">See all →</button>
         </div>
       </div>
-      <div id="home-atrisk-list" style="margin-top:12px;"></div>
+      <div class="tab-strip" data-tab-group="home-work">
+        <button data-tab="todos" class="active" type="button">Todos <span class="tab-count" id="tab-count-todos"></span></button>
+        <button data-tab="notifications" type="button">Notifications <span class="tab-count" id="tab-count-notifications"></span></button>
+        <button data-tab="activity" type="button">Activity</button>
+      </div>
+      <div class="tab-pane active" data-tab-pane="todos">
+        <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+          <input id="home-todo-input" type="text" placeholder="What's on your mind? (Enter to add)"
+                 style="flex:1;min-width:200px;padding:7px 10px;font-size:12px;" maxlength="500" />
+          <select id="home-todo-priority" style="padding:7px 10px;font-size:11px;">
+            <option value="">No priority</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <input id="home-todo-due" type="date" style="padding:6px 10px;font-size:11px;" />
+          <button class="btn" id="home-todo-add" type="button" style="padding:7px 14px;font-size:12px;">Add</button>
+        </div>
+        <div id="home-todo-list"></div>
+        <div id="home-todo-count" class="muted" style="display:none;"></div>
+      </div>
+      <div class="tab-pane" data-tab-pane="notifications">
+        <div class="muted" id="home-notif-sub" style="font-size:11px;margin-bottom:10px;">When you get assigned a contact or lead, it lands here.</div>
+        <div id="home-notif-list"></div>
+      </div>
+      <div class="tab-pane" data-tab-pane="activity">
+        <div class="muted" style="font-size:11px;margin-bottom:10px;">Recent changes across leads, partners, contacts. Click a row to open.</div>
+        <div id="home-activity-list"></div>
+      </div>
     </div>
-    <!-- v1.0.0bi: watched accounts. Quick-jump list of leads the
-         user is tracking for relevant news. Hidden when nothing
-         is watched — the toggle on each lead drawer is the entry
-         point, so an empty state would just confuse. -->
-    <div class="card" id="home-watched-card" style="margin-top:14px;display:none;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+
+    <!-- TEAM PULSE — snapshot + activity context, collapsed by default -->
+    <details class="card" id="home-team-snapshot" style="margin-top:14px;">
+      <summary style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;list-style:none;">
         <div>
-          <h3 style="margin:0;font-size:14px;">Watched accounts</h3>
-          <div class="muted" id="home-watched-sub" style="font-size:11px;margin-top:2px;">Click any to open. News digests land in your notifications when relevant.</div>
+          <h3 style="margin:0;font-size:14px;display:inline;">Team pulse</h3>
+          <span class="muted" style="font-size:11px;margin-left:8px;">Last 30 days · context for your personal numbers above</span>
         </div>
-      </div>
-      <div id="home-watched-list" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:6px;"></div>
-    </div>
-    <!-- v1.0.0am: per-user todo list. Always visible (even when
-         empty) because this is the primary place to capture personal
-         follow-ups. Backed by /api/todos; persists across sessions. -->
-    <div class="card" id="home-todo-card" style="margin-top:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <h3 style="margin:0;font-size:14px;">Your todos <span id="home-todo-count" class="muted" style="font-weight:400;font-size:11px;margin-left:6px;"></span></h3>
-          <div class="muted" style="font-size:11px;margin-top:2px;">Personal scratch list. Survives across sessions. Open ones float to the top.</div>
-        </div>
-        <button class="btn ghost" id="home-todo-clear" type="button" style="padding:6px 12px;font-size:11px;display:none;">Clear completed</button>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:12px;align-items:center;flex-wrap:wrap;">
-        <input id="home-todo-input" type="text" placeholder="What's on your mind? (Enter to add)"
-               style="flex:1;min-width:200px;padding:7px 10px;font-size:12px;" maxlength="500" />
-        <select id="home-todo-priority" style="padding:7px 10px;font-size:11px;">
-          <option value="">No priority</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
-        <input id="home-todo-due" type="date" style="padding:6px 10px;font-size:11px;" />
-        <button class="btn" id="home-todo-add" type="button" style="padding:7px 14px;font-size:12px;">Add</button>
-      </div>
-      <div id="home-todo-list" style="margin-top:12px;"></div>
-    </div>
-    <!-- v1.0.0ap: team activity feed. Rendered from /api/activity
-         (separate fetch so the Home payload stays fast). Shows the
-         last ~10 cross-team changes — renames, ownership transfers,
-         scope moves — so you can see what's happening without
-         digging through each surface. Hidden until at least one
-         event lands. -->
-    <div class="card" id="home-activity-card" style="margin-top:14px;display:none;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <h3 style="margin:0;font-size:14px;">Team activity</h3>
-          <div class="muted" style="font-size:11px;margin-top:2px;">Recent changes across leads, partners, contacts. Click a row to open.</div>
-        </div>
-        <button class="btn ghost" id="home-activity-refresh" type="button" style="padding:6px 12px;font-size:11px;">Refresh</button>
-      </div>
-      <div id="home-activity-list" style="margin-top:12px;"></div>
-    </div>
-    <!-- v1.0.0al: notifications panel on Home. Rendered from
-         home.notifications.recent so users see assignments without
-         hunting for the bell. Hidden when there's nothing to show. -->
-    <div class="card" id="home-notif-card" style="margin-top:14px;display:none;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <h3 style="margin:0;font-size:14px;">Recent assignments</h3>
-          <div class="muted" id="home-notif-sub" style="font-size:11px;margin-top:2px;">When you get assigned a contact or lead, it lands here.</div>
-        </div>
-        <button id="home-notif-open" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">See all →</button>
-      </div>
-      <div id="home-notif-list" style="margin-top:12px;"></div>
-    </div>
-    <div class="card" id="home-team-snapshot" style="margin-top:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <h3 style="margin:0;font-size:14px;">Team snapshot</h3>
-          <div class="muted" style="font-size:11px;margin-top:2px;">Last 30 days · context for your personal numbers above.</div>
-        </div>
-        <button id="home-open-dashboard" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;">Open full Dashboard →</button>
-      </div>
+        <button id="home-open-dashboard" class="btn ghost" type="button" style="padding:6px 12px;font-size:11px;" onclick="event.preventDefault();">Open full Dashboard →</button>
+      </summary>
       <div id="home-team-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;"></div>
-    </div>
+    </details>
   </section>
 
   <section id="view-qualify" class="view">
@@ -2506,7 +2567,19 @@
     $$('.view').forEach(v => v.classList.remove('active'));
     $(`#view-${name}`).classList.add('active');
     $$('header.top nav button').forEach(b => b.classList.remove('active'));
-    $(`#nav-${name}`).classList.add('active');
+    const navBtn = $(`#nav-${name}`);
+    if (navBtn) navBtn.classList.add('active');
+    // v1.0.0bm: also mark the parent dropdown trigger active when
+    // a child view is current — so the user can see which group
+    // they're inside.
+    const parentDropdown = navBtn?.closest('.nav-dropdown');
+    if (parentDropdown) {
+      const trigger = parentDropdown.querySelector('.nav-dropdown-trigger');
+      if (trigger) trigger.classList.add('active');
+    }
+    // Close any open dropdowns when we switch views.
+    document.querySelectorAll('.nav-dropdown.open').forEach(d =>
+      d.classList.remove('open'));
     if (name === 'pipeline') refreshPipeline();
     if (name === 'build')    initProjectBuild();
     if (name === 'partners') initPartners();
@@ -3808,6 +3881,73 @@
         _renderTechStackChips(inp.value);
       });
     });
+  }
+
+  // v1.0.0bm: tab-strip handler. Switches active panes within a
+  // `.tab-strip` group + its sibling `.tab-pane`s. Called once on
+  // init; subsequent re-renders don't need to re-wire.
+  function _initHomeTabs() {
+    document.querySelectorAll('.tab-strip').forEach(strip => {
+      if (strip.dataset.wired === '1') return;
+      strip.dataset.wired = '1';
+      strip.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-tab]');
+        if (!btn) return;
+        const tab = btn.dataset.tab;
+        const parentCard = strip.closest('.card');
+        if (!parentCard) return;
+        strip.querySelectorAll('button').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        parentCard.querySelectorAll('.tab-pane').forEach(p =>
+          p.classList.toggle('active', p.dataset.tabPane === tab));
+        // v1.0.0bm: the per-tab header buttons (Clear completed /
+        // Refresh feed / See all) show only when their tab is active.
+        _syncHomeWorkHeaderButtons(tab);
+      });
+    });
+  }
+
+  // v1.0.0bm: show/hide the header action buttons for the Your work
+  // card so each tab's button is only visible when that tab is active.
+  function _syncHomeWorkHeaderButtons(activeTab) {
+    const map = {
+      todos:         '#home-todo-clear',
+      activity:      '#home-activity-refresh',
+      notifications: '#home-notif-open',
+    };
+    Object.entries(map).forEach(([t, sel]) => {
+      const el = $(sel);
+      if (!el) return;
+      // Preserve the existing display value (clear-completed has
+      // dynamic visibility based on whether there's anything to clear)
+      // but only when the active tab matches.
+      el.style.display = (t === activeTab) ? '' : 'none';
+    });
+  }
+
+  // v1.0.0bm: set the count badge for a tab. Called by each renderer
+  // as it populates its pane.
+  function _setTabCount(id, n) {
+    const el = $('#tab-count-' + id);
+    if (!el) return;
+    el.textContent = n > 0 ? String(n) : '';
+  }
+
+  // v1.0.0bm: pick the most-actionable tab to show first. If there's
+  // anything that needs attention, surface that. Otherwise default to
+  // the most-recently-touched leads.
+  function _autoSelectHomeAccountsTab(homeData) {
+    const atRiskCount = (homeData.at_risk_leads || []).length;
+    if (atRiskCount > 0) {
+      _activateTab('home-accounts', 'atrisk');
+    }
+  }
+
+  function _activateTab(group, tab) {
+    const strip = document.querySelector(`.tab-strip[data-tab-group="${group}"]`);
+    if (!strip) return;
+    const btn = strip.querySelector(`button[data-tab="${tab}"]`);
+    if (btn) btn.click();
   }
 
   // v1.0.0bc: shared helper for the trend arrow shown next to ENG
@@ -8897,11 +9037,37 @@
     const homeRefreshBtn = document.getElementById('home-refresh');
     if (homeRefreshBtn) homeRefreshBtn.addEventListener('click', loadHome);
     const homeOpenDash = document.getElementById('home-open-dashboard');
-    if (homeOpenDash) homeOpenDash.addEventListener('click', () => {
+    if (homeOpenDash) homeOpenDash.addEventListener('click', (e) => {
+      // v1.0.0bm: button now lives inside a <summary>; stop propagation
+      // so clicking it doesn't ALSO toggle the details open/closed.
+      e.preventDefault();
+      e.stopPropagation();
       switchView('dashboard');
       loadDashboard();
     });
+    // v1.0.0bm: initialise the home tab strips. Idempotent.
+    _initHomeTabs();
 
+    // v1.0.0bm: dropdown triggers. Click a parent button → toggle the
+    // open class (which CSS uses to show the menu). Outside click
+    // closes them all.
+    document.querySelectorAll('.nav-dropdown-trigger').forEach(t => {
+      t.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dropdown = t.closest('.nav-dropdown');
+        const wasOpen = dropdown.classList.contains('open');
+        // Close every other open dropdown first.
+        document.querySelectorAll('.nav-dropdown.open').forEach(d =>
+          d.classList.remove('open'));
+        if (!wasOpen) dropdown.classList.add('open');
+      });
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.nav-dropdown')) {
+        document.querySelectorAll('.nav-dropdown.open').forEach(d =>
+          d.classList.remove('open'));
+      }
+    });
     $('#nav-qualify').addEventListener('click', () => switchView('qualify'));
     $('#nav-pipeline').addEventListener('click', () => {
       switchView('pipeline');
@@ -9528,18 +9694,21 @@
   function _renderHomeTodos(todoData) {
     todoState.items = (todoData && todoData.items) || [];
     const list = $('#home-todo-list');
-    const count = $('#home-todo-count');
     const clearBtn = $('#home-todo-clear');
     if (!list) return;
     _wireHomeTodoOnce();
     const open = todoState.items.filter(t => !t.done).length;
     const done = todoState.items.length - open;
-    if (count) {
-      count.textContent = todoState.items.length
-        ? `· ${open} open${done ? ` · ${done} done` : ''}`
-        : '';
+    // v1.0.0bm: tab count shows open todos (not total — done items
+    // shouldn't drive the badge).
+    _setTabCount('todos', open);
+    // Only show clear button when the Todos tab is active AND there's
+    // something to clear. Tab handler manages the active part; we
+    // just control "has items".
+    if (clearBtn) {
+      const todosTabActive = $('.tab-strip[data-tab-group="home-work"] button[data-tab="todos"]')?.classList.contains('active');
+      clearBtn.style.display = (done > 0 && todosTabActive) ? 'inline-flex' : 'none';
     }
-    if (clearBtn) clearBtn.style.display = done > 0 ? 'inline-flex' : 'none';
     if (!todoState.items.length) {
       list.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">Nothing on the list yet. Add your first todo above.</div>`;
       return;
@@ -9809,6 +9978,7 @@
     // Overdue contacts
     const overdueList = $('#home-overdue-list');
     const overdue = data.overdue_contacts || [];
+    _setTabCount('overdue', overdue.length);
     if (!overdue.length) {
       overdueList.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">Nothing overdue. You\'re in good shape.</div>';
     } else {
@@ -9855,6 +10025,7 @@
     // Active leads
     const leadsList = $('#home-leads-list');
     const leads = data.active_leads || [];
+    _setTabCount('active', leads.length);
     if (!leads.length) {
       leadsList.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No active leads on your book yet.</div>';
     } else {
@@ -9974,6 +10145,10 @@
     // pulls from todos + notifications stores). Renders at the top of
     // Home as a dismissible card.
     _loadMorningBrief();
+
+    // v1.0.0bm: if anything's at risk, surface it by auto-selecting
+    // the Needs attention tab. Otherwise keep the default Active tab.
+    _autoSelectHomeAccountsTab(data);
   }
 
   // v1.0.0bf: morning brief loader + renderer.
@@ -10088,12 +10263,15 @@
   // nothing is watched — the entry point is the drawer toggle, so
   // an empty state would just confuse.
   function _renderWatchedAccounts(items) {
-    const card = $('#home-watched-card');
     const list = $('#home-watched-list');
     const sub = $('#home-watched-sub');
-    if (!card || !list) return;
-    if (!items.length) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
+    if (!list) return;
+    // v1.0.0bm: tab count + empty state inside pane.
+    _setTabCount('watched', items.length);
+    if (!items.length) {
+      list.innerHTML = '<div class="muted" style="font-size:11px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;grid-column:1/-1;">No accounts watched yet. Open any lead and click <strong>Watch</strong> next to the ENG chip.</div>';
+      return;
+    }
     if (sub) {
       sub.textContent = `${items.length} watched · click any to open. News digests land in your notifications when relevant.`;
     }
@@ -10115,11 +10293,15 @@
   // company + ENG/ICP chips + days since touch + an + todo button so
   // the AE can capture a follow-up without leaving Home.
   function _renderAtRiskLeads(items) {
-    const card = $('#home-atrisk-card');
     const list = $('#home-atrisk-list');
-    if (!card || !list) return;
-    if (!items.length) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
+    if (!list) return;
+    // v1.0.0bm: tab count + empty state inside the tab pane (the
+    // card itself is always visible — it's a tab container now).
+    _setTabCount('atrisk', items.length);
+    if (!items.length) {
+      list.innerHTML = '<div class="muted" style="font-size:11px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">Nothing at risk on your book — all leads scoring 50+. ✓</div>';
+      return;
+    }
     list.innerHTML = items.map(l => {
       const band = l.engagement_band || 'cold';
       const engColor =
@@ -10178,9 +10360,8 @@
   //  Team activity feed (v1.0.0ap) — Home card
   // =============================================================
   async function _loadActivityFeed() {
-    const card = $('#home-activity-card');
     const list = $('#home-activity-list');
-    if (!card || !list) return;
+    if (!list) return;
     // Wire the refresh button once.
     const refreshBtn = $('#home-activity-refresh');
     if (refreshBtn && !refreshBtn.dataset.wired) {
@@ -10190,8 +10371,12 @@
     try {
       const data = await jsonFetch('/api/activity?limit=10');
       const items = data.items || [];
-      if (!items.length) { card.style.display = 'none'; return; }
-      card.style.display = 'block';
+      // v1.0.0bm: empty state inside the tab pane — the card always
+      // exists as a tab container so we don't hide it.
+      if (!items.length) {
+        list.innerHTML = '<div class="muted" style="font-size:11px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No team activity yet.</div>';
+        return;
+      }
       list.innerHTML = items.map(e => `
         <div data-activity-link='${escapeAttr(JSON.stringify(e.link || {}))}'
              style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;${e.link ? 'cursor:pointer;' : ''}">
@@ -10214,21 +10399,23 @@
         });
       });
     } catch (e) {
-      // Don't surface — activity is supplementary. Just keep the
-      // card hidden if it can't load.
       console.warn('activity feed fetch failed', e);
-      card.style.display = 'none';
+      list.innerHTML = '<div class="muted" style="font-size:11px;padding:14px;text-align:center;">Activity feed unavailable.</div>';
     }
   }
 
   function _renderHomeNotifications(notifData) {
-    const card = $('#home-notif-card');
     const list = $('#home-notif-list');
     const sub  = $('#home-notif-sub');
-    if (!card || !list) return;
+    if (!list) return;
     const items = notifData.recent || [];
-    if (!items.length) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
+    // v1.0.0bm: tab count + empty state inside pane.
+    _setTabCount('notifications', items.length);
+    if (!items.length) {
+      list.innerHTML = '<div class="muted" style="font-size:11px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No recent assignments. New ones land here automatically.</div>';
+      if (sub) sub.textContent = 'When you get assigned a contact or lead, it lands here.';
+      return;
+    }
     const unread = notifData.unread_count || 0;
     if (sub) {
       sub.textContent = unread

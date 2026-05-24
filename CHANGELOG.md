@@ -5,6 +5,93 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bm] — 2026-05-24 — Design pass: nav restructure + Home consolidation
+
+Ben asked for a design review. Two biggest issues:
+- **Nav had 8 flat buttons**, mixing destinations (Pipeline, Live) with
+  actions (Qualify Lead) and adjacent analytics (Forecast, Dashboard).
+- **Home view had ~10 stacked cards** with overlap (Morning brief
+  duplicated Notifications + part of Todos + Needs attention flags).
+
+This commit fixes both without functional change.
+
+### Nav: 8 buttons → 5 main + 1 CTA
+
+```
+Before:  Home · Qualify Lead · Pipeline · Forecast · Dashboard · Project Build · Live · Partners
+After:   Home · Pipeline ▾ · Live · Partners · Insights ▾ · [+ Qualify]
+```
+
+- **Pipeline ▾** dropdown: Pipeline / Project Build / Forecast (pre-
+  sale flow grouped together)
+- **Insights ▾** dropdown: Dashboard (room for engagement leaderboard,
+  exports later)
+- **+ Qualify** CTA pinned right — Qualify is an action, not a
+  destination
+- Parent dropdown trigger gets active state when a child view is
+  current, so the user can see which group they're inside
+- Click outside closes any open dropdown
+
+### Home: 10 cards → 5
+
+```
+Before stack (10 cards):
+  Morning brief
+  Greeting
+  KPIs (5-card grid)
+  [Overdue contacts] [Active leads]
+  Role extras
+  Needs attention
+  Watched accounts
+  Todos
+  Notifications
+  Activity
+  Team snapshot
+
+After (5 cards):
+  Morning brief
+  Greeting
+  KPIs
+  Your accounts   ── Needs attention · Active · Watched · Overdue contacts
+  Your work       ── Todos · Notifications · Activity
+  Team pulse      ── collapsed <details>, expand for snapshot
+```
+
+- **Your accounts** card with 4 tabs. Auto-selects Needs attention
+  when there's anything <50 engagement; otherwise defaults to Active.
+- **Your work** card with 3 tabs. Per-tab header buttons (Clear
+  completed / Refresh feed / See all) only show when their tab is
+  active.
+- **Team pulse** collapsed by default — the personal stuff above is
+  what AEs scan first; team snapshot is reference context, not
+  always-on.
+- Tab counts on the chip labels so users see weight without clicking.
+
+### Added (CSS infra)
+
+- `.nav-dropdown` + `.nav-dropdown-menu` for the new sub-nav pattern.
+  Light/dark theme aware. Active state propagates up.
+- `.nav-cta` for the pinned-right action button (MR red).
+- `.tab-strip` + `.tab-pane` for the Home tabs. Active chip gets
+  bottom-border MR red. Tab counts in `.tab-count` badges that
+  highlight in MR red on the active tab.
+
+### What's not in this commit (v1.0.0bn)
+
+- **Drawer header tightening** — 5 buttons (Restore / Rescore /
+  Promote-to-Live / Save / Close) is still a lot. Move secondary
+  actions into a "..." menu.
+- **Live project detail tabs** — 6 stacked sections (header, status,
+  summary, OKRs, stakeholders, agencies) — wrap in Overview / OKRs
+  / Stakeholders / Agencies tabs.
+- **Color audit** — MR red is overworked. Keep it for primary CTAs +
+  brand surfaces, switch alarm states to a distinct red token.
+
+### Tests
+
+No new tests — this is pure frontend restructuring with no behaviour
+change. The full 916-test suite passes unchanged.
+
 ## [1.0.0bl] — 2026-05-24 — Stakeholder map + concurrent agencies
 
 Completes the live-project surface Ben asked for. v1.0.0bk shipped
