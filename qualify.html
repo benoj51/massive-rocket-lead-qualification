@@ -952,6 +952,19 @@
       </div>
       <div id="home-atrisk-list" style="margin-top:12px;"></div>
     </div>
+    <!-- v1.0.0bi: watched accounts. Quick-jump list of leads the
+         user is tracking for relevant news. Hidden when nothing
+         is watched — the toggle on each lead drawer is the entry
+         point, so an empty state would just confuse. -->
+    <div class="card" id="home-watched-card" style="margin-top:14px;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <h3 style="margin:0;font-size:14px;">Watched accounts</h3>
+          <div class="muted" id="home-watched-sub" style="font-size:11px;margin-top:2px;">Click any to open. News digests land in your notifications when relevant.</div>
+        </div>
+      </div>
+      <div id="home-watched-list" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:6px;"></div>
+    </div>
     <!-- v1.0.0am: per-user todo list. Always visible (even when
          empty) because this is the primary place to capture personal
          follow-ups. Backed by /api/todos; persists across sessions. -->
@@ -1790,6 +1803,12 @@
              ICP = how good the lead is intrinsically; Engagement =
              how well we're working it. Hidden until the score loads. -->
         <span class="icp-pill" id="ld-engagement" style="display:none;" title="">—</span>
+        <!-- v1.0.0bi: watchlist toggle. Eye when not watching, eye+✓
+             when watching. Click flips the state. Hidden until the
+             user profile loads (no profile = no watchlist scope). -->
+        <button id="ld-watch-toggle" type="button"
+                title="Watch this account for relevant news"
+                style="display:none;background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:3px 9px;border-radius:14px;cursor:pointer;font-size:11px;line-height:1;margin-left:4px;display:none;align-items:center;gap:4px;"></button>
         <span class="status-chip" id="ld-status-chip" style="display:none;"></span>
         <span id="ld-group-chip"></span>
       </div>
@@ -3765,6 +3784,72 @@
     return '';
   }
 
+  // v1.0.0bi: load + wire the watchlist toggle in the drawer header.
+  // Hidden when no profile is set. Click flips the state via POST /
+  // DELETE and re-renders the button.
+  async function loadLeadWatchToggle(leadId) {
+    const btn = $('#ld-watch-toggle');
+    if (!btn || !leadId) return;
+    const user = _currentRecipient();
+    if (!user) { btn.style.display = 'none'; return; }
+    try {
+      const data = await jsonFetch(
+        `/api/watchlist/${encodeURIComponent(leadId)}/status?user=${encodeURIComponent(user)}`);
+      _renderWatchToggle(btn, leadId, !!data.watching);
+    } catch (e) {
+      console.warn('watchlist status fetch failed', e);
+      btn.style.display = 'none';
+    }
+  }
+
+  function _renderWatchToggle(btn, leadId, watching) {
+    btn.style.display = 'inline-flex';
+    btn.dataset.watching = watching ? '1' : '0';
+    btn.innerHTML = watching
+      ? `${icon('eye', { size: 11 })} Watching`
+      : `${icon('eye', { size: 11 })} Watch`;
+    btn.style.color = watching ? 'var(--green)' : 'var(--text-dim)';
+    btn.style.borderColor = watching ? 'rgba(74,222,128,.4)' : 'var(--border)';
+    btn.style.background = watching ? 'rgba(74,222,128,.06)' : 'transparent';
+    btn.title = watching
+      ? "You're watching this account — click to unwatch"
+      : "Watch this account for relevant news";
+    // Re-wire (clones+replaces to drop any previous handler).
+    const fresh = btn.cloneNode(true);
+    btn.parentNode.replaceChild(fresh, btn);
+    fresh.addEventListener('click', () => _toggleLeadWatch(leadId));
+  }
+
+  async function _toggleLeadWatch(leadId) {
+    const user = _currentRecipient();
+    if (!user) {
+      toast('Pick your profile first (Home → Switch profile)', 'error');
+      return;
+    }
+    const btn = $('#ld-watch-toggle');
+    const currentlyWatching = btn?.dataset?.watching === '1';
+    try {
+      if (currentlyWatching) {
+        await jsonFetch(
+          `/api/watchlist/${encodeURIComponent(leadId)}?user=${encodeURIComponent(user)}`,
+          { method: 'DELETE' });
+        toast('Removed from watchlist', 'success');
+      } else {
+        await jsonFetch(
+          `/api/watchlist/${encodeURIComponent(leadId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user }),
+        });
+        toast('Added to watchlist', 'success');
+      }
+      // Re-render with new state.
+      _renderWatchToggle($('#ld-watch-toggle'), leadId, !currentlyWatching);
+    } catch (e) {
+      toast(`Watch toggle failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
   // v1.0.0at: fetch + render the engagement score chip in the drawer
   // header. Hidden until the first successful load; replaced in place
   // on every drawer open. Tooltip shows the signal breakdown so the
@@ -5268,6 +5353,9 @@
       // v1.0.0at: account engagement score chip — fired after the
       // first paint so it doesn't block the header/hero rendering.
       loadLeadEngagementScore(pageId);
+      // v1.0.0bi: watchlist toggle. Reads the current is-watching
+      // state for this lead + this user.
+      loadLeadWatchToggle(pageId);
       // Reset dirty state — freshly loaded data is the new baseline.
       updateDirtyState();
     } catch (e) {
@@ -9015,6 +9103,9 @@
     // server-side so the score math stays in one place).
     _renderAtRiskLeads(data.at_risk_leads || []);
 
+    // v1.0.0bi: watched accounts card. Hidden when nothing's watched.
+    _renderWatchedAccounts(data.watched_accounts || []);
+
     // v1.0.0am: Home todos panel — fed by data.todos. Always rendered
     // (even when empty) so the input is always discoverable.
     _renderHomeTodos(data.todos || { items: [] });
@@ -9134,6 +9225,34 @@
         // Reuse todo-link router for consistent navigation.
         _openTodoLink(link);
       });
+    });
+  }
+
+  // v1.0.0bi: render the "Watched accounts" Home card. Each entry
+  // is a clickable pill that opens the lead drawer. Hidden when
+  // nothing is watched — the entry point is the drawer toggle, so
+  // an empty state would just confuse.
+  function _renderWatchedAccounts(items) {
+    const card = $('#home-watched-card');
+    const list = $('#home-watched-list');
+    const sub = $('#home-watched-sub');
+    if (!card || !list) return;
+    if (!items.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    if (sub) {
+      sub.textContent = `${items.length} watched · click any to open. News digests land in your notifications when relevant.`;
+    }
+    list.innerHTML = items.map(w => `
+      <button type="button" data-home-watched-open="${escapeAttr(w.lead_id)}"
+              style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;text-align:left;cursor:pointer;color:var(--text);font-size:12px;line-height:1.3;">
+        <div style="font-weight:500;">${escapeHtml(w.company || w.lead_id)}</div>
+        ${w.last_news_seen_at
+          ? `<div class="muted" style="font-size:10px;margin-top:2px;">Last news ${escapeHtml(_fmtAgoShort(w.last_news_seen_at))}</div>`
+          : `<div class="muted" style="font-size:10px;margin-top:2px;">No news scanned yet</div>`}
+      </button>
+    `).join('');
+    list.querySelectorAll('[data-home-watched-open]').forEach(b => {
+      b.addEventListener('click', () => openLeadDrawer(b.dataset.homeWatchedOpen));
     });
   }
 

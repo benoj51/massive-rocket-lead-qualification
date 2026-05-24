@@ -52,6 +52,7 @@ import criteria_store
 import engagement
 import engagement_snapshots_store
 import hubspot_sync
+import account_watchlist_store
 import filter_presets_store
 import lead_summary_store
 import notifications_store
@@ -3701,6 +3702,19 @@ def api_home():
     notifs_recent = notifications_store.list_for(owner_name, limit=5)
     notifs_unread = notifications_store.unread_count(owner_name)
 
+    # v1.0.0bi: surface the user's watched accounts on Home so they
+    # see the watch list without a second fetch. Limited to 10 for
+    # the card; the full list is on the Watch view (drawer/dedicated).
+    watched_top = account_watchlist_store.list_for(owner_name)[:10]
+    # Enrich with company name from the already-loaded pipeline_rows
+    # (no second Notion call).
+    company_by_id = {r.get("id"): r.get("company")
+                      for r in pipeline_rows if r.get("id")}
+    watched_payload = [{
+        **w,
+        "company": company_by_id.get(w.get("lead_id")) or w.get("lead_id"),
+    } for w in watched_top]
+
     # v1.0.0am: surface the user's own todos on Home. We send the full
     # list (cheap — typical user has <20) so the UI can render +
     # filter without a second round-trip.
@@ -3771,6 +3785,8 @@ def api_home():
             "unread_count":  notifs_unread,
         },
         "todos":            todos_summary,
+        # v1.0.0bi: watched accounts (top 10).
+        "watched_accounts": watched_payload,
         "generated_at":     team["generated_at"],
     })
 
@@ -4155,6 +4171,86 @@ def api_filter_presets_delete(preset_id: str):
     if not ok:
         return jsonify({"error": "not_found"}), 404
     return jsonify({"deleted": True})
+
+
+# v1.0.0bi: Account watchlist API -----------------------------------------
+# Per-user list of leads the team wants to track for relevant news.
+# Foundation today; the news fetcher + AI relevance scorer +
+# notifications land in v1.0.0bj. This commit ships:
+#   - the store + endpoints
+#   - the "Watch" toggle on the lead drawer
+#   - the "Watched accounts" Home card
+# so the watch state is visible end-to-end before news pulling is live.
+
+@app.route("/api/watchlist", methods=["GET"])
+def api_watchlist_list():
+    """List a user's watched accounts. Query: user (required).
+
+    Enriches each entry with the lead's company name (best-effort via
+    Notion pipeline lookup) so the UI doesn't need a second fetch
+    just to render labels.
+    """
+    user = (request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    rows = account_watchlist_store.list_for(user)
+    # Enrich with company names via the pipeline lookup. Best-effort —
+    # if Notion is unreachable, return ids only.
+    name_by_id: dict[str, str] = {}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                name_by_id[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("Watchlist list: pipeline enrich failed: %s", e)
+    out = []
+    for r in rows:
+        lid = r.get("lead_id")
+        out.append({
+            **r,
+            "company": name_by_id.get(lid) or lid,
+        })
+    return jsonify({"items": out})
+
+
+@app.route("/api/watchlist/<lead_id>", methods=["POST"])
+def api_watchlist_add(lead_id: str):
+    """Add a lead to the user's watchlist. Body or query: user."""
+    body = request.get_json(silent=True) or {}
+    user = (body.get("user") or request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    try:
+        entry = account_watchlist_store.add(user, lead_id)
+    except account_watchlist_store.AccountWatchlistStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("watchlist_added", actor=_actor(),
+                    lead_id=lead_id, user=user)
+    return jsonify({"entry": entry,
+                    "watching": True}), 201
+
+
+@app.route("/api/watchlist/<lead_id>", methods=["DELETE"])
+def api_watchlist_remove(lead_id: str):
+    """Remove a lead from the user's watchlist."""
+    user = (request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    ok = account_watchlist_store.remove(user, lead_id)
+    if ok:
+        audit.log_event("watchlist_removed", actor=_actor(),
+                        lead_id=lead_id, user=user)
+    return jsonify({"removed": ok, "watching": False})
+
+
+@app.route("/api/watchlist/<lead_id>/status", methods=["GET"])
+def api_watchlist_status(lead_id: str):
+    """Cheap is-this-user-watching check. Used by the drawer to
+    decide whether the toggle starts on or off."""
+    user = (request.args.get("user") or "").strip()
+    if not user:
+        return jsonify({"error": "user required"}), 400
+    return jsonify({"watching": account_watchlist_store.is_watching(user, lead_id)})
 
 
 # v1.0.0t: Dashboard endpoint ----------------------------------------------

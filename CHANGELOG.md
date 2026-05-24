@@ -5,6 +5,69 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bi] — 2026-05-24 — Account watch list (foundation)
+
+Ben: "I'd like the team to be able to create an account watch list
+meaning that they will receive notification on relevant news for the
+account based on Massive Rocket's needs."
+
+This ships the watch-list foundation — store, endpoints, drawer
+toggle, Home card. v1.0.0bj will wire in the news fetcher + AI
+relevance scoring + the bell notifications. Splitting in two keeps
+each commit reviewable and ships something testable today (you can
+already mark accounts to watch + see them on Home).
+
+### Added
+
+- **`account_watchlist_store.py`** — per-user JSON store. Each
+  entry: `{lead_id, added_at, last_news_seen_at}`. The
+  `last_news_seen_at` high-water mark is the foundation v1.0.0bj
+  will use so the news fetcher only considers new items since the
+  last scan. API: `list_for`, `add` (idempotent), `remove`,
+  `is_watching`, `watchers_of(lead_id)` (inverse lookup for
+  fan-out), `mark_news_seen`. Cap 200 per user.
+- **API endpoints**:
+  - `GET /api/watchlist?user=` — list, enriched with company name
+    via best-effort Notion pipeline lookup
+  - `POST /api/watchlist/<lead_id>` body `{user}` → 201 + entry
+  - `DELETE /api/watchlist/<lead_id>?user=` → `{removed, watching}`
+  - `GET /api/watchlist/<lead_id>/status?user=` — cheap is-watching
+    check (drawer toggle uses this on open)
+- **`/api/home` payload** now includes `watched_accounts` (top 10)
+  so the Home card renders with the first paint, no second fetch.
+- **Watch toggle on the lead drawer header** next to the ENG chip.
+  Eye icon + "Watch" / green eye + "Watching" state. Click flips
+  via POST or DELETE. Hidden when no profile is set.
+- **Watched accounts card on Home** — grid of clickable pills
+  showing company name + "Last news Xd ago" / "No news scanned
+  yet". Hidden when nothing is watched (the toggle is the entry
+  point so an empty state would confuse). Click any pill →
+  lead drawer opens.
+- **Audit events**: `watchlist_added`, `watchlist_removed` so the
+  team activity feed (v1.0.0ap) surfaces watch state changes.
+
+### Tests
+
+- **`tests/test_account_watchlist.py`** — 20 tests:
+  - 13 store units: add+list, add idempotent, newest-first sort,
+    remove (first + second), is_watching, per-user isolation,
+    watchers_of (inverse lookup + empty case),
+    mark_news_seen (bumps + missing), validation (user/lead_id
+    required), 200-per-user cap.
+  - 7 endpoint tests with NotionSync patched: list requires user,
+    add+list with company enrichment, add returns 201, remove,
+    remove unknown returns removed=false, status check on/off,
+    missing-user 400.
+
+### Next (v1.0.0bj)
+
+- News fetcher (Google News RSS per company query)
+- AI relevance scorer (Claude reads headlines, scores 0-10 against
+  MR's offer of CRM / data / loyalty / engineering, drops anything
+  below threshold)
+- `kind: news_alert` notification on materially-relevant items
+- News digest feed in the lead drawer
+
 ## [1.0.0bh] — 2026-05-23 — Fix: partner-sourced notes not synthesised
 
 Ben: "Added notes which were given by a partner on Shell but the
