@@ -142,6 +142,42 @@
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
   }
+  /* v1.0.0bq: utility strip above the main header. Always visible,
+     never wraps. Surfaces integration status (Apollo / Notion / AI)
+     + sign-out so the user can see at a glance what's live without
+     hunting for the right corner of a busy nav row. */
+  .util-strip {
+    position: sticky; top: 0; z-index: 31;
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 14px;
+    padding: 6px 24px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--text-muted);
+    font-family: var(--mono);
+  }
+  .util-strip .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); margin-left: 6px;
+  }
+  .util-strip .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
+  .util-strip .pill.warn { color: var(--yellow); border-color: rgba(251,191,36,.3); }
+  .util-strip a, .util-strip a:visited { color: var(--text-muted); text-decoration: none; }
+  .util-strip a:hover { color: var(--text); }
+  .util-strip .util-divider { color: var(--border); margin: 0 2px; }
+  /* Inline theme toggle inside the strip — smaller than the nav-row
+     button it replaces. */
+  .util-strip .util-action {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-muted); padding: 2px 8px; border-radius: 6px;
+    font-size: 11px; line-height: 1; cursor: pointer;
+    font-family: var(--mono);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .util-strip .util-action:hover { color: var(--text); border-color: var(--text-dim); }
+  /* Once the util strip is above the header, the header itself
+     stops sticking from 0 — it now sticks from below the strip. */
+  body.has-util-strip header.top { top: 28px; }
   header.top .brand {
     font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 13px;
     color: var(--text); display: flex; align-items: center; gap: 10px;
@@ -963,6 +999,19 @@
     if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
   })();
 </script>
+<!-- v1.0.0bq: utility strip — always-visible top bar with integration
+     status, theme toggle, and sign-out. Pulled out of the main header
+     because the nav row was crowded and the strip was getting lost on
+     the right edge. Body class signals "shift header.top down 28px to
+     keep the sticky stack clean." -->
+<div class="util-strip" id="util-strip">
+  <span class="health-inline" id="health-bar">Loading…</span>
+  <span class="util-divider">·</span>
+  <button id="theme-toggle" class="util-action" type="button"
+          title="Toggle light / dark theme"
+          aria-label="Toggle light / dark theme"><span data-icon="moon" data-icon-size="12"></span></button>
+</div>
+
 <header class="top">
   <div class="brand"><span class="dot"></span> MR · Lead Qualification</div>
   <!-- v1.0.0bm: restructured nav — 8 flat buttons → 5 main + CTA.
@@ -989,6 +1038,13 @@
         <button id="nav-dashboard"  type="button">Dashboard</button>
       </div>
     </div>
+    <!-- v1.0.0bq: settings nav. Lives between Insights and the
+         Qualify CTA so it sits at the admin end of the bar. Uses
+         a gear icon rather than a wordmark to stay compact. -->
+    <button id="nav-settings" type="button" title="Settings"
+            aria-label="Settings" style="padding:8px 10px;">
+      <span data-icon="settings" data-icon-size="14"></span>
+    </button>
     <button id="nav-qualify" class="nav-cta" type="button">+ Qualify</button>
   </nav>
   <button id="global-search-open" type="button" title="Search all contacts (⌘K)"
@@ -1016,10 +1072,8 @@
       <div id="notif-list" style="max-height:420px;overflow-y:auto;"></div>
     </div>
   </div>
-  <button id="theme-toggle" type="button" title="Toggle light / dark theme"
-          aria-label="Toggle light / dark theme"
-          style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;border-radius:8px;font-size:14px;cursor:pointer;line-height:1;margin-left:8px;display:inline-flex;align-items:center;"><span data-icon="moon" data-icon-size="14"></span></button>
-  <div class="health" id="health-bar"></div>
+  <!-- v1.0.0bq: theme toggle + health bar moved to the util-strip
+       above the header — they live there now, always visible. -->
 </header>
 
 <main>
@@ -1837,6 +1891,57 @@
       <div id="exp-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
     </div>
     <div id="exp-detail" class="card" style="display:none;margin-top:14px;"></div>
+  </section>
+
+  <!-- SETTINGS VIEW (v1.0.0bq) ================================ -->
+  <!-- Admin surface: edit MR teammates (the list that drives every
+       owner dropdown + the profile picker) and inspect integration
+       status. Read-only integrations panel for now; edit hooks come
+       in a follow-up when we wire env-var management. -->
+  <section id="view-settings" class="view">
+    <div class="card">
+      <h2 style="margin:0 0 4px;display:flex;align-items:center;gap:10px;">
+        <span data-icon="settings" data-icon-size="18"></span>Settings
+      </h2>
+      <p class="muted" style="margin:0 0 14px;font-size:12px;">
+        Manage MR teammates, profile picker, and integration status.
+      </p>
+      <!-- Tab strip — Users / Integrations. Mirrors the Home + Live
+           project detail patterns. -->
+      <div class="tab-strip">
+        <button class="tab-btn active" type="button" data-settings-tab="users">
+          Users <span class="tab-count" id="settings-users-count"></span>
+        </button>
+        <button class="tab-btn" type="button" data-settings-tab="integrations">
+          Integrations
+        </button>
+      </div>
+
+      <!-- USERS TAB -->
+      <div class="tab-pane active" data-settings-pane="users">
+        <p class="muted" style="margin:0 0 12px;font-size:11px;">
+          Every name here appears in owner dropdowns (Pipeline, Qualify,
+          Lead drawer) + the profile picker. Deactivating preserves the
+          row so historical lead.owner references still resolve;
+          deleting is permanent.
+        </p>
+        <div class="btn-row" style="margin-bottom:10px;">
+          <button id="settings-user-add" class="btn" type="button"
+                  style="padding:6px 14px;font-size:12px;">+ Add teammate</button>
+        </div>
+        <div id="settings-users-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
+      <!-- INTEGRATIONS TAB -->
+      <div class="tab-pane" data-settings-pane="integrations">
+        <p class="muted" style="margin:0 0 12px;font-size:11px;">
+          Connection status for the three external services this app
+          depends on. Configured at the Railway level — restart after
+          changing env vars.
+        </p>
+        <div id="settings-integrations-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    </div>
   </section>
 
   <!-- PARTNERS VIEW =========================================== -->
@@ -4438,6 +4543,212 @@
         loadExpansion();
       }).catch(e => toast(`Link failed: ${e.body?.error || e.message}`, 'error'));
     }, 600);
+  }
+
+  // =============================================================
+  //  Settings view (v1.0.0bq) — Users CRUD + Integrations status
+  // =============================================================
+  //
+  // Backed by /api/settings/users (CRUD) + /api/health (read-only).
+  // Adding/removing/renaming a teammate writes to the JSON store
+  // and triggers an audit event. The dropdowns elsewhere read the
+  // active-only subset via /api/owners and re-fetch on profile
+  // switch / page reload.
+  const settingsState = { users: [], health: null };
+
+  async function loadSettings() {
+    // Two payloads in parallel — cheap, both endpoints are fast.
+    try {
+      const [u, h] = await Promise.all([
+        jsonFetch('/api/settings/users'),
+        jsonFetch('/api/health'),
+      ]);
+      settingsState.users = u.users || [];
+      settingsState.health = h;
+      _renderSettingsUsers();
+      _renderSettingsIntegrations();
+      const countEl = $('#settings-users-count');
+      if (countEl) countEl.textContent = String(settingsState.users.length);
+    } catch (e) {
+      const list = $('#settings-users-list');
+      if (list) list.innerHTML = `<div style="color:var(--red);">Failed to load settings: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderSettingsUsers() {
+    const list = $('#settings-users-list');
+    if (!list) return;
+    const users = settingsState.users || [];
+    if (!users.length) {
+      list.innerHTML = '<div class="muted">No teammates yet — click + Add teammate to start.</div>';
+      return;
+    }
+    const rows = users.map(u => {
+      const dim = u.active ? '' : ' style="opacity:.5;"';
+      const badge = u.active
+        ? ''
+        : ' <span style="font-size:9px;background:var(--surface-2);color:var(--text-muted);padding:2px 6px;border-radius:8px;margin-left:6px;text-transform:uppercase;letter-spacing:.05em;">inactive</span>';
+      return `
+        <tr data-user-id="${escapeAttr(u.id)}"${dim}>
+          <td style="padding:8px 6px;font-weight:600;">${escapeHtml(u.name)}${badge}</td>
+          <td style="padding:8px 6px;color:var(--text-dim);font-size:11px;">${escapeHtml(u.role || '—')}</td>
+          <td style="padding:8px 6px;color:var(--text-dim);font-size:11px;">${escapeHtml(u.region || '—')}</td>
+          <td style="padding:8px 6px;color:var(--text-dim);font-size:11px;font-family:var(--mono);">${escapeHtml(u.email || '—')}</td>
+          <td style="padding:8px 6px;text-align:right;">
+            <button class="btn ghost" data-user-edit="${escapeAttr(u.id)}" type="button" style="padding:3px 8px;font-size:10px;">Edit</button>
+            <button class="btn ghost" data-user-toggle="${escapeAttr(u.id)}" type="button" style="padding:3px 8px;font-size:10px;">${u.active ? 'Deactivate' : 'Activate'}</button>
+            <button class="btn ghost" data-user-delete="${escapeAttr(u.id)}" type="button" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    list.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="text-align:left;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+            <th style="padding:6px;">Name</th>
+            <th style="padding:6px;">Role</th>
+            <th style="padding:6px;">Region</th>
+            <th style="padding:6px;">Email</th>
+            <th style="padding:6px;width:1%;"></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+    list.querySelectorAll('[data-user-edit]').forEach(b => {
+      b.addEventListener('click', () => _editSettingsUser(b.dataset.userEdit));
+    });
+    list.querySelectorAll('[data-user-toggle]').forEach(b => {
+      b.addEventListener('click', () => _toggleSettingsUser(b.dataset.userToggle));
+    });
+    list.querySelectorAll('[data-user-delete]').forEach(b => {
+      b.addEventListener('click', () => _deleteSettingsUser(b.dataset.userDelete));
+    });
+  }
+
+  function _renderSettingsIntegrations() {
+    const list = $('#settings-integrations-list');
+    if (!list) return;
+    const h = settingsState.health || {};
+    const rows = [
+      { name: 'Apollo',
+        status: h.apollo?.mode === 'live' ? 'live' : (h.apollo?.mode || 'unknown'),
+        ok: h.apollo?.mode === 'live',
+        hint: 'Contact + company enrichment. Configure with APOLLO_API_KEY.' },
+      { name: 'Notion',
+        status: (h.notion?.configured && h.notion?.target_present) ? 'configured' : 'missing',
+        ok: !!(h.notion?.configured && h.notion?.target_present),
+        hint: 'Durable lead store. Configure with NOTION_API_KEY + NOTION_DATABASE_ID.' },
+      { name: 'AI (Claude)',
+        status: h.ai?.configured ? 'on' : 'off',
+        ok: !!h.ai?.configured,
+        hint: 'Note synthesis + contact extraction. Configure with ANTHROPIC_API_KEY.' },
+      { name: 'HubSpot',
+        status: h.hubspot?.enabled ? 'enabled' : 'disabled',
+        ok: !!h.hubspot?.enabled,
+        hint: 'Optional write-back. Set HUBSPOT_API_KEY + HUBSPOT_SYNC_ENABLED=1.' },
+    ];
+    list.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <tbody>
+          ${rows.map(r => `
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:10px 6px;font-weight:600;width:120px;">${escapeHtml(r.name)}</td>
+              <td style="padding:10px 6px;">
+                <span class="pill ${r.ok ? 'ok' : 'warn'}" style="font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);${r.ok ? 'color:var(--green);border-color:rgba(74,222,128,.3);' : 'color:var(--yellow);border-color:rgba(251,191,36,.3);'}">${escapeHtml(r.status)}</span>
+              </td>
+              <td style="padding:10px 6px;color:var(--text-muted);font-size:11px;">${escapeHtml(r.hint)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  async function _addSettingsUser() {
+    const name = window.prompt('Full name:');
+    if (!name || !name.trim()) return;
+    const role = window.prompt('Role (e.g. "Account Manager"):', '') || '';
+    const region = window.prompt('Region (e.g. AMER / EMEA / Global):', '') || '';
+    const email = window.prompt('Email:', '') || '';
+    try {
+      await jsonFetch('/api/settings/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(),
+                                role: role.trim(),
+                                region: region.trim(),
+                                email: email.trim() }),
+      });
+      toast(`Added ${name.trim()}`, 'success');
+      loadSettings();
+    } catch (e) {
+      toast(`Add failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _editSettingsUser(userId) {
+    const u = (settingsState.users || []).find(x => x.id === userId);
+    if (!u) return;
+    // Sequential prompts — light-touch admin UI; a modal form is
+    // overkill for a list this small. If the user cancels any
+    // prompt mid-flight we abort the whole edit.
+    const name = window.prompt('Full name:', u.name);
+    if (name == null) return;
+    const role = window.prompt('Role:', u.role || '');
+    if (role == null) return;
+    const region = window.prompt('Region:', u.region || '');
+    if (region == null) return;
+    const email = window.prompt('Email:', u.email || '');
+    if (email == null) return;
+    try {
+      await jsonFetch(`/api/settings/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(),
+                                role: role.trim(),
+                                region: region.trim(),
+                                email: email.trim() }),
+      });
+      toast(`Updated ${name.trim()}`, 'success');
+      loadSettings();
+    } catch (e) {
+      toast(`Edit failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _toggleSettingsUser(userId) {
+    const u = (settingsState.users || []).find(x => x.id === userId);
+    if (!u) return;
+    try {
+      await jsonFetch(`/api/settings/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !u.active }),
+      });
+      toast(`${u.active ? 'Deactivated' : 'Activated'} ${u.name}`, 'success');
+      loadSettings();
+    } catch (e) {
+      toast(`Toggle failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function _deleteSettingsUser(userId) {
+    const u = (settingsState.users || []).find(x => x.id === userId);
+    if (!u) return;
+    // Hard-delete warning — historical lead.owner references stop
+    // resolving back to email/role for this name.
+    if (!window.confirm(`Permanently delete ${u.name}?\n\nIf they were ever assigned to a lead, the historical "owner = ${u.name}" reference will no longer resolve to an email/role. Use Deactivate instead unless they were added by mistake.`)) return;
+    try {
+      await jsonFetch(`/api/settings/users/${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+      });
+      toast(`Deleted ${u.name}`, 'success');
+      loadSettings();
+    } catch (e) {
+      toast(`Delete failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   // =============================================================
@@ -9546,6 +9857,10 @@
   }
 
   async function _runInit() {
+    // v1.0.0bq: signal "util strip is present" so the sticky header
+    // can offset down by the strip's height. Done first so CSS settles
+    // before any sticky elements paint.
+    document.body.classList.add('has-util-strip');
     await ensureAuth();
     // v1.0.0i: fire-and-forget cache-health check. Banner appears
     // post-init if anything looks off.
@@ -9663,6 +9978,26 @@
         loadExpansion();
       });
     }
+    // v1.0.0bq: Settings view (gear icon, between Insights + Qualify).
+    const navSet = $('#nav-settings');
+    if (navSet) {
+      navSet.addEventListener('click', () => {
+        switchView('settings');
+        loadSettings();
+      });
+    }
+    // Tab switcher inside Settings — Users / Integrations.
+    document.querySelectorAll('[data-settings-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.settingsTab;
+        document.querySelectorAll('[data-settings-tab]').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-settings-pane]').forEach(p =>
+          p.classList.toggle('active', p.dataset.settingsPane === target));
+      });
+    });
+    const addUserBtn = $('#settings-user-add');
+    if (addUserBtn) addUserBtn.addEventListener('click', _addSettingsUser);
     const expRefresh = $('#exp-refresh');
     if (expRefresh) expRefresh.addEventListener('click', loadExpansion);
     document.querySelectorAll('[data-exp-filter]').forEach(b => {

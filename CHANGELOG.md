@@ -5,6 +5,71 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bq] — 2026-05-24 — Settings view + writable users + utility strip
+
+Ben asked for two things back-to-back: a place to edit users from the
+UI rather than from `mr_owners.py`, and the integration-status strip
+made always-visible instead of buried at the right edge of a crowded
+nav row. This commit ships both.
+
+### Settings view (new top-nav surface)
+
+A gear icon between Insights and the + Qualify CTA opens a Settings
+view with two tabs:
+
+- **Users** — full CRUD on MR teammates. Add, rename, edit role /
+  region / email, deactivate (preserves the row so historical
+  `lead.owner = "Old Name"` references still resolve), or
+  hard-delete. The list is the same one that drives every owner
+  dropdown across Pipeline / Qualify / Lead drawer / Partner
+  contacts, plus the profile picker.
+- **Integrations** — read-only status for Apollo / Notion / AI
+  (Claude) / HubSpot. One row per service with the env-var hint so
+  an admin can wire credentials in Railway without grepping docs.
+
+### Writable owners store
+
+`mr_owners.py` used to be hard-coded — every roster change required
+a code edit + Railway deploy. We now persist owners as JSON in
+`cache/mr_owners/owners.json` via `mr_owners_store.py`, seeded from
+the existing 12 names on first read so the upgrade is invisible.
+`mr_owners.list_owners` / `get_owner` / `names` / `OWNERS` all
+delegate to the store — every caller (notifications, dropdowns,
+scoring) sees live edits without an import change. Endpoints:
+
+- `GET /api/settings/users` — admin list (includes inactive)
+- `POST /api/settings/users` — create
+- `PATCH /api/settings/users/<id>` — edit any field, including
+  `active` toggle
+- `DELETE /api/settings/users/<id>` — hard delete
+- `GET /api/owners` — unchanged read-only public surface
+  (active-only, used by every dropdown)
+
+All mutations audit-logged
+(`settings_user_{created,updated,deleted}`).
+
+### Utility strip
+
+The integration health pills + theme toggle now live in a thin
+sticky bar above the main nav. Always visible, never wraps, never
+gets pushed off-screen on smaller windows. The main header sticks
+from below the strip so the visual stack stays clean.
+
+### Tests
+
+34 new tests in `test_settings_users.py`:
+- Store CRUD + seed-on-first-read + ordering preserved
+- Rename / duplicate-name rejection / case-insensitive lookup
+- Deactivated owners still resolve via `get_owner` (audit trail
+  safety)
+- `mr_owners.py` shim backward-compat
+- Endpoint contracts (GET / POST / PATCH / DELETE + 400 / 404 paths)
+- `/api/owners` still returns active-only after deactivation
+
+Full suite: **1005 passing**.
+
+---
+
 ## [1.0.0bp] — 2026-05-24 — Click-to-edit account name + honest partial-save reporting
 
 ### The bug

@@ -1,140 +1,49 @@
 """
-Massive Rocket owners (v1.0.0o).
+Massive Rocket owners (v1.0.0o → v1.0.0bq).
 
-Single source of truth for the people at MR who can be assigned as
-the `owner` field on a lead or `mr_owner` on a partner contact.
-Every UI surface that needs the list of MR people (lead drawer, qualify
-form, partner contact form, pipeline filter) reads from here via
-`GET /api/owners`, so adding/removing a name is a one-place change.
+This module used to own the canonical hard-coded list of MR
+teammates. As of v1.0.0bq the list lives in `mr_owners_store.py`
+(writable JSON) and this module is a thin backward-compat shim.
 
-Adding a person: append a dict to `OWNERS` below. Removing: delete or
-mark `active: False` (preferred — keeps historical lead.owner values
-resolvable if you want to surface "ex-MR" tags later).
+Why keep the shim
+-----------------
+Half a dozen modules import `mr_owners.list_owners` /
+`mr_owners.get_owner` / `mr_owners.names`. Forcing every caller
+to migrate at once would have been noisy + risky. The shim
+re-exports those three functions verbatim so downstream code
+doesn't notice the move.
 
-Roles + regions are surfaced in the UI dropdowns (e.g. "Daniel Ergueta
-— Account Manager · AMER") so Ben can pick the right person without
-remembering the org chart.
+Edit/add/remove
+---------------
+Use the Settings → Users surface in the UI, or hit the
+`/api/settings/users` CRUD endpoints. The hard-coded SEED_OWNERS
+list (in `mr_owners_store.py`) only fires once, on first read,
+when no persisted file exists.
 """
 from __future__ import annotations
 
 from typing import Any
 
+# v1.0.0bq: delegate everything to the writable store. The SEED_OWNERS
+# constant there mirrors the v1.0.0o list verbatim so first-run
+# experience is unchanged.
+from mr_owners_store import (  # noqa: F401  (re-exports are intentional)
+    list_owners,
+    get_owner,
+    names,
+    SEED_OWNERS,
+)
 
-# Ordered for the dropdown. Senior leadership + Growth lead first, then
-# AMs, then AEs-in-transition, then marketing + partner managers.
-# Sort UI applies alpha-by-name as a secondary, but the AE picks from
-# the order presented here.
-OWNERS: list[dict[str, Any]] = [
-    {
-        "name":   "Thierry Sequeira",
-        "role":   "CEO UK",
-        "region": "Global",
-        "email":  "thierry@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Daniel Craig",
-        "role":   "Director of Growth",
-        "region": "Global",
-        "email":  "daniel.craig@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Ben Ojuolape",
-        "role":   "Growth Lead (Partnerships + GTM)",
-        "region": "UK → US",
-        "email":  "ben@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Daniel Ergueta",
-        "role":   "Account Manager",
-        "region": "AMER",
-        "email":  "daniel.ergueta@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Tsveti Grncarova",
-        "role":   "Account Manager",
-        "region": "EMEA",
-        "email":  "tsvetelina.rancheva@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Jorge Arrechea",
-        "role":   "AMER AM, transitioning to AE",
-        "region": "AMER",
-        "email":  "jorge.arrechea@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Marija Veljanova",
-        "role":   "AMER AM, transitioning to AE",
-        "region": "EMEA",
-        "email":  "marija.veljanova@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Darren Addy",
-        "role":   "EMEA AM, transitioning to AE",
-        "region": "EMEA",
-        "email":  "darren.addy@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Claudia Lima",
-        "role":   "Partner Manager, AMER",
-        "region": "AMER",
-        "email":  "claudia.lima@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Sonal Dalia",
-        "role":   "Partner Manager",
-        "region": "EMEA",
-        # Email not provided in the roster — left blank intentionally.
-        # Update here when confirmed.
-        "email":  "",
-        "active": True,
-    },
-    {
-        "name":   "Jamie MacDow",
-        "role":   "Marketing — co-owns New Accounts OKR",
-        "region": "Global",
-        "email":  "jamie.macdow@massiverocket.com",
-        "active": True,
-    },
-    {
-        "name":   "Lea",
-        "role":   "Marketing",
-        "region": "Global",
-        # Single-name entry from the roster — surname pending.
-        "email":  "lea@massiverocket.com",
-        "active": True,
-    },
-]
+# v1.0.0o-era constant: kept as an alias for any code that imports
+# `mr_owners.OWNERS` directly. Reads from the store, not from a
+# frozen list. If a caller mutates OWNERS in-place (none should,
+# but the old API allowed it) they'll get a fresh list each time —
+# safer than letting them silently mutate seed data.
+def _owners_proxy() -> list[dict[str, Any]]:
+    return list_owners(active_only=False)
 
 
-def list_owners(*, active_only: bool = True) -> list[dict[str, Any]]:
-    """Return the owners list in display order. Pass active_only=False
-    to include any future deactivated entries (e.g. former staff)."""
-    if active_only:
-        return [o for o in OWNERS if o.get("active", True)]
-    return list(OWNERS)
-
-
-def names(*, active_only: bool = True) -> list[str]:
-    """Convenience for the bare list of names (the UI option labels)."""
-    return [o["name"] for o in list_owners(active_only=active_only)]
-
-
-def get_owner(name: str) -> dict[str, Any] | None:
-    """Lookup by name (case-insensitive). Useful for resolving an owner
-    string back to its email/role for notification flows later."""
-    if not name:
-        return None
-    needle = name.strip().lower()
-    for o in OWNERS:
-        if o["name"].lower() == needle:
-            return o
-    return None
+# Module-level attribute that behaves like a list for the common
+# `for o in mr_owners.OWNERS` pattern. Materialises on import so
+# scripts that took a snapshot still work.
+OWNERS = _owners_proxy()

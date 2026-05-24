@@ -2616,12 +2616,71 @@ def api_settings_enums_reset(key: str):
 
 # v1.0.0o: MR owners — single source of truth for the people the UI
 # offers in every owner / mr_owner dropdown.
+# v1.0.0bq: list is now writable. /api/owners stays read-only +
+# active-only (it's used by every dropdown — no admin context).
+# /api/settings/users below is the admin surface — exposes all
+# owners (active + inactive) + CRUD.
 @app.route("/api/owners", methods=["GET"])
 def api_owners():
     """Return the list of MR owners (lead owner + partner-contact
     `mr_owner`). Includes role + region + email for richer dropdowns."""
     import mr_owners
     return jsonify({"owners": mr_owners.list_owners(active_only=True)})
+
+
+# v1.0.0bq: settings → users CRUD. The Settings view in the UI
+# reads + mutates this endpoint. We deliberately surface inactive
+# owners too so an admin can re-activate someone who left and
+# came back, without losing the historical lead.owner = "Old Name"
+# resolutions that depend on the row sticking around.
+@app.route("/api/settings/users", methods=["GET"])
+def api_settings_users_list():
+    import mr_owners_store
+    owners = mr_owners_store.list_owners(active_only=False)
+    return jsonify({"users": owners, "count": len(owners)})
+
+
+@app.route("/api/settings/users", methods=["POST"])
+def api_settings_users_create():
+    import mr_owners_store
+    body = request.get_json(silent=True) or {}
+    try:
+        owner = mr_owners_store.create_owner(body)
+    except mr_owners_store.MrOwnersStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("settings_user_created", actor=_actor(),
+                    user_id=owner["id"], name=owner["name"])
+    return jsonify({"user": owner}), 201
+
+
+@app.route("/api/settings/users/<user_id>", methods=["PATCH"])
+def api_settings_users_update(user_id: str):
+    import mr_owners_store
+    body = request.get_json(silent=True) or {}
+    try:
+        owner = mr_owners_store.update_owner(user_id, **body)
+    except mr_owners_store.MrOwnersStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if owner is None:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("settings_user_updated", actor=_actor(),
+                    user_id=user_id, fields=sorted(body.keys()))
+    return jsonify({"user": owner})
+
+
+@app.route("/api/settings/users/<user_id>", methods=["DELETE"])
+def api_settings_users_delete(user_id: str):
+    """Hard delete. UI offers Deactivate as the primary action
+    because historical references (lead.owner = "Old Name") need
+    the row to keep resolving. This endpoint exists for the
+    "added by mistake, never assigned to anything" case."""
+    import mr_owners_store
+    ok = mr_owners_store.delete_owner(user_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("settings_user_deleted", actor=_actor(),
+                    user_id=user_id)
+    return jsonify({"deleted": True})
 
 
 @app.route("/api/partners", methods=["GET"])
