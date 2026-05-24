@@ -945,6 +945,7 @@
       </div>
     </div>
     <button id="nav-live" type="button">Live</button>
+    <button id="nav-expansion" type="button">Expansion</button>
     <button id="nav-partners" type="button">Partners</button>
     <div class="nav-dropdown" data-nav-group="insights">
       <button class="nav-dropdown-trigger" id="nav-insights-group" type="button">Insights</button>
@@ -1770,6 +1771,36 @@
       <div id="lv-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
     </div>
     <div id="lv-detail" class="card" style="display:none;margin-top:14px;"></div>
+  </section>
+
+  <!-- EXPANSION VIEW (v1.0.0bo) ================================ -->
+  <!-- Land-and-expand surface. Lists landed accounts (anchored to
+       live projects) + their expansion targets — sibling
+       opportunities in the same parent account family that we
+       haven't worked yet. Click a target → detail panel for
+       contacts + notes + convert-to-lead. -->
+  <section id="view-expansion" class="view">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h2 style="margin:0;">Account expansion</h2>
+          <p class="muted" style="margin:4px 0 0;">Where you've landed + where you can grow. Map contacts, capture intel, then promote a target into the pipeline when it's ready.</p>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button id="exp-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="exp-totals" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0;"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Show:</span>
+        <button class="chip active" data-exp-filter="" type="button" style="font-size:11px;padding:4px 10px;">All</button>
+        <button class="chip" data-exp-filter="greenfield" type="button" style="font-size:11px;padding:4px 10px;">Greenfield</button>
+        <button class="chip" data-exp-filter="researching" type="button" style="font-size:11px;padding:4px 10px;">Researching</button>
+        <button class="chip" data-exp-filter="qualifying" type="button" style="font-size:11px;padding:4px 10px;">Qualifying</button>
+      </div>
+      <div id="exp-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
+    </div>
+    <div id="exp-detail" class="card" style="display:none;margin-top:14px;"></div>
   </section>
 
   <!-- PARTNERS VIEW =========================================== -->
@@ -3979,6 +4010,393 @@
     if (direction === 'down')
       return ` <span style="color:var(--red);font-size:11px;" title="Engagement down vs last week">↓</span>`;
     return '';
+  }
+
+  // =============================================================
+  //  Account Expansion view (v1.0.0bo)
+  // =============================================================
+  const expansionState = {
+    overview:    null,   // {anchors: [...], totals: {...}}
+    filter:      '',     // '' | 'greenfield' | 'researching' | 'qualifying'
+    selectedTargetId: null,
+  };
+
+  async function loadExpansion() {
+    const el = $('#exp-list');
+    if (!el) return;
+    el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>';
+    try {
+      const data = await jsonFetch('/api/expansion/overview');
+      expansionState.overview = data;
+      _renderExpansionTotals(data.totals || {});
+      _renderExpansionList();
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderExpansionTotals(totals) {
+    const el = $('#exp-totals');
+    if (!el) return;
+    const card = (label, value, sub, color) => `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:3px;">${escapeHtml(label)}</div>
+        <div style="font-size:20px;font-weight:600;color:${color || 'var(--text)'};line-height:1.1;">${value}</div>
+        ${sub ? `<div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(sub)}</div>` : ''}
+      </div>
+    `;
+    el.innerHTML = [
+      card('Landed accounts',  totals.anchors || 0,    'with live projects or targets'),
+      card('Total targets',    totals.targets || 0,    'expansion opportunities'),
+      card('Greenfield',       totals.greenfield || 0, 'not yet worked',
+            totals.greenfield > 0 ? 'var(--mr-red,#e82b23)' : 'var(--text)'),
+      card('In progress',      totals.in_progress || 0, 'researching + qualifying'),
+    ].join('');
+  }
+
+  function _renderExpansionList() {
+    const el = $('#exp-list');
+    if (!el || !expansionState.overview) return;
+    const anchors = expansionState.overview.anchors || [];
+    const filter = expansionState.filter;
+    // Filter targets by status if filter is set; drop anchors with
+    // no surviving targets so the list stays focused.
+    const filtered = anchors.map(a => {
+      const matched = filter
+        ? (a.targets || []).filter(t => t.status === filter)
+        : (a.targets || []);
+      return { ...a, _filtered_targets: matched };
+    }).filter(a => !filter || a._filtered_targets.length > 0);
+
+    if (!filtered.length) {
+      el.innerHTML = `<div class="muted" style="font-size:12px;padding:14px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">
+        ${filter
+          ? `No targets in status "${escapeHtml(filter)}".`
+          : `No landed accounts yet. Promote a lead to <strong>Live</strong> first, then come back here to plan expansion.`}
+      </div>`;
+      return;
+    }
+
+    const statusChip = (s) => {
+      const tone = {
+        greenfield:        ['var(--mr-red,#e82b23)', 'rgba(232,43,35,.10)'],
+        researching:       ['var(--yellow)',         'rgba(251,191,36,.12)'],
+        qualifying:        ['var(--blue)',           'rgba(96,165,250,.12)'],
+        converted_to_lead: ['var(--green)',          'rgba(74,222,128,.12)'],
+        dropped:           ['var(--text-muted)',     'var(--surface-2)'],
+      }[s] || ['var(--text-muted)', 'var(--surface-2)'];
+      return `<span style="background:${tone[1]};color:${tone[0]};font-size:9px;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;">${escapeHtml(s.replace('_', ' '))}</span>`;
+    };
+    const projectStatusChip = (s) => {
+      if (!s) return '<span class="muted" style="font-size:10px;">no live project yet</span>';
+      const colors = {
+        active:    'var(--green)',  paused: 'var(--yellow)',
+        completed: 'var(--blue)',   archived: 'var(--text-muted)',
+      };
+      return `<span style="font-size:10px;color:${colors[s] || 'var(--text-muted)'};text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Live · ${escapeHtml(s)}</span>`;
+    };
+
+    el.innerHTML = filtered.map(a => `
+      <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;background:var(--surface);">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:13px;font-weight:600;">${escapeHtml(a.company || a.lead_id || '—')}</div>
+            <div style="font-size:11px;margin-top:2px;">
+              <strong>Landed:</strong> ${escapeHtml(a.project_name || a.company || '—')}
+              <span style="margin-left:6px;">${projectStatusChip(a.project_status)}</span>
+            </div>
+          </div>
+          <button class="btn ghost" type="button" data-exp-add="${escapeAttr(a.lead_id)}" style="padding:5px 10px;font-size:11px;flex-shrink:0;">+ Add target</button>
+        </div>
+        <div style="padding:8px 12px;">
+          ${a._filtered_targets.length
+            ? a._filtered_targets.map(t => `
+                <div data-exp-target="${escapeAttr(t.id)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;cursor:pointer;background:var(--surface);">
+                  <div style="min-width:0;flex:1;">
+                    <div style="font-size:12px;font-weight:500;">
+                      ${escapeHtml(t.name || '—')}
+                      ${t.region ? `<span class="muted" style="font-size:10px;margin-left:6px;">${escapeHtml(t.region)}</span>` : ''}
+                    </div>
+                    <div style="margin-top:3px;display:flex;gap:8px;align-items:center;">
+                      ${statusChip(t.status || 'greenfield')}
+                      <span class="muted" style="font-size:10px;">${(t.contacts || []).length} contact${(t.contacts || []).length === 1 ? '' : 's'}${t.notes ? ' · notes' : ''}</span>
+                    </div>
+                  </div>
+                  <button class="btn ghost" type="button" style="padding:3px 10px;font-size:10px;flex-shrink:0;">Open →</button>
+                </div>
+              `).join('')
+            : `<div class="muted" style="font-size:11px;padding:10px;text-align:center;font-style:italic;">No expansion targets yet for this account. Click <strong>+ Add target</strong> to capture one.</div>`}
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('[data-exp-target]').forEach(row => {
+      row.addEventListener('click', () => openExpansionTarget(row.dataset.expTarget));
+    });
+    el.querySelectorAll('[data-exp-add]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _addExpansionTarget(b.dataset.expAdd);
+      });
+    });
+  }
+
+  async function _addExpansionTarget(anchorLeadId) {
+    const name = window.prompt('Expansion target (e.g. "Shell UK"):');
+    if (name === null || !name.trim()) return;
+    const region = window.prompt('Region (optional, e.g. "EMEA"):', '');
+    if (region === null) return;
+    try {
+      const data = await jsonFetch('/api/expansion-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anchor_lead_id: anchorLeadId,
+          name: name.trim(),
+          region: region.trim() || null,
+        }),
+      });
+      toast(`Added "${name.trim()}" as expansion target`, 'success');
+      await loadExpansion();
+      openExpansionTarget(data.target.id);
+    } catch (e) {
+      toast(`Failed: ${e.body?.error || e.message}`, 'error');
+    }
+  }
+
+  async function openExpansionTarget(targetId) {
+    expansionState.selectedTargetId = targetId;
+    const el = $('#exp-detail');
+    el.style.display = 'block';
+    el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;">Loading…</div>';
+    try {
+      const data = await jsonFetch(`/api/expansion-targets/${encodeURIComponent(targetId)}`);
+      _renderExpansionTargetDetail(data.target);
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderExpansionTargetDetail(t) {
+    const el = $('#exp-detail');
+    const statusSel = `<select id="exp-d-status" style="padding:4px 8px;font-size:11px;">
+      ${['greenfield','researching','qualifying','converted_to_lead','dropped'].map(s =>
+        `<option value="${s}"${s === t.status ? ' selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}
+    </select>`;
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+        <div style="min-width:0;flex:1;">
+          <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+            <span>${escapeHtml(t.name || '—')}</span>
+            <button class="btn ghost" id="exp-d-rename" type="button" style="padding:2px 8px;font-size:10px;">edit</button>
+          </h3>
+          <div class="muted" style="font-size:11px;margin-top:4px;">
+            ${t.region ? escapeHtml(t.region) + ' · ' : ''}${t.vertical ? escapeHtml(t.vertical) + ' · ' : ''}created ${escapeHtml((t.created_at || '').slice(0, 10))}
+          </div>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          ${t.status !== 'converted_to_lead' ? `<button class="btn" id="exp-d-convert" type="button" style="padding:5px 12px;font-size:11px;">Convert to lead →</button>` : ''}
+          <button class="btn ghost" id="exp-d-del" type="button" style="padding:5px 10px;font-size:11px;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+          <button class="btn ghost" id="exp-d-close" type="button" style="padding:5px 10px;font-size:11px;">✕</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div>
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Status</label>
+          ${statusSel}
+        </div>
+        <div>
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Region</label>
+          <input id="exp-d-region" type="text" value="${escapeAttr(t.region || '')}" style="padding:4px 8px;font-size:12px;width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Vertical</label>
+          <input id="exp-d-vertical" type="text" value="${escapeAttr(t.vertical || '')}" style="padding:4px 8px;font-size:12px;width:100%;" />
+        </div>
+      </div>
+      ${t.converted_lead_id
+        ? `<div style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3);color:var(--green);padding:8px 12px;border-radius:6px;font-size:11px;margin-bottom:14px;">
+            ✓ Converted to lead <strong>${escapeHtml(t.converted_lead_id)}</strong> on ${escapeHtml((t.converted_at || '').slice(0, 10))}
+            · <button class="btn ghost" type="button" id="exp-d-open-lead" style="padding:2px 8px;font-size:10px;">Open lead →</button>
+          </div>`
+        : ''}
+      <div style="margin-bottom:14px;">
+        <label style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Notes</label>
+        <textarea id="exp-d-notes" rows="4" placeholder="What you know about this opportunity — context, who's involved, why MR should target it, when, via whom..." style="padding:8px 10px;font-size:12px;width:100%;font-family:inherit;">${escapeHtml(t.notes || '')}</textarea>
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
+          Contacts <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px;">— who you know in this region</span>
+        </h4>
+        <div id="exp-d-contacts"></div>
+        <button class="btn ghost" id="exp-d-add-contact" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add contact</button>
+      </div>
+    `;
+    const patch = async (fields) => {
+      try {
+        const res = await jsonFetch(`/api/expansion-targets/${encodeURIComponent(t.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields),
+        });
+        return res.target;
+      } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+    };
+    $('#exp-d-close').addEventListener('click', () => {
+      el.style.display = 'none';
+      expansionState.selectedTargetId = null;
+    });
+    $('#exp-d-rename').addEventListener('click', async () => {
+      const n = window.prompt('Rename target:', t.name);
+      if (n === null || !n.trim()) return;
+      const u = await patch({ name: n.trim() });
+      if (u) { openExpansionTarget(t.id); loadExpansion(); }
+    });
+    $('#exp-d-status').addEventListener('change', async (e) => {
+      const u = await patch({ status: e.target.value });
+      if (u) { toast(`Status → ${u.status.replace('_', ' ')}`, 'success'); loadExpansion(); }
+    });
+    $('#exp-d-region').addEventListener('change', (e) =>
+      patch({ region: e.target.value }).then(u => u && toast('Region saved', 'success')));
+    $('#exp-d-vertical').addEventListener('change', (e) =>
+      patch({ vertical: e.target.value }).then(u => u && toast('Vertical saved', 'success')));
+    $('#exp-d-notes').addEventListener('change', (e) =>
+      patch({ notes: e.target.value }).then(u => u && toast('Notes saved', 'success')));
+    $('#exp-d-del').addEventListener('click', async () => {
+      if (!window.confirm(`Delete the expansion target "${t.name}"? This is permanent.`)) return;
+      try {
+        await jsonFetch(`/api/expansion-targets/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
+        toast('Deleted', 'success');
+        el.style.display = 'none';
+        loadExpansion();
+      } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+    });
+    const convertBtn = $('#exp-d-convert');
+    if (convertBtn) convertBtn.addEventListener('click', () => _convertExpansionTarget(t));
+    const openLeadBtn = $('#exp-d-open-lead');
+    if (openLeadBtn) openLeadBtn.addEventListener('click', () =>
+      openLeadDrawer(t.converted_lead_id));
+    $('#exp-d-add-contact').addEventListener('click', () =>
+      _addExpansionTargetContact(t.id));
+    _renderExpansionTargetContacts(t.id, t.contacts || []);
+  }
+
+  function _renderExpansionTargetContacts(targetId, contacts) {
+    const wrap = $('#exp-d-contacts');
+    if (!wrap) return;
+    if (!contacts.length) {
+      wrap.innerHTML = '<div class="muted" style="font-size:11px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;text-align:center;">No contacts mapped yet. Click + Add contact to capture who you know in this region.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <table class="stakeholders" style="width:100%;font-size:11px;">
+        <thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Source</th><th></th></tr></thead>
+        <tbody>
+          ${contacts.map(c => `
+            <tr data-exp-c-row="${escapeAttr(c.id)}">
+              <td>${escapeHtml(c.name || '—')}</td>
+              <td class="muted">${escapeHtml(c.title || '—')}</td>
+              <td class="muted">${escapeHtml(c.email || '—')}</td>
+              <td class="muted" style="font-style:italic;">${escapeHtml(c.source || '—')}</td>
+              <td style="text-align:right;">
+                <button class="btn ghost" type="button" data-exp-c-edit="${escapeAttr(c.id)}" style="padding:1px 6px;font-size:10px;">edit</button>
+                <button class="btn ghost" type="button" data-exp-c-del="${escapeAttr(c.id)}" style="padding:1px 6px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    wrap.querySelectorAll('[data-exp-c-edit]').forEach(b =>
+      b.addEventListener('click', () => _editExpansionTargetContact(targetId,
+        contacts.find(c => c.id === b.dataset.expCEdit))));
+    wrap.querySelectorAll('[data-exp-c-del]').forEach(b =>
+      b.addEventListener('click', () => _deleteExpansionTargetContact(targetId, b.dataset.expCDel)));
+  }
+
+  async function _addExpansionTargetContact(targetId) {
+    const name = window.prompt('Contact name:');
+    if (name === null || !name.trim()) return;
+    const title = window.prompt('Title (optional):', '') || '';
+    const email = window.prompt('Email (optional):', '') || '';
+    const source = window.prompt('Source (where did you hear about them? e.g. "via Marina at Braze"):', '') || '';
+    try {
+      await jsonFetch(`/api/expansion-targets/${encodeURIComponent(targetId)}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(),
+                                 title: title.trim() || null,
+                                 email: email.trim() || null,
+                                 source: source.trim() || null }),
+      });
+      openExpansionTarget(targetId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _editExpansionTargetContact(targetId, contact) {
+    if (!contact) return;
+    const name  = window.prompt('Name:', contact.name);
+    if (name === null) return;
+    const title = window.prompt('Title:', contact.title || '');
+    if (title === null) return;
+    const email = window.prompt('Email:', contact.email || '');
+    if (email === null) return;
+    const source = window.prompt('Source:', contact.source || '');
+    if (source === null) return;
+    try {
+      await jsonFetch(
+        `/api/expansion-targets/${encodeURIComponent(targetId)}/contacts/${encodeURIComponent(contact.id)}`,
+        { method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim() || contact.name,
+            title: title.trim() || null,
+            email: email.trim() || null,
+            source: source.trim() || null,
+          })});
+      openExpansionTarget(targetId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _deleteExpansionTargetContact(targetId, contactId) {
+    if (!window.confirm('Remove this contact?')) return;
+    try {
+      await jsonFetch(
+        `/api/expansion-targets/${encodeURIComponent(targetId)}/contacts/${encodeURIComponent(contactId)}`,
+        { method: 'DELETE' });
+      openExpansionTarget(targetId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _convertExpansionTarget(target) {
+    // Two-step UX: AE qualifies the lead in the standard Qualify
+    // flow (which creates the Notion page), then comes back here +
+    // pastes the new lead id. Could automate via direct creation
+    // later — but the AE typically WANTS to run the qualify flow
+    // to seed scoring + ICP first.
+    const msg = `Promote "${target.name}" to a lead?\n\nSteps:\n1. Click OK\n2. The Qualify Lead view will open with the name prefilled\n3. Complete the qualify flow\n4. Come back here + paste the new lead id`;
+    if (!window.confirm(msg)) return;
+    // Prefill the qualify form.
+    switchView('qualify');
+    const nameInput = $('#in-name');
+    if (nameInput) nameInput.value = target.name;
+    // Surface a sticky banner with a "I've created the lead, paste id"
+    // input so the AE can come back and close the loop.
+    setTimeout(() => {
+      const pageId = window.prompt(
+        `Once you've qualified the lead in the form below, paste the page id here to link it back:`,
+        ''
+      );
+      if (!pageId || !pageId.trim()) return;
+      jsonFetch(`/api/expansion-targets/${encodeURIComponent(target.id)}/convert-to-lead`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: pageId.trim() }),
+      }).then(() => {
+        toast(`"${target.name}" linked to lead ${pageId.trim()}`, 'success');
+        loadExpansion();
+      }).catch(e => toast(`Link failed: ${e.body?.error || e.message}`, 'error'));
+    }, 600);
   }
 
   // =============================================================
@@ -9124,6 +9542,24 @@
           x.classList.toggle('active', x === b));
         liveProjectsState.filter = b.dataset.lvFilter;
         loadLiveProjects();
+      });
+    });
+    // v1.0.0bo: Expansion view.
+    const navExp = $('#nav-expansion');
+    if (navExp) {
+      navExp.addEventListener('click', () => {
+        switchView('expansion');
+        loadExpansion();
+      });
+    }
+    const expRefresh = $('#exp-refresh');
+    if (expRefresh) expRefresh.addEventListener('click', loadExpansion);
+    document.querySelectorAll('[data-exp-filter]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('[data-exp-filter]').forEach(x =>
+          x.classList.toggle('active', x === b));
+        expansionState.filter = b.dataset.expFilter;
+        _renderExpansionList();
       });
     });
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });

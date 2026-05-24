@@ -57,6 +57,7 @@ import hubspot_sync
 import account_news
 import account_news_store
 import account_watchlist_store
+import expansion_targets_store
 import filter_presets_store
 import live_project_okrs_store
 import live_projects_store
@@ -4478,6 +4479,225 @@ def api_okr_kr_delete(okr_id: str, kr_id: str):
     if not ok:
         return jsonify({"error": "not_found"}), 404
     return jsonify({"deleted": True})
+
+
+# v1.0.0bo: Account expansion API -----------------------------------------
+# Land-and-expand surface. Each "expansion target" sits between
+# "known opportunity" and "real lead in pipeline" — captures the
+# pre-qualification research + contact mapping anchored to a won
+# account. Convert flow promotes a target into the pipeline when
+# ready.
+
+@app.route("/api/expansion/overview", methods=["GET"])
+def api_expansion_overview():
+    """Top-of-view aggregate: every landed account (live project)
+    + its expansion targets in one payload. Powers the grouped
+    list render on the Expansion view.
+
+    Each row in `anchors`:
+      {
+        anchor_id:       live project id (None if anchored only by lead),
+        lead_id:         the lead this anchor traces back to,
+        company:         display name (from Notion),
+        project_status:  active|paused|completed (None if anchor has no live project),
+        targets:         [expansion_target...],
+        target_counts:   {total, by_status: {greenfield: N, ...}}
+      }
+
+    Targets whose anchor_lead_id doesn't match any live project (or
+    Notion lead) land under a synthetic "Unlinked" anchor at the
+    bottom so they stay visible.
+    """
+    # Pull state: live projects + every target + pipeline rows (for
+    # name resolution).
+    projects = live_projects_store.list_all()
+    targets = expansion_targets_store.list_all()
+    name_by_lead: dict[str, str] = {}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                name_by_lead[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("Expansion overview: pipeline name lookup failed: %s", e)
+
+    # Build the anchor list: every live project becomes one,
+    # PLUS any anchor_lead_id referenced by a target that doesn't
+    # have a live project (covers "we know we want to expand from
+    # this account but haven't promoted it yet").
+    anchors_by_lead: dict[str, dict] = {}
+    for p in projects:
+        lid = p.get("lead_id")
+        if not lid:
+            continue
+        anchors_by_lead[lid] = {
+            "anchor_id":      p.get("id"),
+            "lead_id":        lid,
+            "company":        name_by_lead.get(lid) or lid,
+            "project_name":   p.get("name"),
+            "project_status": p.get("status"),
+            "targets":        [],
+            "target_counts":  {"total": 0, "by_status": {}},
+        }
+    for t in targets:
+        lid = t.get("anchor_lead_id")
+        if lid and lid not in anchors_by_lead:
+            anchors_by_lead[lid] = {
+                "anchor_id":      None,
+                "lead_id":        lid,
+                "company":        name_by_lead.get(lid) or lid,
+                "project_name":   None,
+                "project_status": None,
+                "targets":        [],
+                "target_counts":  {"total": 0, "by_status": {}},
+            }
+        if lid in anchors_by_lead:
+            anchors_by_lead[lid]["targets"].append(t)
+
+    # Aggregate counts per anchor.
+    for anchor in anchors_by_lead.values():
+        anchor["targets"].sort(
+            key=lambda x: (
+                # Greenfield first (most actionable), then by name
+                0 if x.get("status") == "greenfield" else
+                1 if x.get("status") in ("researching", "qualifying") else 2,
+                (x.get("name") or "").lower(),
+            ))
+        counts = {"total": len(anchor["targets"]), "by_status": {}}
+        for t in anchor["targets"]:
+            s = t.get("status", "greenfield")
+            counts["by_status"][s] = counts["by_status"].get(s, 0) + 1
+        anchor["target_counts"] = counts
+
+    # Sort anchors: ones with targets first (more work to do),
+    # then alphabetical.
+    anchors = sorted(
+        anchors_by_lead.values(),
+        key=lambda a: (a["target_counts"]["total"] == 0,
+                        (a["company"] or "").lower()))
+    return jsonify({
+        "anchors":       anchors,
+        "totals": {
+            "anchors":         len(anchors),
+            "targets":         len(targets),
+            "greenfield":      sum(1 for t in targets if t.get("status") == "greenfield"),
+            "in_progress":     sum(1 for t in targets if t.get("status") in ("researching", "qualifying")),
+            "converted":       sum(1 for t in targets if t.get("status") == "converted_to_lead"),
+        },
+    })
+
+
+@app.route("/api/expansion-targets", methods=["POST"])
+def api_expansion_targets_create():
+    body = request.get_json(silent=True) or {}
+    try:
+        t = expansion_targets_store.create(
+            anchor_lead_id=body.get("anchor_lead_id") or "",
+            name=body.get("name") or "",
+            region=body.get("region") or None,
+            vertical=body.get("vertical") or None,
+            notes=body.get("notes") or None)
+    except expansion_targets_store.ExpansionTargetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("expansion_target_created", actor=_actor(),
+                    target_id=t["id"], anchor_lead_id=t["anchor_lead_id"],
+                    name=t["name"])
+    return jsonify({"target": t}), 201
+
+
+@app.route("/api/expansion-targets/<target_id>", methods=["GET"])
+def api_expansion_targets_get(target_id: str):
+    t = expansion_targets_store.get(target_id)
+    if not t:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"target": t})
+
+
+@app.route("/api/expansion-targets/<target_id>", methods=["PATCH"])
+def api_expansion_targets_update(target_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        t = expansion_targets_store.update(target_id, **body)
+    except expansion_targets_store.ExpansionTargetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if t is None:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("expansion_target_updated", actor=_actor(),
+                    target_id=target_id, fields=sorted(body.keys()))
+    return jsonify({"target": t})
+
+
+@app.route("/api/expansion-targets/<target_id>", methods=["DELETE"])
+def api_expansion_targets_delete(target_id: str):
+    ok = expansion_targets_store.delete(target_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("expansion_target_deleted", actor=_actor(),
+                    target_id=target_id)
+    return jsonify({"deleted": True})
+
+
+# ---- per-target contacts -------------------------------------------------
+
+@app.route("/api/expansion-targets/<target_id>/contacts", methods=["POST"])
+def api_expansion_target_contact_add(target_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        c = expansion_targets_store.add_contact(target_id, body)
+    except expansion_targets_store.ExpansionTargetsStoreError as e:
+        msg = str(e)
+        # If the target didn't exist we want 404, not 400.
+        if "not found" in msg.lower():
+            return jsonify({"error": msg}), 404
+        return jsonify({"error": msg}), 400
+    return jsonify({"contact": c}), 201
+
+
+@app.route("/api/expansion-targets/<target_id>/contacts/<contact_id>",
+            methods=["PATCH"])
+def api_expansion_target_contact_update(target_id: str, contact_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        c = expansion_targets_store.update_contact(target_id, contact_id, **body)
+    except expansion_targets_store.ExpansionTargetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    if c is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"contact": c})
+
+
+@app.route("/api/expansion-targets/<target_id>/contacts/<contact_id>",
+            methods=["DELETE"])
+def api_expansion_target_contact_delete(target_id: str, contact_id: str):
+    ok = expansion_targets_store.delete_contact(target_id, contact_id)
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"deleted": True})
+
+
+# ---- conversion ---------------------------------------------------------
+
+@app.route("/api/expansion-targets/<target_id>/convert-to-lead",
+            methods=["POST"])
+def api_expansion_target_convert(target_id: str):
+    """Mark a target as converted-to-lead. Body must include
+    `lead_id` (the page_id of the new lead the AE just created).
+    Idempotent — re-marking a converted target just updates the
+    converted_lead_id.
+
+    The actual lead creation happens via the standard Qualify
+    flow; this endpoint only updates the bookkeeping so we
+    preserve the lineage (target → lead).
+    """
+    body = request.get_json(silent=True) or {}
+    lead_id = (body.get("lead_id") or "").strip()
+    if not lead_id:
+        return jsonify({"error": "lead_id required"}), 400
+    t = expansion_targets_store.mark_converted(target_id, lead_id)
+    if t is None:
+        return jsonify({"error": "not_found"}), 404
+    audit.log_event("expansion_target_converted", actor=_actor(),
+                    target_id=target_id, lead_id=lead_id)
+    return jsonify({"target": t})
 
 
 # v1.0.0bj: account news --------------------------------------------------

@@ -5,6 +5,72 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bo] — 2026-05-24 — Account expansion: land-and-expand view
+
+The team's motion isn't "win once, walk away" — it's "win Shell
+North America, then work Shell UK, Shell EMEA, Shell APAC." Until
+now the platform had no surface for that pre-qualification research.
+Expansion targets sat in someone's head or a side-doc, and the
+hand-off from "we know there's an opportunity" to "this is now a
+real lead in Notion" had no system of record.
+
+### What's new
+
+A dedicated **Expansion** view (top nav, between Live and Partners)
+shows every landed account ("anchor") and the expansion targets
+mapped to it. Each target captures:
+
+- **Region / vertical** — Shell UK, Shell EMEA, Popeyes Canada
+- **Status** — `greenfield` → `researching` → `qualifying` →
+  `converted_to_lead` (or `dropped`)
+- **Contacts** — full CRUD with name / title / email / source
+  ("via Marina at Braze") so the team can map relationships
+  before there's a deal
+- **Notes** — free-form intel, hand-off context, blockers
+- **Convert** — promotes a target into the Qualify flow, then
+  marks the target `converted_to_lead` with a reference to the
+  new lead's page_id so the lineage stays intact for audit
+
+### Why a separate store (not the lead pipeline)
+
+Targets aren't leads yet. Forcing them through the qualified-lead
+pipeline before they're ready would pollute pipeline metrics and
+force premature scoring. They aren't live projects either — nothing
+to deliver. They're a third thing: pre-qualification research
+anchored to a won account.
+
+### Architecture
+
+- `expansion_targets_store.py` — per-target JSON store with the
+  same shape as our other domain stores. Statuses, embedded
+  contacts array, `mark_converted` helper.
+- Endpoints:
+  - `GET  /api/expansion/overview` — anchor-grouped aggregate
+    with totals (greenfield, in_progress, converted)
+  - `POST /api/expansion-targets` (+ GET/PATCH/DELETE on `<id>`)
+  - `POST /api/expansion-targets/<id>/contacts` (+ PATCH/DELETE
+    on `<contact_id>`)
+  - `POST /api/expansion-targets/<id>/convert-to-lead`
+    (idempotent — last write wins)
+- All target mutations emit audit events
+  (`expansion_target_{created,updated,deleted,converted}`).
+
+### Overview aggregator behaviour
+
+Anchors with targets sort first (more work to do). Within each
+anchor, greenfield surfaces above in-progress, which surfaces above
+dropped/converted. Targets whose `anchor_lead_id` doesn't match any
+live project still get a synthetic anchor row so they stay visible
+— never lose a target to a deleted anchor.
+
+### Tests
+
+51 new tests in `test_expansion_targets.py` (store CRUD, endpoint
+contracts, overview aggregation + sort, convert idempotence).
+Full suite: 967 tests passing.
+
+---
+
 ## [1.0.0bn] — 2026-05-24 — Design pass II: drawer header + live tabs + colour audit
 
 The three remaining items from the v1.0.0bm review.
