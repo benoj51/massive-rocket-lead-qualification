@@ -5115,57 +5115,137 @@
     `;
   }
 
-  async function _addSettingsUser() {
-    const name = window.prompt('Full name:');
-    if (!name || !name.trim()) return;
-    const role = window.prompt('Role (e.g. "Account Manager"):', '') || '';
-    const region = window.prompt('Region (e.g. AMER / EMEA / Global):', '') || '';
-    const email = window.prompt('Email:', '') || '';
-    try {
-      await jsonFetch('/api/settings/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(),
-                                role: role.trim(),
-                                region: region.trim(),
-                                email: email.trim() }),
+  // v1.0.0bw: replaced the chain-of-prompts UX with a real modal.
+  // Original implementation fired 4 sequential window.prompt() calls;
+  // Chrome (and others) suppress repeat prompts after a couple, so
+  // Edit "didn't work" mid-flow + nothing told the user why. A real
+  // form solves both: one screen, all fields, validation, no browser
+  // throttling.
+  //
+  // Single modal handles both Add (no userId) and Edit (with userId)
+  // — same form, same submit path, just a different verb on POST/PATCH.
+  function _openSettingsUserModal(userId) {
+    const user = userId
+      ? (settingsState.users || []).find(x => x.id === userId)
+      : null;
+    let overlay = $('#settings-user-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'settings-user-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:60;display:none;align-items:center;justify-content:center;padding:20px;';
+      overlay.innerHTML = `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.35);">
+          <header style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+            <h3 id="settings-user-modal-title" style="margin:0;font-size:15px;">Add teammate</h3>
+            <button id="settings-user-modal-close" type="button" aria-label="Close"
+                    style="background:transparent;border:0;color:var(--text-muted);font-size:20px;cursor:pointer;padding:0 6px;line-height:1;">×</button>
+          </header>
+          <div style="padding:16px 18px;">
+            <div class="field" style="margin-bottom:10px;">
+              <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Name <span style="color:var(--red);">*</span></label>
+              <input id="settings-user-name" type="text" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div class="field" style="margin-bottom:10px;">
+              <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Role</label>
+              <input id="settings-user-role" type="text" placeholder="e.g. Account Manager" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div class="field" style="margin-bottom:10px;">
+              <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Region</label>
+              <input id="settings-user-region" type="text" placeholder="e.g. AMER / EMEA / Global" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div class="field" style="margin-bottom:14px;">
+              <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Email</label>
+              <input id="settings-user-email" type="email" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div id="settings-user-error" style="color:var(--red);font-size:11px;margin-bottom:10px;display:none;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button class="btn ghost" id="settings-user-cancel" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+              <button class="btn" id="settings-user-save" type="button" style="padding:6px 14px;font-size:12px;">Save</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      // One-time wiring.
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) _closeSettingsUserModal();
       });
-      toast(`Added ${name.trim()}`, 'success');
+      $('#settings-user-modal-close').addEventListener('click', _closeSettingsUserModal);
+      $('#settings-user-cancel').addEventListener('click', _closeSettingsUserModal);
+      $('#settings-user-save').addEventListener('click', _submitSettingsUserModal);
+      // Esc to close, Enter to submit when focused inside the form.
+      document.addEventListener('keydown', (e) => {
+        if (overlay.style.display !== 'flex') return;
+        if (e.key === 'Escape') _closeSettingsUserModal();
+        else if (e.key === 'Enter'
+                  && e.target.closest('#settings-user-overlay')
+                  && e.target.tagName === 'INPUT') {
+          e.preventDefault();
+          _submitSettingsUserModal();
+        }
+      });
+    }
+    // Populate fields + remember which user we're editing.
+    overlay.dataset.userId = user ? user.id : '';
+    $('#settings-user-modal-title').textContent = user ? `Edit ${user.name}` : 'Add teammate';
+    $('#settings-user-name').value = user ? (user.name || '') : '';
+    $('#settings-user-role').value = user ? (user.role || '') : '';
+    $('#settings-user-region').value = user ? (user.region || '') : '';
+    $('#settings-user-email').value = user ? (user.email || '') : '';
+    $('#settings-user-error').style.display = 'none';
+    overlay.style.display = 'flex';
+    setTimeout(() => $('#settings-user-name').focus(), 50);
+  }
+
+  function _closeSettingsUserModal() {
+    const o = $('#settings-user-overlay');
+    if (o) o.style.display = 'none';
+  }
+
+  async function _submitSettingsUserModal() {
+    const overlay = $('#settings-user-overlay');
+    const userId = overlay.dataset.userId || null;
+    const name = ($('#settings-user-name').value || '').trim();
+    if (!name) {
+      const err = $('#settings-user-error');
+      err.textContent = 'Name is required.';
+      err.style.display = 'block';
+      $('#settings-user-name').focus();
+      return;
+    }
+    const payload = {
+      name,
+      role:   ($('#settings-user-role').value || '').trim(),
+      region: ($('#settings-user-region').value || '').trim(),
+      email:  ($('#settings-user-email').value || '').trim(),
+    };
+    const saveBtn = $('#settings-user-save');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      const url = userId
+        ? `/api/settings/users/${encodeURIComponent(userId)}`
+        : '/api/settings/users';
+      await jsonFetch(url, {
+        method:  userId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      toast(`${userId ? 'Updated' : 'Added'} ${name}`, 'success');
+      _closeSettingsUserModal();
       loadSettings();
     } catch (e) {
-      toast(`Add failed: ${e.body?.error || e.message}`, 'error');
+      const err = $('#settings-user-error');
+      err.textContent = e.body?.error || e.message || 'Save failed';
+      err.style.display = 'block';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
     }
   }
 
-  async function _editSettingsUser(userId) {
-    const u = (settingsState.users || []).find(x => x.id === userId);
-    if (!u) return;
-    // Sequential prompts — light-touch admin UI; a modal form is
-    // overkill for a list this small. If the user cancels any
-    // prompt mid-flight we abort the whole edit.
-    const name = window.prompt('Full name:', u.name);
-    if (name == null) return;
-    const role = window.prompt('Role:', u.role || '');
-    if (role == null) return;
-    const region = window.prompt('Region:', u.region || '');
-    if (region == null) return;
-    const email = window.prompt('Email:', u.email || '');
-    if (email == null) return;
-    try {
-      await jsonFetch(`/api/settings/users/${encodeURIComponent(userId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(),
-                                role: role.trim(),
-                                region: region.trim(),
-                                email: email.trim() }),
-      });
-      toast(`Updated ${name.trim()}`, 'success');
-      loadSettings();
-    } catch (e) {
-      toast(`Edit failed: ${e.body?.error || e.message}`, 'error');
-    }
-  }
+  // Thin shims so the existing call sites + button wiring don't change.
+  function _addSettingsUser()           { _openSettingsUserModal(null); }
+  function _editSettingsUser(userId)    { _openSettingsUserModal(userId); }
 
   async function _toggleSettingsUser(userId) {
     const u = (settingsState.users || []).find(x => x.id === userId);

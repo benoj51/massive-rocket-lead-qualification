@@ -5,6 +5,32 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bw] — 2026-05-24 — Fix: Settings → Edit user is now a real modal
+
+Reported: "Edit didn't work" on the Settings → Users page.
+
+The v1.0.0bq implementation fired **four sequential** `window.prompt()`
+dialogs (Name → Role → Region → Email). Browsers throttle / suppress
+repeat prompts after a few — so Edit visibly stalled mid-flow with no
+explanation, looking broken. Add was the same shape and same problem.
+
+Replaced both with a proper modal:
+- One screen, all four fields visible
+- Validation (Name required, inline error chip)
+- Cancel / Save buttons + Esc to close + Enter to submit
+- Save button shows spinner during the PATCH
+- Backend errors surface as the inline error (instead of dying as
+  a toast that disappears in 4 seconds)
+
+Both Add and Edit now share the same modal — single source of truth,
+single submit path. `_addSettingsUser` / `_editSettingsUser` are thin
+shims so the existing button wiring + call sites didn't have to
+change.
+
+Backend untouched — pure UX fix. Full suite: **1089 passing**.
+
+---
+
 ## [1.0.0bv] — 2026-05-24 — CSV import for partner contacts
 
 ### The ask
