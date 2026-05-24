@@ -5,6 +5,85 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bl] — 2026-05-24 — Stakeholder map + concurrent agencies
+
+Completes the live-project surface Ben asked for. v1.0.0bk shipped
+the project + OKRs spine; this commit adds:
+- a stakeholder influence×interest matrix per project (driven by
+  fields on existing contacts — no parallel store)
+- concurrent agencies (other agencies on the account alongside MR,
+  with scope + embedded contacts)
+
+Both extend existing stores rather than build new ones, so the
+upgrade is backward-compatible and there's no data migration.
+
+### Added
+
+- **`contacts_store` extended** with `stakeholder_role`
+  (sponsor|champion|user|blocker|unknown), `influence`
+  (high|medium|low), `interest` (high|medium|low). All optional,
+  default None. Case-insensitive on save. Invalid values normalise
+  to None (so a typo doesn't pollute the matrix).
+- **`lead_agencies_store` extended** with:
+  - `TYPE_CONCURRENT = "concurrent"` sibling to
+    incumbent/previous/competitor — for agencies working
+    *alongside* MR on a live engagement.
+  - `contacts: [{id, name, title, email, phone, notes}]` embedded
+    array (small + tightly scoped — these only make sense in the
+    context of the agency they work at).
+  - Preserved across updates: if the caller doesn't supply
+    `contacts` on a re-save, the existing list is kept.
+- **`/api/live-projects/<id>` detail endpoint** now returns
+  `contacts` + `agencies` alongside the project + OKRs, so the
+  detail card renders the stakeholder map + concurrent agencies
+  without further fetches.
+- **Stakeholder map UI** on the live project detail:
+  - 2×2 influence×interest matrix with named quadrants
+    ("Manage closely", "Keep satisfied", "Keep informed",
+    "Monitor")
+  - Per-contact inline editor (role / influence / interest
+    dropdowns) — change saves to `/api/contacts/<lead_id>` POST +
+    re-renders the matrix immediately
+  - Yellow warning when contacts aren't placed yet ("3 contacts
+    not yet placed — set influence + interest below")
+  - "medium" influence/interest counts as "high" for the 2×2
+    placement (medium-interest stakeholders are interested enough
+    to track in the closer quadrants)
+- **Concurrent agencies UI** on the live project detail:
+  - List of all agencies on the account, colour-coded by type
+    (concurrent green, incumbent yellow, competitor red,
+    previous muted)
+  - Each card shows scope + embedded contacts
+  - Add / edit (with contact-append) / delete via prompts
+
+### Tests
+
+- **`tests/test_stakeholder_map_concurrent_agencies.py`** — 13
+  tests:
+  - **5 stakeholder-fields tests** on contacts_store: defaults
+    None, valid values stick, invalid → None, case-insensitive,
+    round-trip through list_contacts.
+  - **6 concurrent-agency tests** on lead_agencies_store: type
+    accepted, existing types still work (backward-compat), invalid
+    type still rejected, embedded contacts persist + dedup-by-name,
+    contacts preserved through update when caller omits the field.
+  - **1 integration test**: the live-project detail endpoint
+    includes contacts (with stakeholder fields populated) +
+    agencies (concurrent with embedded contact).
+
+### Why extending the existing stores
+
+Two reasons for not creating new
+`live_project_stakeholders_store` and
+`live_project_agencies_store`:
+1. **Single source of truth** — a contact's role / influence /
+   interest is true regardless of whether we're looking through
+   the lead drawer or the live project. Mirroring them across two
+   stores guarantees drift.
+2. **Backward compat** — every contact + agency that already
+   exists in the platform "just works" in the new UI. Mapping
+   them is opt-in.
+
 ## [1.0.0bk] — 2026-05-24 — Live Projects (post-sale delivery + OKRs)
 
 Ben asked for a "live projects" section — accounts that have moved

@@ -3927,13 +3927,14 @@
     el.innerHTML = '<div class="muted" style="font-size:12px;padding:14px;">Loading…</div>';
     try {
       const data = await jsonFetch(`/api/live-projects/${encodeURIComponent(projectId)}`);
-      _renderLiveProjectDetail(data.project, data.okrs || []);
+      _renderLiveProjectDetail(data.project, data.okrs || [],
+                                  data.contacts || [], data.agencies || []);
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 
-  function _renderLiveProjectDetail(project, okrs) {
+  function _renderLiveProjectDetail(project, okrs, contacts, agencies) {
     const el = $('#lv-detail');
     const statusSel = `<select id="lv-d-status" style="padding:4px 8px;font-size:11px;">
       ${['active','paused','completed','archived'].map(s => `<option value="${s}"${s === project.status ? ' selected' : ''}>${s}</option>`).join('')}
@@ -3972,6 +3973,27 @@
         <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Quarterly OKRs</h4>
         <div id="lv-d-okrs"></div>
         <button class="btn ghost" id="lv-d-add-okr" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add OKR</button>
+      </div>
+      <!-- v1.0.0bl: stakeholder map. 2×2 influence×interest matrix
+           rendered from the contacts on the underlying lead. Each
+           cell is clickable + the contact rows below let the user
+           edit role/influence/interest inline. -->
+      <div style="margin-bottom:12px;">
+        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
+          Stakeholder map
+          <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px;">— set influence + interest per contact</span>
+        </h4>
+        <div id="lv-d-stakeholder-matrix"></div>
+        <div id="lv-d-stakeholder-list" style="margin-top:8px;"></div>
+      </div>
+      <!-- v1.0.0bl: concurrent agencies — other agencies working
+           alongside MR. Add/edit/remove + embedded contacts each. -->
+      <div style="margin-bottom:12px;">
+        <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
+          Other agencies on this account
+        </h4>
+        <div id="lv-d-agencies"></div>
+        <button class="btn ghost" id="lv-d-add-agency" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add agency</button>
       </div>
     `;
     $('#lv-d-close').addEventListener('click', () => {
@@ -4018,6 +4040,267 @@
     });
     $('#lv-d-add-okr').addEventListener('click', () => _addNewOkr(project.id));
     _renderOkrs(project.id, okrs);
+    // v1.0.0bl: stakeholder map + concurrent agencies.
+    _renderStakeholderMap(project.lead_id, contacts || []);
+    _renderConcurrentAgencies(project.lead_id, agencies || []);
+    $('#lv-d-add-agency').addEventListener('click', () =>
+      _addConcurrentAgency(project.lead_id, project.id));
+  }
+
+  // v1.0.0bl: stakeholder influence×interest matrix. Plots each
+  // contact into one of 4 quadrants based on influence + interest.
+  // The list below the matrix lets the AE edit each contact's
+  // stakeholder fields inline (PATCH to /api/contacts).
+  function _renderStakeholderMap(leadId, contacts) {
+    const matrix = $('#lv-d-stakeholder-matrix');
+    const list = $('#lv-d-stakeholder-list');
+    if (!matrix || !list) return;
+    const quadrants = {
+      'high|high':   { label: 'Manage closely', tone: 'var(--green)' },
+      'high|low':    { label: 'Keep satisfied', tone: 'var(--yellow)' },
+      'low|high':    { label: 'Keep informed',  tone: 'var(--blue)'   },
+      'low|low':     { label: 'Monitor',        tone: 'var(--text-muted)' },
+    };
+    const cellContacts = {
+      'high|high': [], 'high|low': [],
+      'low|high':  [], 'low|low':  [],
+      'unscored':  [],  // anyone missing influence or interest
+    };
+    (contacts || []).forEach(c => {
+      const inf = (c.influence || '').toLowerCase();
+      const intr = (c.interest || '').toLowerCase();
+      // Normalise medium → high for the 2x2 (medium leans interested
+      // enough to track). Keep "low" as low; treat anything else as
+      // unscored so the AE sees what still needs categorising.
+      const i = (inf === 'high' || inf === 'medium') ? 'high'
+              : (inf === 'low' ? 'low' : null);
+      const t = (intr === 'high' || intr === 'medium') ? 'high'
+              : (intr === 'low' ? 'low' : null);
+      const key = (i && t) ? `${i}|${t}` : 'unscored';
+      cellContacts[key].push(c);
+    });
+    const cellHtml = (key) => {
+      const meta = quadrants[key];
+      const items = cellContacts[key];
+      return `
+        <div style="border:1px solid var(--border);border-radius:6px;padding:8px;min-height:70px;background:var(--surface);">
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:${meta.tone};font-weight:600;margin-bottom:4px;">${escapeHtml(meta.label)}</div>
+          ${items.length ? items.map(c =>
+              `<div style="font-size:11px;padding:2px 0;">${escapeHtml(c.name || '—')}${c.title ? ' <span class="muted" style="font-size:10px;">' + escapeHtml(c.title) + '</span>' : ''}</div>`
+            ).join('') : '<div class="muted" style="font-size:10px;font-style:italic;">empty</div>'}
+        </div>
+      `;
+    };
+    matrix.innerHTML = `
+      <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center;">
+        <div></div>
+        <div style="text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Low interest</div>
+        <div style="text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">High interest</div>
+        <div style="text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);writing-mode:vertical-rl;transform:rotate(180deg);">High influence</div>
+        ${cellHtml('high|low')}
+        ${cellHtml('high|high')}
+        <div style="text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);writing-mode:vertical-rl;transform:rotate(180deg);">Low influence</div>
+        ${cellHtml('low|low')}
+        ${cellHtml('low|high')}
+      </div>
+      ${cellContacts.unscored.length
+        ? `<div class="muted" style="font-size:11px;margin-top:8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.3);padding:6px 10px;border-radius:6px;">
+            ${cellContacts.unscored.length} contact${cellContacts.unscored.length === 1 ? '' : 's'} not yet placed — set influence + interest below.
+          </div>`
+        : ''}
+    `;
+    // Inline editor: each contact row → 3 dropdowns (role, influence,
+    // interest) that PATCH the contact on change.
+    if (!contacts.length) {
+      list.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;text-align:center;">No contacts on this account yet. Add them from the lead drawer first.</div>';
+      return;
+    }
+    const optSet = (current, opts) =>
+      ['', ...opts].map(o =>
+        `<option value="${o}"${(o || null) === (current || null) ? ' selected' : ''}>${o || '—'}</option>`
+      ).join('');
+    list.innerHTML = `
+      <table class="stakeholders" style="width:100%;font-size:11px;">
+        <thead>
+          <tr>
+            <th>Contact</th>
+            <th>Role</th>
+            <th>Influence</th>
+            <th>Interest</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${contacts.map(c => `
+            <tr>
+              <td>${escapeHtml(c.name || '—')}${c.title ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.title)}</span>` : ''}</td>
+              <td><select data-stake-role data-cid="${escapeAttr(c.id)}" style="padding:2px 6px;font-size:11px;">
+                ${optSet(c.stakeholder_role, ['sponsor','champion','user','blocker','unknown'])}
+              </select></td>
+              <td><select data-stake-influence data-cid="${escapeAttr(c.id)}" style="padding:2px 6px;font-size:11px;">
+                ${optSet(c.influence, ['high','medium','low'])}
+              </select></td>
+              <td><select data-stake-interest data-cid="${escapeAttr(c.id)}" style="padding:2px 6px;font-size:11px;">
+                ${optSet(c.interest, ['high','medium','low'])}
+              </select></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    const save = async (cid, field, value) => {
+      const c = contacts.find(x => x.id === cid);
+      if (!c) return;
+      try {
+        await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...c, [field]: value || null }),
+        });
+        // Patch local cache + re-render the matrix (no full reload).
+        c[field] = value || null;
+        _renderStakeholderMap(leadId, contacts);
+      } catch (e) {
+        toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+      }
+    };
+    list.querySelectorAll('[data-stake-role]').forEach(s =>
+      s.addEventListener('change', () => save(s.dataset.cid, 'stakeholder_role', s.value)));
+    list.querySelectorAll('[data-stake-influence]').forEach(s =>
+      s.addEventListener('change', () => save(s.dataset.cid, 'influence', s.value)));
+    list.querySelectorAll('[data-stake-interest]').forEach(s =>
+      s.addEventListener('change', () => save(s.dataset.cid, 'interest', s.value)));
+  }
+
+  // v1.0.0bl: concurrent agencies list + add form. Re-uses
+  // /api/leads/<lead_id>/agencies which already supports the new
+  // TYPE_CONCURRENT enum value.
+  function _renderConcurrentAgencies(leadId, agencies) {
+    const wrap = $('#lv-d-agencies');
+    if (!wrap) return;
+    // Filter to the types relevant for a LIVE engagement: incumbent
+    // (we share the account), previous (good context), competitor
+    // (active threat), concurrent (working alongside us). Skip
+    // nothing — better to over-show than hide useful context.
+    const sorted = [...(agencies || [])].sort((a, b) =>
+      (a.type || '').localeCompare(b.type || '') ||
+      (a.name || '').localeCompare(b.name || ''));
+    const typeLabel = (t) => ({
+      incumbent:  'Incumbent',
+      previous:   'Previous',
+      competitor: 'Competitor',
+      concurrent: 'Concurrent',
+    }[t] || t);
+    const typeTone = (t) => ({
+      incumbent:  'var(--yellow)',
+      previous:   'var(--text-muted)',
+      competitor: 'var(--red)',
+      concurrent: 'var(--green)',
+    }[t] || 'var(--text-muted)');
+    if (!sorted.length) {
+      wrap.innerHTML = '<div class="muted" style="font-size:11px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;text-align:center;">No other agencies tracked yet. Click + Add agency.</div>';
+      return;
+    }
+    wrap.innerHTML = sorted.map(a => `
+      <div data-ag-card="${escapeAttr(a.id)}" style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:var(--surface);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;">
+          <div style="min-width:0;flex:1;">
+            <strong style="font-size:12px;">${escapeHtml(a.name || '—')}</strong>
+            <span style="font-size:9px;color:${typeTone(a.type)};text-transform:uppercase;letter-spacing:.06em;margin-left:6px;font-weight:600;">${escapeHtml(typeLabel(a.type))}</span>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <button class="btn ghost" type="button" data-ag-edit="${escapeAttr(a.id)}" style="padding:2px 8px;font-size:10px;">edit</button>
+            <button class="btn ghost" type="button" data-ag-del="${escapeAttr(a.id)}" style="padding:2px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);">×</button>
+          </div>
+        </div>
+        ${a.scope ? `<div style="font-size:11px;color:var(--text-dim);margin-top:3px;"><strong>Scope:</strong> ${escapeHtml(a.scope)}</div>` : ''}
+        ${a.notes ? `<div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(a.notes)}</div>` : ''}
+        ${(a.contacts || []).length ? `
+          <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:3px;">Contacts</div>
+            ${a.contacts.map(c => `
+              <div style="font-size:11px;padding:2px 0;">
+                ${escapeHtml(c.name || '—')}${c.title ? ` <span class="muted" style="font-size:10px;">${escapeHtml(c.title)}</span>` : ''}
+                ${c.email ? ` <span class="muted" style="font-size:10px;">· ${escapeHtml(c.email)}</span>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+    wrap.querySelectorAll('[data-ag-edit]').forEach(b => {
+      b.addEventListener('click', () =>
+        _editAgency(leadId, b.dataset.agEdit, sorted));
+    });
+    wrap.querySelectorAll('[data-ag-del]').forEach(b => {
+      b.addEventListener('click', () =>
+        _deleteAgency(leadId, b.dataset.agDel));
+    });
+  }
+
+  async function _addConcurrentAgency(leadId, projectId) {
+    const name = window.prompt('Agency name:');
+    if (name === null || !name.trim()) return;
+    const scope = window.prompt(
+      `Scope (what they're doing on the account):`, '');
+    if (scope === null) return;
+    const type = window.prompt(
+      'Type — concurrent (alongside MR) | incumbent | previous | competitor:',
+      'concurrent');
+    if (type === null) return;
+    try {
+      await jsonFetch(`/api/leads/${encodeURIComponent(leadId)}/agencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          scope: scope.trim() || null,
+          type: type.trim() || 'concurrent',
+          source: 'manual',
+        }),
+      });
+      openLiveProjectDetail(projectId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _editAgency(leadId, agencyId, agencies) {
+    const a = agencies.find(x => x.id === agencyId);
+    if (!a) return;
+    const scope = window.prompt('Update scope:', a.scope || '');
+    if (scope === null) return;
+    const addContact = window.confirm(
+      `Update scope to "${scope}".\n\nAdd a contact at ${a.name}? (Cancel = just save the scope)`);
+    const payload = { ...a, scope: scope.trim() || null };
+    if (addContact) {
+      const cname = window.prompt(`Contact name at ${a.name}:`);
+      if (cname && cname.trim()) {
+        const ctitle = window.prompt('Title (optional):') || '';
+        const cemail = window.prompt('Email (optional):') || '';
+        payload.contacts = [
+          ...(a.contacts || []),
+          { name: cname.trim(),
+            title: ctitle.trim() || null,
+            email: cemail.trim() || null },
+        ];
+      }
+    }
+    try {
+      await jsonFetch(
+        `/api/leads/${encodeURIComponent(leadId)}/agencies/${encodeURIComponent(agencyId)}`,
+        { method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload) });
+      openLiveProjectDetail(liveProjectsState.selectedId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+  }
+
+  async function _deleteAgency(leadId, agencyId) {
+    if (!window.confirm('Remove this agency entry?')) return;
+    try {
+      await jsonFetch(
+        `/api/leads/${encodeURIComponent(leadId)}/agencies/${encodeURIComponent(agencyId)}`,
+        { method: 'DELETE' });
+      openLiveProjectDetail(liveProjectsState.selectedId);
+    } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
   function _renderOkrs(projectId, okrs) {

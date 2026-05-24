@@ -4306,7 +4306,9 @@ def api_live_projects_list():
 
 @app.route("/api/live-projects/<project_id>", methods=["GET"])
 def api_live_projects_get(project_id: str):
-    """Full detail: project + every OKR + per-OKR summary."""
+    """Full detail: project + every OKR + per-OKR summary +
+    contacts + agencies for the stakeholder map and concurrent-
+    agencies surfaces (v1.0.0bl)."""
     project = live_projects_store.get(project_id)
     if not project:
         return jsonify({"error": "not_found"}), 404
@@ -4316,15 +4318,23 @@ def api_live_projects_get(project_id: str):
         for o in okrs
     ]
     # Enrich with the lead's display name.
-    company = project.get("lead_id")
+    lead_id = project.get("lead_id")
+    company = lead_id
     try:
-        lead = NotionSync().get_page(project.get("lead_id")) or {}
+        lead = NotionSync().get_page(lead_id) or {}
         company = lead.get("company") or company
     except Exception:
         pass
+    # v1.0.0bl: pull contacts (for stakeholder map) + agencies (for
+    # concurrent agencies + the broader account picture). Both are
+    # already keyed by lead_id so no extra lookup needed.
+    contacts = contacts_store.list_contacts(lead_id) if lead_id else []
+    agencies = lead_agencies_store.list_agencies(lead_id) if lead_id else []
     return jsonify({
-        "project": {**project, "company": company},
-        "okrs":    okrs_with_summary,
+        "project":  {**project, "company": company},
+        "okrs":     okrs_with_summary,
+        "contacts": contacts,
+        "agencies": agencies,
     })
 
 

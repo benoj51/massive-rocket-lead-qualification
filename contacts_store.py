@@ -123,7 +123,30 @@ def _normalise(contact: dict[str, Any]) -> dict[str, Any]:
         # on the SAME lead. Empty string normalises to None so the chart
         # treats it as a root node.
         "reports_to_id": (contact.get("reports_to_id") or "").strip() or None,
+        # v1.0.0bl: stakeholder map fields. Drive the influence×interest
+        # matrix on live project detail. All optional + permissive so
+        # existing contacts work untouched.
+        # `stakeholder_role`: their role in the buying / delivery group.
+        # `influence`: how much sway they have (high|medium|low|None).
+        # `interest`: how much they care about MR's work (same scale).
+        "stakeholder_role": _validate_stakeholder_enum(
+            contact.get("stakeholder_role"),
+            ("sponsor", "champion", "user", "blocker", "unknown")),
+        "influence": _validate_stakeholder_enum(
+            contact.get("influence"), ("high", "medium", "low")),
+        "interest":  _validate_stakeholder_enum(
+            contact.get("interest"),  ("high", "medium", "low")),
     }
+
+
+def _validate_stakeholder_enum(value, allowed):
+    """v1.0.0bl: coerce to a known value or None. Anything unrecognised
+    (including empty string) → None — keeps old data clean and stops
+    typos polluting the matrix."""
+    if value is None or value == "":
+        return None
+    s = str(value).strip().lower()
+    return s if s in allowed else None
 
 
 def _parse_iso(s: str | None):

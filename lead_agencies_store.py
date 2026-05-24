@@ -52,7 +52,12 @@ TYPE_PREVIOUS = "previous"
 # Distinct from incumbent so the AE can tell "we're up against WPP"
 # from "they used to use WPP, switched 2 years ago".
 TYPE_COMPETITOR = "competitor"
-AGENCY_TYPES = [TYPE_INCUMBENT, TYPE_PREVIOUS, TYPE_COMPETITOR]
+# v1.0.0bl: agencies working ALONGSIDE MR on a live engagement.
+# E.g. MR runs CRM/loyalty while Accenture does the broader digital
+# transformation. Surfaces on live project detail so the team knows
+# who else is in the room.
+TYPE_CONCURRENT = "concurrent"
+AGENCY_TYPES = [TYPE_INCUMBENT, TYPE_PREVIOUS, TYPE_COMPETITOR, TYPE_CONCURRENT]
 
 
 class LeadAgenciesStoreError(RuntimeError):
@@ -119,9 +124,39 @@ def _normalise(lead_id: str, payload: dict[str, Any],
         # AI vs. manual capture.
         "source":     (payload.get("source") or (existing or {}).get("source") or "manual").strip() or "manual",
         "source_call_id": (payload.get("source_call_id") or (existing or {}).get("source_call_id") or None),
+        # v1.0.0bl: optional contacts at this agency. Embedded array
+        # rather than a separate store — these are small + tightly
+        # scoped (5-10 contacts per agency tops) and they only make
+        # sense in the context of the agency they work at.
+        # Shape per contact: {id, name, title, email, phone, notes}.
+        "contacts":   _normalise_contacts(payload.get("contacts") or
+                                           (existing or {}).get("contacts") or []),
         "added_at":   (existing or {}).get("added_at") or _now_iso(),
         "updated_at": _now_iso(),
     }
+
+
+def _normalise_contacts(items):
+    """v1.0.0bl: clean the embedded contacts array. Each entry needs
+    at least a name; everything else is optional."""
+    if not isinstance(items, list):
+        return []
+    out = []
+    for c in items:
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        out.append({
+            "id":    (c.get("id") or uuid.uuid4().hex[:10]),
+            "name":  name,
+            "title": (c.get("title") or "").strip() or None,
+            "email": (c.get("email") or "").strip() or None,
+            "phone": (c.get("phone") or "").strip() or None,
+            "notes": (c.get("notes") or "").strip() or None,
+        })
+    return out
 
 
 # v1.0.0bb: case-insensitive lookup so the auto-link doesn't add
