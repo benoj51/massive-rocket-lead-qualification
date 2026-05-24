@@ -269,6 +269,45 @@
   header.top .health .pill.ok { color: var(--green); border-color: rgba(74,222,128,.3); }
   header.top .health .pill.warn { color: var(--yellow); border-color: rgba(251,191,36,.3); }
 
+  /* v1.0.0bt: inline enum cell — partner contacts table.
+     At-rest the select looks like the old static badge: small,
+     coloured per-kind, no chrome. On hover/focus we add a subtle
+     outline so users discover the cell is editable. Empty option
+     renders as "—" (no value) which doubles as a clear action. */
+  .inline-enum-cell {
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background: transparent; color: var(--text-muted);
+    border: 1px solid transparent; border-radius: 12px;
+    padding: 2px 18px 2px 8px;
+    font-size: 10px; font-family: inherit; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                       linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+    transition: border-color .12s, background-color .12s, color .12s;
+    max-width: 100%;
+  }
+  .inline-enum-cell:hover {
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .inline-enum-cell:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(74,222,128,.15);
+    color: var(--text);
+  }
+  /* When the select is showing — (empty option), keep it muted so
+     it visually matches the old static cell. The helper sets
+     data-has-value to "1" when a real value is picked so we can
+     differentiate. */
+  .inline-enum-cell[data-has-value="0"] {
+    color: var(--text-muted);
+    background-color: transparent;
+    border-color: transparent;
+  }
+
   /* v1.0.0bs: Jeff — floating chat assistant. Bottom-right button +
      slide-up chat panel. Brand-coloured trigger so it reads as
      "MR thing"; surface-coloured panel so it doesn't compete with
@@ -12712,6 +12751,51 @@
   function _sentimentColor(label)  { return _sentimentPalette(label).text; }
   function _sentimentBorder(label) { return _sentimentPalette(label).border; }
 
+  // v1.0.0bt: inline enum cell — renders as a styled <select> that
+  // PATCHes the partner contact on change. Why a real <select> over
+  // a click-to-edit dance: native select gives keyboard nav +
+  // accessibility for free, doesn't require a separate "edit mode"
+  // toggle, and the empty option (`—`) lets the user clear a value
+  // without a separate delete affordance.
+  //
+  // Styling: the select is invisible (transparent background, no
+  // border) UNTIL hover/focus, when it gets a subtle outline. The
+  // currently-selected option renders as the badge it was before
+  // (sentiment colour, tier tag, etc.) so the table at rest looks
+  // identical to v1.0.0bs. Only when the user interacts do dropdown
+  // chrome surfaces.
+  function _renderInlineEnumCell(value, options, partnerId, contactId,
+                                    field, opts) {
+    opts = opts || {};
+    const kind = opts.kind || 'plain';
+    // Empty option labelled "—" so a select with no current value
+    // visibly reads as dashes (matching the old static cell). It
+    // also doubles as the "clear" action.
+    const optHtml = [`<option value=""${value ? '' : ' selected'}>—</option>`]
+      .concat((options || []).map(o =>
+        `<option value="${escapeAttr(o)}" ${o === value ? 'selected' : ''}>${escapeHtml(o)}</option>`))
+      .join('');
+    // Inline-style the select so its at-rest appearance matches the
+    // surrounding cell typography. Kind drives the colour.
+    let cellStyle = '';
+    if (kind === 'sentiment' && value) {
+      const pal = _sentimentPalette(value);
+      cellStyle = `background:${pal.bg};color:${pal.text};border-color:${pal.border};`;
+    } else if (kind === 'plain' && value) {
+      // Tier — use the same `tag signal` look the old static cell had.
+      cellStyle = 'background:var(--surface-2);color:var(--text);border-color:var(--border);';
+    }
+    return `
+      <select class="inline-enum-cell"
+              data-pc-inline="${escapeAttr(field)}"
+              data-pc-partner="${escapeAttr(partnerId)}"
+              data-pc-contact="${escapeAttr(contactId)}"
+              data-has-value="${value ? '1' : '0'}"
+              style="${cellStyle}">
+        ${optHtml}
+      </select>`;
+  }
+
   // Friendly relative date — "today", "1d ago", "12d ago", "3mo ago".
   function _fmtDaysAgo(days) {
     if (days == null) return 'never';
@@ -13773,6 +13857,14 @@
     const wrap = $('#ptn-contacts-table');
     const all = partner.contacts || [];
     const f = partnersState.filter;
+    // v1.0.0bt: pull enums here so the inline cell editors below
+    // know what options to render. partnersState.enums is loaded
+    // once per partner detail; we read it lazily so the table still
+    // renders (with blank dropdown options) if it hasn't landed yet.
+    const enums = partnersState.enums || {};
+    const tierOpts = enums.tiers || [];
+    const sentimentOpts = enums.partner_sentiments || [];
+    const seniorityOpts = enums.seniorities || [];
     const filtered = all.filter(c => {
       // v1.0.0e: multi-tag — match if filter is in the tag list.
       if (f.territory && !_tagListIncludes(c, 'territories', 'territory', f.territory)) return false;
@@ -13842,9 +13934,12 @@
               <td><input type="checkbox" data-bulk-row="${escapeAttr(c.id)}" ${sel.has(c.id) ? 'checked' : ''} /></td>
               <td><strong>${escapeHtml(c.name || '—')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}<br><span style="font-size:10px;">${linkedinCell(c.linkedin_url, c.name, partner.name)}</span></td>
               <td>${escapeHtml(c.title || '—')}</td>
-              <td>${c.tier ? `<span class="tag signal" style="font-size:10px;">${escapeHtml(c.tier)}</span>` : '—'}</td>
-              <td>${c.partner_sentiment ? `<span class="tag signal" style="font-size:10px;background:${_sentimentBg(c.partner_sentiment)};color:${_sentimentColor(c.partner_sentiment)};border-color:${_sentimentBorder(c.partner_sentiment)};">${escapeHtml(c.partner_sentiment)}</span>` : '—'}</td>
-              <td>${c.seniority ? `<span class="muted" style="font-size:11px;">${escapeHtml(c.seniority)}</span>` : '—'}</td>
+              <!-- v1.0.0bt: inline-editable dropdowns. PATCH on change,
+                   optimistic update + revert on failure. Saves clicks
+                   vs. opening the edit form for each row. -->
+              <td>${_renderInlineEnumCell(c.tier, tierOpts, partner.id, c.id, 'tier', { kind: 'plain' })}</td>
+              <td>${_renderInlineEnumCell(c.partner_sentiment, sentimentOpts, partner.id, c.id, 'partner_sentiment', { kind: 'sentiment' })}</td>
+              <td>${_renderInlineEnumCell(c.seniority, seniorityOpts, partner.id, c.id, 'seniority', { kind: 'muted' })}</td>
               <td>${(_tagList(c, 'territories', 'territory').map(t => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(t)}</span>`).join('')) || '—'}</td>
               <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}</td>
               <td>${c.country ? escapeHtml(c.country) : '—'}</td>
@@ -13921,6 +14016,74 @@
     // v1.0.0r: hydrate + wire the inline MR owner dropdowns.
     hydrateOwnerSelects(wrap);
     wireInlineOwnerCells(wrap);
+    // v1.0.0bt: wire inline enum cells (Tier / Sentiment / Seniority).
+    // One handler bound per cell; on change PATCHes the contact + does
+    // an optimistic local update so the partner detail doesn't flash
+    // with a full re-fetch on every keystroke-equivalent click.
+    wrap.querySelectorAll('[data-pc-inline]').forEach(sel => {
+      sel.addEventListener('change', async (e) => {
+        const field = sel.dataset.pcInline;
+        const partnerId = sel.dataset.pcPartner;
+        const contactId = sel.dataset.pcContact;
+        const newValue = sel.value || null;
+        // Snapshot for revert.
+        const prevValue = sel.dataset.previousValue ||
+            (function () {
+              const c = (partner.contacts || []).find(x => x.id === contactId);
+              return c ? (c[field] || '') : '';
+            })();
+        sel.disabled = true;
+        try {
+          const data = await jsonFetch(
+            `/api/partners/${encodeURIComponent(partnerId)}/contacts/${encodeURIComponent(contactId)}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ [field]: newValue }),
+            });
+          // Update the local contact so any later re-render keeps
+          // the new value without another fetch.
+          const c = (partner.contacts || []).find(x => x.id === contactId);
+          if (c && data?.contact) c[field] = data.contact[field];
+          sel.dataset.previousValue = newValue || '';
+          sel.dataset.hasValue = newValue ? '1' : '0';
+          // Re-style for sentiment (kind drives the badge colour).
+          if (field === 'partner_sentiment') {
+            if (newValue) {
+              const pal = _sentimentPalette(newValue);
+              sel.style.background = pal.bg;
+              sel.style.color = pal.text;
+              sel.style.borderColor = pal.border;
+            } else {
+              sel.style.background = '';
+              sel.style.color = '';
+              sel.style.borderColor = '';
+            }
+          } else if (field === 'tier') {
+            if (newValue) {
+              sel.style.background = 'var(--surface-2)';
+              sel.style.color = 'var(--text)';
+              sel.style.borderColor = 'var(--border)';
+            } else {
+              sel.style.background = '';
+              sel.style.color = '';
+              sel.style.borderColor = '';
+            }
+          }
+          // Subtle confirmation toast; the user just changed a field,
+          // they don't need a popup but they DO want acknowledgment.
+          toast(`Saved`, 'success');
+        } catch (err) {
+          // Revert + surface the error. Failures here are usually
+          // a stale enum value (the admin changed the list) or a
+          // network hiccup.
+          sel.value = prevValue;
+          toast(`Save failed: ${err.body?.error || err.message}`, 'error');
+        } finally {
+          sel.disabled = false;
+        }
+      });
+    });
   }
 
   function openContactForm(partner, existing) {

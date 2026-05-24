@@ -5,6 +5,62 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bt] — 2026-05-24 — Inline-edit Tier / Sentiment / Seniority in Partners table
+
+### Reported
+
+> "Should be able to change these with the drop down without having
+> to go into the contact."
+
+Ben sent a screenshot of the Partners contacts table — every row
+in the TIER / SENTIMENT / SENIORITY columns showing dashes — making
+the point that editing required opening each contact's form
+individually. For a team triaging dozens of partner relationships,
+that's a real friction.
+
+### Fix
+
+Those three cells now render as inline `<select>` dropdowns. At
+rest they look identical to the previous static badges (sentiment
+keeps its colour palette, tier keeps its `tag signal` look,
+seniority stays muted). On hover the cell gets a subtle outline so
+the affordance is discoverable. On change:
+
+1. PATCH `/api/partners/<pid>/contacts/<cid>` with just the
+   changed field
+2. Optimistic local update — the partner-contact object in memory
+   gets the new value so any later re-render doesn't flash stale
+3. Background re-style for the cell's badge colour
+4. Subtle "Saved" toast confirmation
+5. On failure: revert to the previous value + show the error
+
+The empty option in each dropdown is labelled `—` so the same
+control doubles as a clear action (no separate "remove" button).
+
+### Why a native `<select>` over click-to-edit
+
+- Keyboard navigation + screen-reader semantics for free
+- One canonical interaction pattern — no separate "edit mode"
+  toggle to maintain or get out of sync
+- Selecting `—` clears the field; no awkward second affordance
+
+### Backend
+
+`/api/partners/<partner_id>/contacts/<contact_id>` PATCH already
+existed; the inline UI just calls it with a single field. The
+merge logic preserves all other fields on partial updates — pinned
+by 8 new tests so we don't regress that contract:
+
+- Single-field PATCH for tier / sentiment / seniority each
+  preserve every neighbour (industries, email, country, mr_owner)
+- Clearing a value with `null` or `""` normalises to `None`
+- Rapid sequential edits (three back-to-back) accumulate correctly
+- Unknown contact ID returns 404
+
+Full suite: **1069 passing**.
+
+---
+
 ## [1.0.0bs] — 2026-05-24 — Jeff: in-app pricing + scoping assistant
 
 ### The ask
