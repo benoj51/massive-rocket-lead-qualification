@@ -858,15 +858,33 @@ class NotionSync:
         # batch. We parse the error message, strip the offending
         # property, and retry once. If it still fails, surface the
         # error normally so the user sees the real problem.
-        page = self._patch_page_with_missing_property_recovery(page_id, props)
-        return {"updated": True, "page_id": page.get("id"), "url": page.get("url"),
+        #
+        # v1.0.0bp: the recovery now also returns the names of any
+        # dropped properties so the API + UI can be honest about a
+        # partial save instead of returning silent success. This
+        # surfaced after a "still can't edit account names" report
+        # where the user was hitting Save, seeing a green toast, but
+        # the rename never landed because something earlier in the
+        # property list had been dropped.
+        page, dropped = self._patch_page_with_missing_property_recovery(page_id, props)
+        out = {"updated": True, "page_id": page.get("id"), "url": page.get("url"),
                 "lead": _page_to_detail(page)}
+        if dropped:
+            out["dropped_props"] = dropped
+        return out
 
     def _patch_page_with_missing_property_recovery(self, page_id: str,
-                                                     props: dict) -> dict:
+                                                     props: dict) -> tuple[dict, list[str]]:
         """PATCH a page's properties; if Notion 400s with "X is not a
-        property that exists", drop X from the request and retry once.
+        property that exists", drop X from the request and retry.
         Logs the dropped property so it's visible in the server log.
+
+        v1.0.0bp: now returns (page, dropped_property_names) so callers
+        can surface a partial-save warning instead of pretending the
+        full write landed. Loops the recovery — if the second attempt
+        also has a missing property, drop it too and retry once more.
+        Bounded retries (up to len(props)) so a pathologically broken
+        schema can't spin forever.
 
         Notion's error format is reliable here: the message body
         always starts with the property name, e.g.
@@ -875,35 +893,42 @@ class NotionSync:
         it as the key to drop from `props`.
         """
         import re as _re
-        try:
-            return self._request("PATCH", f"/pages/{page_id}",
-                                  json_body={"properties": props})
-        except NotionSyncError as e:
-            msg = str(e)
-            # Match: 'is not a property that exists' — extract the
-            # property name from the message. Quote chars vary.
-            m = _re.search(r'["\'`]?([A-Za-z][A-Za-z0-9 _]+?)["\'`]?\s+is not a property that exists', msg)
-            if not m:
-                raise
-            bad = m.group(1).strip()
-            if bad not in props:
-                # The parsed name doesn't match any prop we sent —
-                # parser may have grabbed something odd. Don't risk a
-                # silent partial save; re-raise.
-                raise
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "Notion DB missing property %r — dropping from PATCH and "
-                "retrying. Add the column manually or wait for the next "
-                "boot self-heal to create it.", bad)
-            stripped = {k: v for k, v in props.items() if k != bad}
-            if not stripped:
-                # Nothing left to write — return a no-op response shape
-                # the caller can handle.
-                return {"id": page_id, "url": None}
-            # Second attempt — if THIS one fails, surface it.
-            return self._request("PATCH", f"/pages/{page_id}",
-                                  json_body={"properties": stripped})
+        import logging as _logging
+        log = _logging.getLogger(__name__)
+        dropped: list[str] = []
+        current = dict(props)
+        # Bound iterations so a totally-broken schema can't infinite-loop.
+        for _ in range(len(props) + 1):
+            try:
+                page = self._request("PATCH", f"/pages/{page_id}",
+                                      json_body={"properties": current})
+                return page, dropped
+            except NotionSyncError as e:
+                msg = str(e)
+                m = _re.search(
+                    r'["\'`]?([A-Za-z][A-Za-z0-9 _]+?)["\'`]?\s+is not a property that exists',
+                    msg)
+                if not m:
+                    raise
+                bad = m.group(1).strip()
+                if bad not in current:
+                    # Parser caught something we didn't send — bail out
+                    # rather than silently dropping unrelated state.
+                    raise
+                log.warning(
+                    "Notion DB missing property %r — dropping from PATCH "
+                    "and retrying. Add the column manually or wait for the "
+                    "next boot self-heal to create it.", bad)
+                dropped.append(bad)
+                current = {k: v for k, v in current.items() if k != bad}
+                if not current:
+                    # Nothing left to write — return a no-op response
+                    # shape the caller can handle, plus the drop trail.
+                    return {"id": page_id, "url": None}, dropped
+        # Defensive — should never reach here given the loop bound.
+        raise NotionSyncError(
+            f"PATCH /pages/{page_id} kept failing with missing-property "
+            f"errors after dropping {dropped!r}")
 
 
 def sync_to_notion(payload: dict) -> dict:

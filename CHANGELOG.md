@@ -5,6 +5,63 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bp] — 2026-05-24 — Click-to-edit account name + honest partial-save reporting
+
+### The bug
+
+Ben reported: "Still can't edit account names."
+
+Two things were going wrong, only one of which was a bug:
+
+**UX bug**: the `Company` input lived inside the `Identity` accordion
+section — which is collapsed by default. Users opened a lead drawer,
+saw the company name at the top of the header, and tried to click it
+to rename. Nothing happened, because the title was a static `<div>`.
+Nobody thought to scroll down, find a collapsed section, expand it,
+edit a labelled input field, then hit Save.
+
+**Latent silent-failure**: the missing-property recovery added in
+v1.0.0aq dropped Notion properties without surfacing the drop to
+the caller. If a save legitimately couldn't write `Company` (or
+anything else), the user got a green "Saved" toast and the rename
+never landed. Hadn't bitten yet — but would the first time anyone
+ran the platform against a freshly-cloned Notion DB.
+
+### Fix
+
+**Click-to-edit on the drawer title.** Click `#ld-title` → swaps to
+an inline input → Enter or blur commits, Esc reverts. The committed
+value mirrors into the hidden `[data-ld="company"]` field and fires
+the `input` event, so the existing dirty-state + `saveLead` flow
+handles persistence. Single source of truth — no separate code path
+to keep in sync. Hover affordance: dashed border + pencil hint
+("✎") so the affordance is discoverable without a docs lookup.
+
+**Honest partial-save reporting.** The recovery now returns
+`(page, dropped_property_names)` and loops through ALL missing
+properties in one save (previously it retried once and gave up if a
+second property was also missing). `update_page` surfaces
+`dropped_props` in its response; the PATCH endpoint forwards it
+verbatim + writes it to the audit log so a partial save is a
+permanent, queryable record. The drawer's Save handler shows a red
+toast when any property was dropped — "Save partially failed — your
+Notion DB is missing these columns: X. Restart to auto-add them, or
+add them manually in Notion."
+
+### Tests
+
+4 new tests in `test_notion_missing_property_recovery.py`:
+- Recovery loops through multiple missing properties in one save
+- Full-success path returns `dropped == []` (not `None`)
+- `update_page` surfaces `dropped_props` end-to-end
+- `dropped_props` key omitted when nothing dropped (no empty-list
+  noise for clean saves)
+
+Existing 6 recovery tests updated to unpack the new `(page, dropped)`
+return tuple. Full suite: 971 passing.
+
+---
+
 ## [1.0.0bo] — 2026-05-24 — Account expansion: land-and-expand view
 
 The team's motion isn't "win once, walk away" — it's "win Shell

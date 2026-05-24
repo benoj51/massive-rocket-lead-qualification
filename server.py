@@ -1472,8 +1472,13 @@ def api_lead_update(page_id: str):
     try:
         sync = NotionSync()
         result = sync.update_page(page_id, body)
+        # v1.0.0bp: surface dropped properties in the audit trail too —
+        # if a Save silently lost a field, we want a permanent record.
+        audit_fields = {"fields": sorted([k for k in body.keys() if k != "id"])}
+        if result.get("dropped_props"):
+            audit_fields["dropped_props"] = result["dropped_props"]
         audit.log_event("lead_updated", actor=_actor(), page_id=page_id,
-                        fields=sorted([k for k in body.keys() if k != "id"]))
+                        **audit_fields)
         # v1.0.0al: fire an "assigned to you" notification if owner
         # changed. Guarded — never blocks the save on a notify error.
         try:

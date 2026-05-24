@@ -7,6 +7,11 @@ property 400s the whole save and the AE loses every edit in the batch.
 
 The fix: parse the error message, strip the offending property, retry
 once. Boot self-heal also now creates the property on next deploy.
+
+v1.0.0bp — recovery now returns (page, dropped_property_names) and
+loops the retry so multiple missing properties can be stripped in one
+save. Callers that previously got just a page dict need to unpack the
+tuple.
 """
 from __future__ import annotations
 
@@ -46,7 +51,7 @@ class MissingPropertyRecoveryTests(unittest.TestCase):
             # Retry succeeded
             return {"id": "abc", "url": "https://notion.so/abc"}
         with patch.object(self.sync, "_request", side_effect=fake_request):
-            result = self.sync._patch_page_with_missing_property_recovery(
+            page, dropped = self.sync._patch_page_with_missing_property_recovery(
                 "abc",
                 {"Company": {"title": []}, "Sourced For": {"multi_select": []}},
             )
@@ -55,7 +60,9 @@ class MissingPropertyRecoveryTests(unittest.TestCase):
         self.assertIn("Sourced For", calls[0]["props"])
         self.assertNotIn("Sourced For", calls[1]["props"])
         self.assertIn("Company", calls[1]["props"])
-        self.assertEqual(result["id"], "abc")
+        self.assertEqual(page["id"], "abc")
+        # v1.0.0bp: dropped names are surfaced so callers can warn.
+        self.assertEqual(dropped, ["Sourced For"])
 
     def test_retry_handles_multi_word_property_name(self):
         """Property names can have spaces ("Lead Summary", "Sourced
@@ -67,11 +74,12 @@ class MissingPropertyRecoveryTests(unittest.TestCase):
                     "Lead Summary is not a property that exists.")
             return {"id": "abc"}
         with patch.object(self.sync, "_request", side_effect=fake_request):
-            result = self.sync._patch_page_with_missing_property_recovery(
+            page, dropped = self.sync._patch_page_with_missing_property_recovery(
                 "abc",
                 {"Lead Summary": {"rich_text": []}, "Company": {"title": []}},
             )
-        self.assertEqual(result["id"], "abc")
+        self.assertEqual(page["id"], "abc")
+        self.assertEqual(dropped, ["Lead Summary"])
 
     def test_other_400_errors_are_not_swallowed(self):
         """The recovery path is narrowly scoped — unrelated 400s
@@ -87,8 +95,8 @@ class MissingPropertyRecoveryTests(unittest.TestCase):
                     "abc", {"Company": {"title": []}})
 
     def test_second_attempt_failure_propagates(self):
-        """If the retry ALSO fails, we surface the second error — don't
-        retry a third time, don't return a fake success."""
+        """If the retry's failure isn't a missing-property error, surface
+        it — don't keep retrying, don't return a fake success."""
         attempts = {"n": 0}
         def fake_request(method, path, json_body=None):
             attempts["n"] += 1
@@ -122,11 +130,84 @@ class MissingPropertyRecoveryTests(unittest.TestCase):
         def fake_request(method, path, json_body=None):
             raise NotionSyncError("Sourced For is not a property that exists.")
         with patch.object(self.sync, "_request", side_effect=fake_request) as mock_req:
-            result = self.sync._patch_page_with_missing_property_recovery(
+            page, dropped = self.sync._patch_page_with_missing_property_recovery(
                 "abc", {"Sourced For": {"multi_select": []}})
         # Only one call — recovery noticed there's nothing left to retry.
         self.assertEqual(mock_req.call_count, 1)
-        self.assertEqual(result["id"], "abc")
+        self.assertEqual(page["id"], "abc")
+        self.assertEqual(dropped, ["Sourced For"])
+
+    # ---- v1.0.0bp: looped recovery + dropped_props surfacing -------
+
+    def test_loops_through_multiple_missing_properties(self):
+        """Two columns missing → recovery should drop both across two
+        retries and still succeed on the third call, surfacing both
+        dropped names. Without the loop, the second missing property
+        would 400 the save."""
+        calls = []
+        def fake_request(method, path, json_body=None):
+            calls.append(set(json_body["properties"].keys()))
+            if "Sourced For" in json_body["properties"]:
+                raise NotionSyncError("Sourced For is not a property that exists.")
+            if "Lead Summary" in json_body["properties"]:
+                raise NotionSyncError("Lead Summary is not a property that exists.")
+            return {"id": "abc"}
+        with patch.object(self.sync, "_request", side_effect=fake_request):
+            page, dropped = self.sync._patch_page_with_missing_property_recovery(
+                "abc",
+                {"Company": {"title": []},
+                 "Sourced For": {"multi_select": []},
+                 "Lead Summary": {"rich_text": []}},
+            )
+        # Three requests: full, minus Sourced For, minus both.
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(page["id"], "abc")
+        # Both dropped names surfaced (order preserved by drop sequence).
+        self.assertEqual(set(dropped), {"Sourced For", "Lead Summary"})
+        # Final call only carried Company.
+        self.assertEqual(calls[-1], {"Company"})
+
+    def test_full_success_returns_empty_dropped_list(self):
+        """Happy path: no recovery needed → dropped should be []
+        (not None). Callers can branch on truthiness uniformly."""
+        def fake_request(method, path, json_body=None):
+            return {"id": "abc"}
+        with patch.object(self.sync, "_request", side_effect=fake_request):
+            page, dropped = self.sync._patch_page_with_missing_property_recovery(
+                "abc", {"Company": {"title": []}})
+        self.assertEqual(page["id"], "abc")
+        self.assertEqual(dropped, [])
+
+    def test_update_page_surfaces_dropped_props_in_response(self):
+        """End-to-end at the update_page boundary: when recovery drops
+        a property, the returned dict includes dropped_props so the
+        API + UI can warn instead of silently swallowing the loss."""
+        def fake_request(method, path, json_body=None):
+            if "Sourced For" in (json_body or {}).get("properties", {}):
+                raise NotionSyncError("Sourced For is not a property that exists.")
+            # Return a minimal page shape that _page_to_detail can parse.
+            return {"id": "abc", "url": "https://notion.so/abc",
+                    "properties": {}}
+        with patch.object(self.sync, "_request", side_effect=fake_request):
+            out = self.sync.update_page("abc", {
+                "company": "Shell",
+                "sourced_for_partners": ["Braze"],
+            })
+        self.assertTrue(out["updated"])
+        # dropped_props key present + lists the offending column.
+        self.assertEqual(out.get("dropped_props"), ["Sourced For"])
+
+    def test_update_page_omits_dropped_props_when_clean(self):
+        """When no recovery fires, response should NOT include the
+        dropped_props key — clients shouldn't have to filter empty
+        lists everywhere."""
+        def fake_request(method, path, json_body=None):
+            return {"id": "abc", "url": "https://notion.so/abc",
+                    "properties": {}}
+        with patch.object(self.sync, "_request", side_effect=fake_request):
+            out = self.sync.update_page("abc", {"company": "Shell"})
+        self.assertTrue(out["updated"])
+        self.assertNotIn("dropped_props", out)
 
 
 if __name__ == "__main__":

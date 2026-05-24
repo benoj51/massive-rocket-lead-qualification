@@ -809,6 +809,42 @@
     -webkit-backdrop-filter: blur(10px);
   }
   .drawer header .title { font-size: 17px; font-weight: 600; line-height: 1.2; }
+  /* v1.0.0bp: drawer title click-to-edit. Hover affordance + pencil icon
+     so users know they can rename without hunting through the Identity
+     section. */
+  .drawer header .title.editable {
+    cursor: text;
+    padding: 1px 6px;
+    margin-left: -6px;
+    border-radius: 4px;
+    border: 1px dashed transparent;
+    transition: background .12s, border-color .12s;
+    position: relative;
+  }
+  .drawer header .title.editable:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
+  .drawer header .title.editable:hover::after {
+    content: " ✎";
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 4px;
+  }
+  .drawer header .title-edit-input {
+    font-size: 17px; font-weight: 600; line-height: 1.2;
+    padding: 1px 6px;
+    margin-left: -7px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--text);
+    width: calc(100% - 2px);
+    font-family: inherit;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(232,43,35,.15);
+  }
   .drawer header .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
   .drawer header .subtitle-row {
     display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px;
@@ -1927,7 +1963,12 @@
 <aside id="lead-drawer" class="drawer" aria-hidden="true">
   <header>
     <div style="flex:1;min-width:0;">
-      <div class="title" id="ld-title">Lead</div>
+      <!-- v1.0.0bp: click-to-edit. Hover shows pencil affordance + the
+           title swaps to an inline input on click. Commit (Enter/blur)
+           pushes into the [data-ld="company"] input so the existing
+           dirty-state + Save flow handles persistence. -->
+      <div class="title editable" id="ld-title"
+            title="Click to rename this account">Lead</div>
       <div class="meta" id="ld-meta"></div>
       <div class="subtitle-row">
         <span class="icp-pill" id="ld-icp">—</span>
@@ -6826,6 +6867,63 @@
     return { count, dirtySections };
   }
 
+  // v1.0.0bp: inline rename of the drawer title.
+  // Click the title → swap to an input → Enter/blur commits, Esc reverts.
+  // Commit pushes the new value into the [data-ld="company"] field so the
+  // existing dirty-state + saveLead flow handles the actual persistence.
+  function enterTitleEditMode() {
+    const titleEl = $('#ld-title');
+    if (!titleEl || !drawerState.id) return;
+    // Already in edit mode? Don't double-swap.
+    if (titleEl.dataset.editing === '1') return;
+    const companyInput = document.querySelector('#lead-drawer [data-ld="company"]');
+    // No company field present (e.g. drawer mid-load) → bail.
+    if (!companyInput) return;
+    const original = companyInput.value || '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'title-edit-input';
+    input.value = original;
+    input.setAttribute('aria-label', 'Rename account');
+    titleEl.dataset.editing = '1';
+    titleEl.replaceChildren(input);
+    // Select-all so a single keystroke can replace the whole name.
+    input.focus();
+    input.select();
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const next = input.value.trim();
+      // Restore the static title rendering — saveLead will refresh
+      // it on success; this keeps the screen sensible meanwhile.
+      titleEl.dataset.editing = '';
+      titleEl.textContent = next || '(no name)';
+      // Mirror into the hidden Company input ONLY if the value
+      // actually changed. Mirroring an unchanged value would still
+      // dispatch input + look "dirty" to updateDirtyState.
+      if (next !== original) {
+        companyInput.value = next;
+        companyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        // Subtle hint: tell the user the rename is staged but
+        // unsaved. No toast — the dirty Save button is the signal.
+        const status = $('#ld-status');
+        if (status) status.textContent = 'Rename staged — click Save to commit';
+      }
+    };
+    const cancel = () => {
+      if (committed) return;
+      committed = true;
+      titleEl.dataset.editing = '';
+      titleEl.textContent = original || '(no name)';
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+  }
+
   function updateDirtyState() {
     const btn = $('#ld-save');
     if (!btn) return;
@@ -7109,6 +7207,19 @@
           metaEl.textContent = `Last edited ${new Date(data.lead.last_edited).toLocaleString()}`;
         }
         summary.push(`${Object.keys(edits).length} field${Object.keys(edits).length === 1 ? '' : 's'}`);
+        // v1.0.0bp: honest partial-save warning. If the Notion DB
+        // is missing a property we tried to write, the server's
+        // missing-property recovery drops it and reports the name(s)
+        // back here. Without this toast the user would see a green
+        // "Saved" and think their rename landed — when it didn't.
+        if (Array.isArray(data.dropped_props) && data.dropped_props.length) {
+          const names = data.dropped_props.join(', ');
+          toast(
+            `Save partially failed — your Notion DB is missing these ` +
+            `columns: ${names}. Restart the server to auto-add them, ` +
+            `or add them manually in Notion.`,
+            'error');
+        }
         // v0.10.0p: server re-scores when scoring-relevant fields change.
         // Reflect the new ICP in the drawer header pill + add a toast.
         if (data.rescored && data.new_score) {
@@ -9663,6 +9774,17 @@
     $('#ld-close').addEventListener('click', closeLeadDrawer);
     // (footer Cancel button removed in v0.10.0g — header X serves the same role.)
     $('#drawer-overlay').addEventListener('click', closeLeadDrawer);
+    // v1.0.0bp: drawer-title click-to-edit. Why a header-level
+    // affordance: the Company input lives inside the (collapsed by
+    // default) Identity <details> section. Users see the title and
+    // try to click it to rename — this makes that intuition work.
+    //
+    // The edit is a value-mirror, not a separate save path: the new
+    // value is pushed into the hidden [data-ld="company"] input and
+    // an `input` event is dispatched, so the existing dirty-state +
+    // Save flow (saveLead → PATCH /api/lead/<id>) handles persistence.
+    // Single source of truth, no separate code path to keep in sync.
+    $('#ld-title').addEventListener('click', enterTitleEditMode);
     // Save click handler — wrapped in try/catch so a silent throw can't
     // strand the user with an unresponsive button.
     $('#ld-save').addEventListener('click', async () => {
