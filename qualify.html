@@ -1031,6 +1031,11 @@
     </div>
     <button id="nav-live" type="button">Live</button>
     <button id="nav-expansion" type="button">Expansion</button>
+    <!-- v1.0.0br: Directory — cross-store roster (accounts + contacts).
+         Sits between Expansion (work-in-flight surfaces) and Partners
+         (the partner-org surface) because Directory is where you go
+         when you want to look someone up rather than work a deal. -->
+    <button id="nav-directory" type="button">Directory</button>
     <button id="nav-partners" type="button">Partners</button>
     <div class="nav-dropdown" data-nav-group="insights">
       <button class="nav-dropdown-trigger" id="nav-insights-group" type="button">Insights</button>
@@ -1891,6 +1896,56 @@
       <div id="exp-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
     </div>
     <div id="exp-detail" class="card" style="display:none;margin-top:14px;"></div>
+  </section>
+
+  <!-- DIRECTORY VIEW (v1.0.0br) =============================== -->
+  <!-- One surface to look up any account or any contact across
+       every store. Accounts tab = pipeline + expansion targets +
+       live project anchors deduped by lead_id. Contacts tab =
+       lead contacts + partner contacts + agency contacts +
+       expansion target contacts, with source attribution.
+       Searchbox filters both tabs by name/email/title/company. -->
+  <section id="view-directory" class="view">
+    <div class="card">
+      <h2 style="margin:0 0 4px;display:flex;align-items:center;gap:10px;">
+        <span data-icon="users" data-icon-size="18"></span>Directory
+      </h2>
+      <p class="muted" style="margin:0 0 14px;font-size:12px;">
+        Every account + every contact across MR. Search by name, email, title, or company.
+      </p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+        <input type="text" id="dir-search" placeholder="Search…"
+               style="flex:1;min-width:240px;padding:8px 12px;font-size:13px;" />
+        <button id="dir-refresh" class="btn ghost" type="button"
+                style="padding:7px 12px;font-size:12px;">Refresh</button>
+      </div>
+      <div class="tab-strip">
+        <button class="tab-btn active" type="button" data-dir-tab="accounts">
+          Accounts <span class="tab-count" id="dir-accounts-count"></span>
+        </button>
+        <button class="tab-btn" type="button" data-dir-tab="contacts">
+          Contacts <span class="tab-count" id="dir-contacts-count"></span>
+        </button>
+      </div>
+
+      <!-- ACCOUNTS TAB -->
+      <div class="tab-pane active" data-dir-pane="accounts">
+        <div id="dir-accounts-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
+      <!-- CONTACTS TAB -->
+      <div class="tab-pane" data-dir-pane="contacts">
+        <!-- Source filter chips. All / Lead / Partner / Agency / Expansion. -->
+        <div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">
+          <button class="chip active" type="button" data-dir-source="">All</button>
+          <button class="chip" type="button" data-dir-source="lead">Lead</button>
+          <button class="chip" type="button" data-dir-source="partner">Partner</button>
+          <button class="chip" type="button" data-dir-source="agency">Agency</button>
+          <button class="chip" type="button" data-dir-source="expansion">Expansion</button>
+        </div>
+        <div id="dir-contacts-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+    </div>
   </section>
 
   <!-- SETTINGS VIEW (v1.0.0bq) ================================ -->
@@ -4543,6 +4598,215 @@
         loadExpansion();
       }).catch(e => toast(`Link failed: ${e.body?.error || e.message}`, 'error'));
     }, 600);
+  }
+
+  // =============================================================
+  //  Directory view (v1.0.0br) — Accounts + Contacts cross-store roster
+  // =============================================================
+  //
+  // Two tabs, one shared search box. Accounts tab clicks open the
+  // lead drawer (real leads) or the Expansion view (orphan targets).
+  // Contacts tab clicks open the right surface based on `source`:
+  // lead → lead drawer, partner → partner detail, etc.
+  const directoryState = {
+    accounts: [],
+    contacts: [],
+    q: '',
+    sourceFilter: '',
+  };
+
+  async function loadDirectory() {
+    await Promise.all([loadDirectoryAccounts(), loadDirectoryContacts()]);
+  }
+
+  async function loadDirectoryAccounts() {
+    const list = $('#dir-accounts-list');
+    if (!list) return;
+    list.innerHTML = 'Loading accounts…';
+    try {
+      const qs = directoryState.q
+        ? `?q=${encodeURIComponent(directoryState.q)}` : '';
+      const data = await jsonFetch(`/api/directory/accounts${qs}`);
+      directoryState.accounts = data.items || [];
+      const countEl = $('#dir-accounts-count');
+      if (countEl) countEl.textContent = String(data.count || 0);
+      _renderDirectoryAccounts(data);
+    } catch (e) {
+      list.innerHTML = `<div style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderDirectoryAccounts(data) {
+    const list = $('#dir-accounts-list');
+    if (!list) return;
+    const items = directoryState.accounts;
+    if (!items.length) {
+      list.innerHTML = '<div class="muted">No accounts found.</div>';
+      return;
+    }
+    // Small totals strip above the table — gives the user a quick
+    // sense of the shape (how many real leads vs orphan targets,
+    // how many have live work in flight).
+    const t = data.totals || {};
+    const totalsStrip = `
+      <div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--text-muted);">
+        <span><strong style="color:var(--text);">${t.leads || 0}</strong> leads</span>
+        <span><strong style="color:var(--text);">${t.orphan_targets || 0}</strong> orphan targets</span>
+        <span><strong style="color:var(--text);">${t.with_live_project || 0}</strong> with live project</span>
+        <span><strong style="color:var(--text);">${t.with_expansion || 0}</strong> with expansion</span>
+      </div>`;
+    const rows = items.map(a => {
+      const status = a.status
+        ? `<span class="status-chip" style="font-size:9px;padding:2px 6px;background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);border-radius:8px;">${escapeHtml(a.status)}</span>`
+        : '';
+      const live = a.has_live_project
+        ? `<span style="font-size:9px;padding:2px 6px;background:rgba(74,222,128,.12);color:var(--green);border:1px solid rgba(74,222,128,.3);border-radius:8px;margin-left:4px;">LIVE</span>`
+        : '';
+      const exp = a.expansion_target_count > 0
+        ? `<span style="font-size:9px;padding:2px 6px;background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);border-radius:8px;margin-left:4px;">+${a.expansion_target_count} exp</span>`
+        : '';
+      const orphan = a.kind === 'expansion_target_orphan'
+        ? `<span style="font-size:9px;padding:2px 6px;background:rgba(251,191,36,.12);color:var(--yellow);border:1px solid rgba(251,191,36,.3);border-radius:8px;margin-left:4px;" title="Anchor lead not in pipeline yet">orphan</span>`
+        : '';
+      const icp = a.icp_normalised != null
+        ? `<span class="icp-pill" style="font-size:10px;padding:1px 6px;">${a.icp_normalised}/10</span>`
+        : '';
+      const click = a.kind === 'lead'
+        ? `data-dir-open-lead="${escapeAttr(a.lead_id)}"`
+        : '';
+      return `
+        <tr ${click} style="cursor:${click ? 'pointer' : 'default'};">
+          <td style="padding:8px 6px;font-weight:600;">${escapeHtml(a.name)} ${live}${exp}${orphan}</td>
+          <td style="padding:8px 6px;font-size:11px;color:var(--text-dim);">${escapeHtml(a.owner || '—')}</td>
+          <td style="padding:8px 6px;font-size:11px;color:var(--text-dim);">${escapeHtml(a.vertical || '—')}</td>
+          <td style="padding:8px 6px;">${status}</td>
+          <td style="padding:8px 6px;">${icp}</td>
+          <td style="padding:8px 6px;font-size:11px;color:var(--text-dim);text-align:right;">${a.contact_count}</td>
+        </tr>`;
+    }).join('');
+    list.innerHTML = totalsStrip + `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="text-align:left;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+            <th style="padding:6px;">Account</th>
+            <th style="padding:6px;">Owner</th>
+            <th style="padding:6px;">Vertical</th>
+            <th style="padding:6px;">Status</th>
+            <th style="padding:6px;">ICP</th>
+            <th style="padding:6px;text-align:right;">Contacts</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    // Row clicks → open lead drawer for real leads. Orphan target
+    // rows are read-only here (clicking would open the Expansion
+    // view, but the deep-link selector for that view isn't wired
+    // yet — punt to v1.0.0bs).
+    list.querySelectorAll('[data-dir-open-lead]').forEach(row => {
+      row.addEventListener('click', () => {
+        const lid = row.dataset.dirOpenLead;
+        if (lid) openLeadDrawer(lid);
+      });
+      row.addEventListener('mouseover', () => {
+        row.style.background = 'var(--surface-2)';
+      });
+      row.addEventListener('mouseout', () => {
+        row.style.background = '';
+      });
+    });
+  }
+
+  async function loadDirectoryContacts() {
+    const list = $('#dir-contacts-list');
+    if (!list) return;
+    list.innerHTML = 'Loading contacts…';
+    try {
+      const params = new URLSearchParams();
+      if (directoryState.q) params.set('q', directoryState.q);
+      if (directoryState.sourceFilter) params.set('source', directoryState.sourceFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const data = await jsonFetch(`/api/directory/contacts${qs}`);
+      directoryState.contacts = data.items || [];
+      const countEl = $('#dir-contacts-count');
+      if (countEl) countEl.textContent = String(data.count || 0);
+      _renderDirectoryContacts(data);
+    } catch (e) {
+      list.innerHTML = `<div style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderDirectoryContacts(data) {
+    const list = $('#dir-contacts-list');
+    if (!list) return;
+    const items = directoryState.contacts;
+    if (!items.length) {
+      list.innerHTML = '<div class="muted">No contacts found. Try clearing filters.</div>';
+      return;
+    }
+    const by = data.by_source || {};
+    const totalsStrip = `
+      <div style="display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--text-muted);">
+        <span><strong style="color:var(--text);">${by.lead || 0}</strong> lead</span>
+        <span><strong style="color:var(--text);">${by.partner || 0}</strong> partner</span>
+        <span><strong style="color:var(--text);">${by.agency || 0}</strong> agency</span>
+        <span><strong style="color:var(--text);">${by.expansion || 0}</strong> expansion</span>
+      </div>`;
+    // Source-pill colour mapping. Used as a small chip so the user
+    // can scan the list and see at a glance which contacts are
+    // partner-sourced vs deal-side.
+    const sourcePill = (s) => {
+      const colours = {
+        lead:      'background:rgba(74,158,255,.12);color:#4a9eff;border-color:rgba(74,158,255,.3);',
+        partner:   'background:rgba(168,85,247,.12);color:#a855f7;border-color:rgba(168,85,247,.3);',
+        agency:    'background:rgba(251,191,36,.12);color:var(--yellow);border-color:rgba(251,191,36,.3);',
+        expansion: 'background:rgba(74,222,128,.12);color:var(--green);border-color:rgba(74,222,128,.3);',
+      };
+      return `<span style="font-size:9px;padding:2px 6px;border-radius:8px;border:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;${colours[s] || ''}">${escapeHtml(s)}</span>`;
+    };
+    const rows = items.map(c => {
+      const stake = c.stakeholder_role
+        ? ` <span style="font-size:9px;padding:1px 5px;background:var(--surface-2);color:var(--text-dim);border-radius:6px;text-transform:uppercase;letter-spacing:.05em;">${escapeHtml(c.stakeholder_role)}</span>`
+        : '';
+      const email = c.email
+        ? `<a href="mailto:${escapeAttr(c.email)}" style="color:var(--text-dim);font-family:var(--mono);font-size:11px;">${escapeHtml(c.email)}</a>`
+        : '<span class="muted">—</span>';
+      const click = c.source === 'lead'
+        ? `data-dir-open-lead="${escapeAttr(c.source_id)}"`
+        : '';
+      return `
+        <tr ${click} style="cursor:${click ? 'pointer' : 'default'};">
+          <td style="padding:8px 6px;font-weight:600;">${escapeHtml(c.name)}${stake}</td>
+          <td style="padding:8px 6px;font-size:11px;color:var(--text-dim);">${escapeHtml(c.title || '—')}</td>
+          <td style="padding:8px 6px;">${sourcePill(c.source)}</td>
+          <td style="padding:8px 6px;font-size:11px;">${escapeHtml(c.source_company || '—')}</td>
+          <td style="padding:8px 6px;">${email}</td>
+        </tr>`;
+    }).join('');
+    list.innerHTML = totalsStrip + `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="text-align:left;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+            <th style="padding:6px;">Name</th>
+            <th style="padding:6px;">Title</th>
+            <th style="padding:6px;">Source</th>
+            <th style="padding:6px;">Company / via</th>
+            <th style="padding:6px;">Email</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    list.querySelectorAll('[data-dir-open-lead]').forEach(row => {
+      row.addEventListener('click', () => {
+        const lid = row.dataset.dirOpenLead;
+        if (lid) openLeadDrawer(lid);
+      });
+      row.addEventListener('mouseover', () => {
+        row.style.background = 'var(--surface-2)';
+      });
+      row.addEventListener('mouseout', () => {
+        row.style.background = '';
+      });
+    });
   }
 
   // =============================================================
@@ -8061,6 +8325,11 @@
     moon:           ['M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'],
     // Navigation
     'arrow-right':  ['M5 12h14', 'M12 5l7 7-7 7'],
+    // v1.0.0br: directory icon — used in the Directory view header.
+    users:          ['M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
+                       'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+                       'M23 21v-2a4 4 0 0 0-3-3.87',
+                       'M16 3.13a4 4 0 0 1 0 7.75'],
   };
 
   function icon(name, opts) {
@@ -9978,6 +10247,46 @@
         loadExpansion();
       });
     }
+    // v1.0.0br: Directory view (between Expansion and Partners).
+    const navDir = $('#nav-directory');
+    if (navDir) {
+      navDir.addEventListener('click', () => {
+        switchView('directory');
+        loadDirectory();
+      });
+    }
+    document.querySelectorAll('[data-dir-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.dirTab;
+        document.querySelectorAll('[data-dir-tab]').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-dir-pane]').forEach(p =>
+          p.classList.toggle('active', p.dataset.dirPane === target));
+      });
+    });
+    document.querySelectorAll('[data-dir-source]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-dir-source]').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        directoryState.sourceFilter = btn.dataset.dirSource;
+        loadDirectoryContacts();  // refetch with new source filter
+      });
+    });
+    const dirSearch = $('#dir-search');
+    if (dirSearch) {
+      // Debounce the search input — typing fires N requests otherwise.
+      let timer = null;
+      dirSearch.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          directoryState.q = dirSearch.value;
+          loadDirectory();
+        }, 250);
+      });
+    }
+    const dirRefresh = $('#dir-refresh');
+    if (dirRefresh) dirRefresh.addEventListener('click', loadDirectory);
+
     // v1.0.0bq: Settings view (gear icon, between Insights + Qualify).
     const navSet = $('#nav-settings');
     if (navSet) {

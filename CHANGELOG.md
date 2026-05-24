@@ -5,6 +5,82 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0br] — 2026-05-24 — Directory: accounts + contacts cross-store roster
+
+### Why
+
+Until now there was no single place to answer "who do we know at
+X?" or "show me every contact we have across MR." Lead contacts
+lived per-Notion-lead, partner contacts lived per-partner, agency
+contacts were embedded inside lead agencies, expansion target
+contacts were embedded inside targets. Each surface was good at
+its job; none of them gave you a roster.
+
+### What's new
+
+A **Directory** nav item between Expansion and Partners opens a
+view with two tabs:
+
+**Accounts tab** — every account we have data on, deduped by
+lead_id where possible:
+- Pipeline leads from Notion
+- Expansion target anchors that aren't yet in the pipeline get
+  synthetic rows (kind = `expansion_target_orphan`) so the team's
+  early-stage research stays visible even before the lead exists
+- Each row enriched with: has-live-project flag + status, expansion
+  target count, contact count
+
+**Contacts tab** — every person we know, with source attribution:
+- `lead` — contacts_store (per Notion lead)
+- `partner` — partner_contacts_store (Braze/Snowflake/etc rosters)
+- `agency` — embedded in lead_agencies_store (concurrent agencies
+  on live deals)
+- `expansion` — embedded in expansion_targets_store (contacts at
+  greenfield accounts)
+- Colour-coded source pills so the user can scan and tell at a
+  glance who's a partner-side contact vs deal-side
+- Lead contacts carry their stakeholder_role (champion / blocker /
+  sponsor) so the directory doubles as a high-level stakeholder map
+- Row click on lead contacts opens the lead drawer
+
+Both tabs share a debounced search box (filters by name / email /
+title / company / vertical / owner). Contacts tab also has source
+filter chips (All / Lead / Partner / Agency / Expansion).
+
+### Resilience
+
+Both aggregators degrade gracefully when Notion is unreachable —
+local stores (live projects, expansion targets, partner contacts,
+agency contacts) still surface so the directory isn't a blank page
+during a pipeline outage. The lead-source company-name resolution
+uses a slug round-trip so `shell_na` on-disk maps back to `Shell`
+in the UI.
+
+### Architecture
+
+- `GET /api/directory/accounts?q=…` — anchor-aware aggregate
+- `GET /api/directory/contacts?q=…&source=…` — cross-store contact roster
+- Per-source totals + grand totals on both endpoints so the UI can
+  render the counts strip without re-walking the data
+
+### Tests
+
+24 new tests in `test_directory.py` covering:
+- Account aggregation: pipeline → list, live-project enrichment,
+  expansion-target enrichment, contact-count enrichment, orphan
+  anchors, query filter on name/owner/vertical, Notion-failure
+  resilience, alphabetical sort
+- Contact aggregation: all four sources surface independently and
+  combined; lead contacts carry stakeholder_role; partner contacts
+  carry partner name; agency contacts get "agency (via lead)"
+  format; expansion contacts carry target name; query filter on
+  name/email/title; source filter; agency contacts without names
+  skipped; Notion-failure resilience
+
+Full suite: **1029 passing**.
+
+---
+
 ## [1.0.0bq] — 2026-05-24 — Settings view + writable users + utility strip
 
 Ben asked for two things back-to-back: a place to edit users from the

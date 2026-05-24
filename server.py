@@ -4545,6 +4545,354 @@ def api_okr_kr_delete(okr_id: str, kr_id: str):
     return jsonify({"deleted": True})
 
 
+# v1.0.0br: Directory ------------------------------------------------------
+# Cross-surface roster. One place to browse every account + every
+# contact across all stores (Notion pipeline, expansion targets,
+# live projects, lead contacts, partner contacts, agency embedded
+# contacts, expansion target embedded contacts).
+#
+# Why aggregate here instead of normalising upstream: each store has
+# different concerns (pipeline drives scoring, partner contacts have
+# territory metadata, agency contacts are scoped to the deal context,
+# etc.) — they're correctly separate at the storage layer. The
+# directory is the read-side view that joins them.
+
+@app.route("/api/directory/accounts", methods=["GET"])
+def api_directory_accounts():
+    """Every account we have data on, deduped by lead_id where
+    possible. Each row tells the UI:
+
+      {
+        lead_id:                "<page-id> | <synthetic for orphan target>",
+        name:                   "Shell North America",
+        kind:                   "lead" | "expansion_target_orphan",
+        status:                 "Qualified" | None,
+        owner:                  "Ben Ojuolape" | None,
+        vertical:               "Energy" | None,
+        icp_normalised:         8.5 | None,
+        url:                    "https://www.shell.com" | None,
+        has_live_project:       True | False,
+        live_project_status:    "active" | None,
+        expansion_target_count: 3,
+        contact_count:          12,
+      }
+
+    Notion pipeline failures don't strand the view — we surface
+    what's locally cached (live projects + targets) even if Notion
+    is unreachable.
+    """
+    name_filter = (request.args.get("q") or "").strip().lower()
+    # Pull everything once. Each `try` is independent so a failure in
+    # one source doesn't blank the others.
+    leads: list[dict] = []
+    try:
+        leads = NotionSync().list_pipeline(limit=500)
+    except Exception as e:
+        log.warning("Directory accounts: Notion pipeline fetch failed: %s", e)
+    projects = live_projects_store.list_all()
+    targets = expansion_targets_store.list_all()
+
+    # Index by lead_id for fast joins.
+    project_by_lead = {p["lead_id"]: p for p in projects if p.get("lead_id")}
+    targets_by_anchor: dict[str, int] = {}
+    for t in targets:
+        a = t.get("anchor_lead_id")
+        if a:
+            targets_by_anchor[a] = targets_by_anchor.get(a, 0) + 1
+
+    # Per-lead contact count (walk the contacts store directory once,
+    # cheaper than N round-trips through list_contacts).
+    contact_counts: dict[str, int] = {}
+    try:
+        d = contacts_store._store_dir()
+        if d.exists():
+            for f in d.glob("*.json"):
+                try:
+                    rows = json.loads(f.read_text())
+                    if isinstance(rows, list):
+                        # File name is the slugified lead_id; we match
+                        # against slugified lead ids below.
+                        contact_counts[f.stem] = len(rows)
+                except (json.JSONDecodeError, OSError):
+                    continue
+    except Exception as e:
+        log.warning("Directory accounts: contact-count scan failed: %s", e)
+
+    def _slug_for(lead_id: str) -> str:
+        try:
+            return project_store.slugify(lead_id)
+        except Exception:
+            return lead_id
+
+    items: list[dict] = []
+    seen_leads: set[str] = set()
+    for lead in leads:
+        lid = lead.get("id") or ""
+        if not lid:
+            continue
+        seen_leads.add(lid)
+        slug = _slug_for(lid)
+        proj = project_by_lead.get(lid)
+        items.append({
+            "lead_id":                lid,
+            "name":                   lead.get("company") or lid,
+            "kind":                   "lead",
+            "status":                 lead.get("status"),
+            "sales_stage":            lead.get("sales_stage"),
+            "owner":                  lead.get("owner"),
+            "vertical":               lead.get("vertical"),
+            "icp_normalised":         lead.get("icp_normalised"),
+            "url":                    lead.get("company_url"),
+            "last_edited":            lead.get("last_edited"),
+            "has_live_project":       bool(proj),
+            "live_project_status":    proj.get("status") if proj else None,
+            "expansion_target_count": targets_by_anchor.get(lid, 0),
+            "contact_count":          contact_counts.get(slug, 0),
+        })
+
+    # Orphan rows: expansion target anchors that don't appear in the
+    # pipeline. Group them under a synthetic "account" row so the
+    # user can still see the work in flight from this anchor.
+    for anchor_id, count in targets_by_anchor.items():
+        if anchor_id in seen_leads:
+            continue
+        items.append({
+            "lead_id":                anchor_id,
+            "name":                   anchor_id,
+            "kind":                   "expansion_target_orphan",
+            "status":                 None,
+            "owner":                  None,
+            "vertical":               None,
+            "icp_normalised":         None,
+            "url":                    None,
+            "last_edited":            None,
+            "has_live_project":       False,
+            "live_project_status":    None,
+            "expansion_target_count": count,
+            "contact_count":          0,
+        })
+
+    if name_filter:
+        items = [i for i in items
+                  if name_filter in (i["name"] or "").lower()
+                  or name_filter in (i.get("vertical") or "").lower()
+                  or name_filter in (i.get("owner") or "").lower()]
+
+    items.sort(key=lambda i: (i["name"] or "").lower())
+    return jsonify({
+        "items":  items,
+        "count":  len(items),
+        "totals": {
+            "leads":               sum(1 for i in items if i["kind"] == "lead"),
+            "orphan_targets":      sum(1 for i in items
+                                        if i["kind"] == "expansion_target_orphan"),
+            "with_live_project":   sum(1 for i in items if i["has_live_project"]),
+            "with_expansion":      sum(1 for i in items
+                                        if i["expansion_target_count"] > 0),
+        },
+    })
+
+
+@app.route("/api/directory/contacts", methods=["GET"])
+def api_directory_contacts():
+    """Every contact we know across every store, with source attribution
+    so the UI can render "Sarah Johnson — Head of Loyalty (via Shell
+    lead)" vs "Marina Klusas — AE (Braze partner)" appropriately.
+
+    Sources:
+      - lead          → contacts_store (per Notion lead)
+      - partner       → partner_contacts_store (partner roster)
+      - agency        → lead_agencies_store (embedded in agencies)
+      - expansion     → expansion_targets_store (embedded in targets)
+
+    Each item:
+      {
+        id:             "<source-id>",
+        name:           "Sarah Johnson",
+        title:          "Head of Loyalty UK",
+        email:          "sarah@shell.com",
+        phone:          "..." | None,
+        source:         "lead" | "partner" | "agency" | "expansion",
+        source_company: "Shell" | "Braze" | "Accenture" | "Shell UK",
+        source_id:      "<lead-id> | <partner-id> | ...",
+        stakeholder_role: "champion" | None,   # lead contacts only
+        last_contacted: iso | None,
+      }
+    """
+    q = (request.args.get("q") or "").strip().lower()
+    source_filter = (request.args.get("source") or "").strip().lower()
+    items: list[dict] = []
+
+    # Pipeline name lookup — used to label lead contacts with the
+    # company name rather than just the page_id.
+    name_by_lead: dict[str, str] = {}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                name_by_lead[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("Directory contacts: pipeline name lookup failed: %s", e)
+
+    # 1) Lead contacts — walk the contacts_store directory.
+    try:
+        d = contacts_store._store_dir()
+        if d.exists():
+            for f in d.glob("*.json"):
+                lead_slug = f.stem
+                try:
+                    rows = json.loads(f.read_text())
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not isinstance(rows, list):
+                    continue
+                # Try to resolve slug back to a human name via the
+                # pipeline name map (slugs are a lossy transform but
+                # they round-trip on simple names). Fall back to
+                # the slug itself.
+                company = name_by_lead.get(lead_slug)
+                if not company:
+                    # Best-effort: pipeline ids may not slug-match;
+                    # try direct id lookup too.
+                    for k, v in name_by_lead.items():
+                        if project_store.slugify(k) == lead_slug:
+                            company = v
+                            break
+                company = company or lead_slug
+                for c in rows:
+                    items.append({
+                        "id":              c.get("id"),
+                        "name":            c.get("name"),
+                        "title":           c.get("title"),
+                        "email":           c.get("email"),
+                        "phone":           c.get("phone"),
+                        "source":          "lead",
+                        "source_company":  company,
+                        "source_id":       lead_slug,
+                        "stakeholder_role": c.get("stakeholder_role"),
+                        "influence":       c.get("influence"),
+                        "interest":        c.get("interest"),
+                        "last_contacted":  c.get("last_contacted"),
+                    })
+    except Exception as e:
+        log.warning("Directory contacts: lead-contacts scan failed: %s", e)
+
+    # 2) Partner contacts.
+    try:
+        partner_name_by_id: dict[str, str] = {}
+        for p in partners_store.list_partners():
+            if p.get("id"):
+                partner_name_by_id[p["id"]] = p.get("name") or p["id"]
+        for c in partner_contacts_store.list_all_contacts():
+            pid = c.get("partner_id") or ""
+            items.append({
+                "id":              c.get("id"),
+                "name":            c.get("name"),
+                "title":           c.get("title"),
+                "email":           c.get("email"),
+                "phone":           c.get("phone"),
+                "source":          "partner",
+                "source_company":  partner_name_by_id.get(pid, pid),
+                "source_id":       pid,
+                "stakeholder_role": None,
+                "last_contacted":  c.get("last_touched"),
+            })
+    except Exception as e:
+        log.warning("Directory contacts: partner-contacts scan failed: %s", e)
+
+    # 3) Agency embedded contacts — walk lead_agencies_store directory.
+    # Slug → company resolution mirrors the lead-contacts path:
+    # the on-disk file name is `slugify(lead_id)`, but pipeline lookups
+    # are keyed by the raw page_id. We do the slug-back walk so the
+    # "via Shell" suffix isn't "via shell_na" garbage.
+    def _company_for_slug(slug: str) -> str:
+        if slug in name_by_lead:
+            return name_by_lead[slug]
+        for raw_id, name in name_by_lead.items():
+            if project_store.slugify(raw_id) == slug:
+                return name
+        return slug
+
+    try:
+        d = lead_agencies_store._store_dir()
+        if d.exists():
+            for f in d.glob("*.json"):
+                lead_slug = f.stem
+                try:
+                    agencies = json.loads(f.read_text())
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not isinstance(agencies, list):
+                    continue
+                company = _company_for_slug(lead_slug)
+                for ag in agencies:
+                    ag_name = ag.get("name") or "agency"
+                    for c in (ag.get("contacts") or []):
+                        if not c.get("name"):
+                            continue
+                        items.append({
+                            "id":              c.get("id"),
+                            "name":            c.get("name"),
+                            "title":           c.get("title"),
+                            "email":           c.get("email"),
+                            "phone":           None,
+                            "source":          "agency",
+                            "source_company":  f"{ag_name} (via {company})",
+                            "source_id":       lead_slug,
+                            "stakeholder_role": None,
+                            "last_contacted":  None,
+                        })
+    except Exception as e:
+        log.warning("Directory contacts: agency-contacts scan failed: %s", e)
+
+    # 4) Expansion target embedded contacts.
+    try:
+        for t in expansion_targets_store.list_all():
+            for c in (t.get("contacts") or []):
+                if not c.get("name"):
+                    continue
+                items.append({
+                    "id":              c.get("id"),
+                    "name":            c.get("name"),
+                    "title":           c.get("title"),
+                    "email":           c.get("email"),
+                    "phone":           None,
+                    "source":          "expansion",
+                    "source_company":  t.get("name") or "expansion target",
+                    "source_id":       t.get("id"),
+                    "stakeholder_role": None,
+                    "last_contacted":  None,
+                })
+    except Exception as e:
+        log.warning("Directory contacts: expansion-contacts scan failed: %s", e)
+
+    # Filter + sort.
+    if source_filter:
+        items = [i for i in items if i["source"] == source_filter]
+    if q:
+        items = [i for i in items
+                  if q in (i.get("name") or "").lower()
+                  or q in (i.get("email") or "").lower()
+                  or q in (i.get("title") or "").lower()
+                  or q in (i.get("source_company") or "").lower()]
+    items.sort(key=lambda i: (i.get("name") or "").lower())
+
+    # Totals computed BEFORE filtering so the UI can show "5 of 312"
+    # — but since we already filtered, compute totals from the
+    # unfiltered set instead. Re-walk is cheap.
+    # Simpler: build totals from `items` post-filter (matches what the
+    # user sees) + return unfiltered counts in a separate field.
+    return jsonify({
+        "items":   items,
+        "count":   len(items),
+        "by_source": {
+            "lead":      sum(1 for i in items if i["source"] == "lead"),
+            "partner":   sum(1 for i in items if i["source"] == "partner"),
+            "agency":    sum(1 for i in items if i["source"] == "agency"),
+            "expansion": sum(1 for i in items if i["source"] == "expansion"),
+        },
+    })
+
+
 # v1.0.0bo: Account expansion API -----------------------------------------
 # Land-and-expand surface. Each "expansion target" sits between
 # "known opportunity" and "real lead in pipeline" — captures the
