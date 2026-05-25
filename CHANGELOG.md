@@ -5,6 +5,68 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bx] — 2026-05-25 — In-app dialog primitives; native prompt/confirm retired
+
+### The pattern problem
+
+After Ben caught the Settings → Edit user flow stalling (browsers
+suppress repeat `window.prompt()` calls), it was obvious the same
+problem hid behind every other dialog in the app. **68 native
+prompt/confirm calls** scattered across Expansion, Live Projects,
+Project Build criteria editor, partner contacts, account watchlist,
+Jeff, filter presets, etc. All of them subject to the same browser
+throttling, all visually inconsistent with the rest of the platform,
+none keyboard-friendly beyond the OS defaults.
+
+### Primitives
+
+Two promise-returning helpers in `qualify.html`:
+
+```js
+await confirmDialog('Delete this contact?')
+await confirmDialog({ title: 'Delete?', message: '…', danger: true })
+
+await promptDialog('New name', 'Old name')
+await promptDialog({ title: 'Rename', label: 'New name',
+                      default: 'Old', placeholder: '…' })
+```
+
+- **Drop-in-friendly signatures**: bare string OR options object,
+  so the mechanical sweep was a one-line code change at each call
+  site (just adding `await`).
+- **Single recycled overlay** (`#mr-dialog-overlay`) — only one
+  dialog open at a time. Opening a second cancels the first.
+- **Esc cancels, Enter submits**, focus + select-all on the input
+  for prompts so a single keystroke replaces the default.
+- **Danger variant** (`danger: true`) renders the confirm button
+  in MR red for destructive actions.
+- **Click-outside cancels** without needing the Cancel button.
+- Exposed on `window` for ad-hoc / console use.
+
+### The sweep
+
+- All 27 `window.confirm(...)` → `await confirmDialog(...)`
+- All 41 `window.prompt(...)` → `await promptDialog(...)`
+- 7 enclosing handlers converted to `async` (4 named functions, 1
+  setTimeout callback, the `_jeffClear` helper, and
+  `_bulkPickFromEnum`)
+- Syntax-checked the whole 612KB inline JS via `node --check` —
+  zero errors
+
+### Out of scope (for later)
+
+The **multi-prompt chains** (Add expansion target with 4 prompts,
+Add OKR with quarter+objective+KR, Add agency with name+scope+type+contact)
+still call the new `promptDialog` sequentially. They work — no
+browser throttling now — but they're still a UX wart. Each deserves
+a feature-specific modal (like Settings Edit got in v1.0.0bw, or
+the CSV import modal in v1.0.0bv). Will pick them off as Ben
+hits the friction.
+
+Backend untouched. Full suite: **1089 passing**.
+
+---
+
 ## [1.0.0bw] — 2026-05-24 — Fix: Settings → Edit user is now a real modal
 
 Reported: "Edit didn't work" on the Settings → Users page.

@@ -2941,6 +2941,182 @@
     window.__toastTimer = setTimeout(() => el.className = 'toast', 4200);
   };
 
+  // =============================================================
+  //  Modal primitives (v1.0.0bx) — promise-returning confirm + prompt
+  // =============================================================
+  //
+  // Replaces native browser dialogs across the app:
+  // - Browser throttling no longer suppresses repeat dialogs
+  // - Visual consistency with the rest of the platform
+  // - Keyboard support (Esc cancels, Enter submits)
+  // - Danger button variant for destructive actions
+  //
+  // Drop-in-friendly signatures: both helpers accept a plain string
+  // (matching the legacy native API) OR an options object for
+  // richer cases (title, danger styling, custom button labels,
+  // helper text, placeholder).
+  //
+  //   await confirmDialog('Delete this contact?')
+  //   await confirmDialog({title:'Delete?', message:'...', danger:true})
+  //   await promptDialog('New name', 'Old name')
+  //   await promptDialog({title:'Rename', label:'New name', default:'Old', placeholder:'...'})
+  //
+  // The two helpers share a single overlay DOM node, recycled
+  // across calls. Only one dialog open at a time (matches native
+  // behaviour) — opening a second while the first is live closes
+  // the first.
+
+  function _ensureDialogOverlay() {
+    let o = $('#mr-dialog-overlay');
+    if (o) return o;
+    o = document.createElement('div');
+    o.id = 'mr-dialog-overlay';
+    o.className = 'mr-dialog-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:none;align-items:center;justify-content:center;padding:20px;';
+    o.innerHTML = `
+      <div class="mr-dialog" role="dialog" aria-modal="true"
+            style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.4);overflow:hidden;">
+        <header style="padding:14px 18px 0;">
+          <h3 class="mr-dialog-title" style="margin:0 0 4px;font-size:15px;font-weight:600;color:var(--text);"></h3>
+          <p class="mr-dialog-message muted" style="margin:0;font-size:12px;line-height:1.45;white-space:pre-wrap;"></p>
+        </header>
+        <div class="mr-dialog-body" style="padding:12px 18px 0;">
+          <label class="mr-dialog-label" style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;"></label>
+          <input class="mr-dialog-input" type="text" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" />
+          <div class="mr-dialog-error" style="color:var(--red);font-size:11px;margin-top:6px;display:none;"></div>
+        </div>
+        <footer style="padding:14px 18px;display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn ghost mr-dialog-cancel" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+          <button class="btn mr-dialog-confirm" type="button" style="padding:6px 14px;font-size:12px;">OK</button>
+        </footer>
+      </div>`;
+    document.body.appendChild(o);
+    // Click outside dialog → cancel.
+    o.addEventListener('click', (e) => {
+      if (e.target === o) o.__resolve && o.__resolve(o.__kind === 'prompt' ? null : false);
+    });
+    return o;
+  }
+
+  function _openDialog(kind, opts) {
+    const o = _ensureDialogOverlay();
+    // If another dialog is open, cancel it before showing the new one.
+    if (o.__resolve) {
+      o.__resolve(kind === 'prompt' ? null : false);
+    }
+    o.__kind = kind;
+    const titleEl   = o.querySelector('.mr-dialog-title');
+    const msgEl     = o.querySelector('.mr-dialog-message');
+    const labelEl   = o.querySelector('.mr-dialog-label');
+    const inputEl   = o.querySelector('.mr-dialog-input');
+    const errorEl   = o.querySelector('.mr-dialog-error');
+    const cancelBtn = o.querySelector('.mr-dialog-cancel');
+    const confirmBtn = o.querySelector('.mr-dialog-confirm');
+    const bodyEl    = o.querySelector('.mr-dialog-body');
+    titleEl.textContent = opts.title || (kind === 'prompt' ? 'Enter a value' : 'Confirm');
+    msgEl.textContent = opts.message || '';
+    msgEl.style.display = opts.message ? 'block' : 'none';
+    if (kind === 'prompt') {
+      bodyEl.style.display = 'block';
+      labelEl.textContent = opts.label || '';
+      labelEl.style.display = opts.label ? 'block' : 'none';
+      inputEl.value = opts.default || '';
+      inputEl.placeholder = opts.placeholder || '';
+      inputEl.type = opts.type || 'text';
+    } else {
+      bodyEl.style.display = 'none';
+    }
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+    cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+    confirmBtn.textContent = opts.confirmLabel || (kind === 'prompt' ? 'Save' : 'OK');
+    confirmBtn.classList.toggle('danger', !!opts.danger);
+    // Visual variant for danger — red button.
+    confirmBtn.style.background = opts.danger ? 'var(--red)' : '';
+    confirmBtn.style.color = opts.danger ? '#fff' : '';
+    confirmBtn.style.borderColor = opts.danger ? 'var(--red)' : '';
+
+    o.style.display = 'flex';
+    setTimeout(() => (kind === 'prompt' ? inputEl : confirmBtn).focus(), 30);
+    if (kind === 'prompt') {
+      // Select the default so a single keystroke replaces it.
+      setTimeout(() => inputEl.select(), 40);
+    }
+
+    return new Promise((resolve) => {
+      const cleanup = (val) => {
+        o.style.display = 'none';
+        document.removeEventListener('keydown', onKey);
+        cancelBtn.onclick = null;
+        confirmBtn.onclick = null;
+        o.__resolve = null;
+        resolve(val);
+      };
+      o.__resolve = cleanup;
+      const submit = () => {
+        if (kind === 'prompt') {
+          const v = inputEl.value;
+          cleanup(v);
+        } else {
+          cleanup(true);
+        }
+      };
+      const cancel = () => cleanup(kind === 'prompt' ? null : false);
+      cancelBtn.onclick = cancel;
+      confirmBtn.onclick = submit;
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        else if (e.key === 'Enter' && (kind !== 'prompt' || e.target === inputEl)) {
+          e.preventDefault(); submit();
+        }
+      };
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  function _normaliseDialogOpts(arg, secondArg) {
+    // Accept a bare string (matching the legacy native API) or an
+    // options object. Two-arg form: promptDialog('Label', 'default').
+    if (arg && typeof arg === 'object') return arg;
+    const opts = {};
+    if (typeof arg === 'string') opts.message = arg;
+    if (typeof secondArg !== 'undefined') opts.default = secondArg;
+    return opts;
+  }
+
+  async function confirmDialog(arg) {
+    const opts = _normaliseDialogOpts(arg);
+    // If the caller only passed a message string, lift it into the title
+    // since confirms read better with title-as-question + no body.
+    if (opts.message && !opts.title) {
+      // If the message is a single line, use it as the title.
+      // Otherwise split on the first newline.
+      const idx = opts.message.indexOf('\n');
+      if (idx === -1) {
+        opts.title = opts.message;
+        opts.message = '';
+      } else {
+        opts.title = opts.message.slice(0, idx).trim();
+        opts.message = opts.message.slice(idx + 1).trim();
+      }
+    }
+    return _openDialog('confirm', opts);
+  }
+
+  async function promptDialog(arg, secondArg) {
+    const opts = _normaliseDialogOpts(arg, secondArg);
+    // Single-string call: use the string as the label.
+    if (opts.message && !opts.label && !opts.title) {
+      opts.label = opts.message;
+      opts.message = '';
+    }
+    return _openDialog('prompt', opts);
+  }
+
+  // Expose globally for ad-hoc use from the console / extension code.
+  window.confirmDialog = confirmDialog;
+  window.promptDialog = promptDialog;
+
   function authHeaders() {
     const t = state.authToken;
     return t ? { 'Authorization': `Bearer ${t}` } : {};
@@ -2980,7 +3156,7 @@
     if (!needsAuth) return;
     let token = state.authToken || localStorage.getItem('mr-auth-token');
     while (force || !token) {
-      const input = window.prompt('Massive Rocket Lead Qualifier — access token');
+      const input = await promptDialog('Massive Rocket Lead Qualifier — access token');
       if (!input) {
         toast('Access token required to continue.', 'error');
         await new Promise(r => setTimeout(r, 1500));
@@ -4012,7 +4188,7 @@
     });
     listEl.querySelectorAll('[data-ag-del]').forEach(b => {
       b.addEventListener('click', async () => {
-        if (!window.confirm('Remove this agency entry?')) return;
+        if (!await confirmDialog('Remove this agency entry?')) return;
         try {
           await jsonFetch(`/api/leads/${encodeURIComponent(drawerState.id)}/agencies/${encodeURIComponent(b.dataset.agDel)}`,
                           { method: 'DELETE' });
@@ -4118,7 +4294,7 @@
       el.querySelectorAll('[data-pa-remove]').forEach(b => {
         b.addEventListener('click', async () => {
           const [pid, cid] = b.dataset.paRemove.split('|');
-          if (!window.confirm('Remove this partner contact from this lead?')) return;
+          if (!await confirmDialog('Remove this partner contact from this lead?')) return;
           try {
             await jsonFetch(`/api/lead/${encodeURIComponent(leadId)}/partner-contacts/${encodeURIComponent(pid)}/${encodeURIComponent(cid)}`,
                             { method: 'DELETE' });
@@ -4528,9 +4704,9 @@
   }
 
   async function _addExpansionTarget(anchorLeadId) {
-    const name = window.prompt('Expansion target (e.g. "Shell UK"):');
+    const name = await promptDialog('Expansion target (e.g. "Shell UK"):');
     if (name === null || !name.trim()) return;
-    const region = window.prompt('Region (optional, e.g. "EMEA"):', '');
+    const region = await promptDialog('Region (optional, e.g. "EMEA"):', '');
     if (region === null) return;
     try {
       const data = await jsonFetch('/api/expansion-targets', {
@@ -4633,7 +4809,7 @@
       expansionState.selectedTargetId = null;
     });
     $('#exp-d-rename').addEventListener('click', async () => {
-      const n = window.prompt('Rename target:', t.name);
+      const n = await promptDialog('Rename target:', t.name);
       if (n === null || !n.trim()) return;
       const u = await patch({ name: n.trim() });
       if (u) { openExpansionTarget(t.id); loadExpansion(); }
@@ -4649,7 +4825,7 @@
     $('#exp-d-notes').addEventListener('change', (e) =>
       patch({ notes: e.target.value }).then(u => u && toast('Notes saved', 'success')));
     $('#exp-d-del').addEventListener('click', async () => {
-      if (!window.confirm(`Delete the expansion target "${t.name}"? This is permanent.`)) return;
+      if (!await confirmDialog(`Delete the expansion target "${t.name}"? This is permanent.`)) return;
       try {
         await jsonFetch(`/api/expansion-targets/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
         toast('Deleted', 'success');
@@ -4701,11 +4877,11 @@
   }
 
   async function _addExpansionTargetContact(targetId) {
-    const name = window.prompt('Contact name:');
+    const name = await promptDialog('Contact name:');
     if (name === null || !name.trim()) return;
-    const title = window.prompt('Title (optional):', '') || '';
-    const email = window.prompt('Email (optional):', '') || '';
-    const source = window.prompt('Source (where did you hear about them? e.g. "via Marina at Braze"):', '') || '';
+    const title = await promptDialog('Title (optional):', '') || '';
+    const email = await promptDialog('Email (optional):', '') || '';
+    const source = await promptDialog('Source (where did you hear about them? e.g. "via Marina at Braze"):', '') || '';
     try {
       await jsonFetch(`/api/expansion-targets/${encodeURIComponent(targetId)}/contacts`, {
         method: 'POST',
@@ -4721,13 +4897,13 @@
 
   async function _editExpansionTargetContact(targetId, contact) {
     if (!contact) return;
-    const name  = window.prompt('Name:', contact.name);
+    const name  = await promptDialog('Name:', contact.name);
     if (name === null) return;
-    const title = window.prompt('Title:', contact.title || '');
+    const title = await promptDialog('Title:', contact.title || '');
     if (title === null) return;
-    const email = window.prompt('Email:', contact.email || '');
+    const email = await promptDialog('Email:', contact.email || '');
     if (email === null) return;
-    const source = window.prompt('Source:', contact.source || '');
+    const source = await promptDialog('Source:', contact.source || '');
     if (source === null) return;
     try {
       await jsonFetch(
@@ -4745,7 +4921,7 @@
   }
 
   async function _deleteExpansionTargetContact(targetId, contactId) {
-    if (!window.confirm('Remove this contact?')) return;
+    if (!await confirmDialog('Remove this contact?')) return;
     try {
       await jsonFetch(
         `/api/expansion-targets/${encodeURIComponent(targetId)}/contacts/${encodeURIComponent(contactId)}`,
@@ -4761,15 +4937,15 @@
     // later — but the AE typically WANTS to run the qualify flow
     // to seed scoring + ICP first.
     const msg = `Promote "${target.name}" to a lead?\n\nSteps:\n1. Click OK\n2. The Qualify Lead view will open with the name prefilled\n3. Complete the qualify flow\n4. Come back here + paste the new lead id`;
-    if (!window.confirm(msg)) return;
+    if (!await confirmDialog(msg)) return;
     // Prefill the qualify form.
     switchView('qualify');
     const nameInput = $('#in-name');
     if (nameInput) nameInput.value = target.name;
     // Surface a sticky banner with a "I've created the lead, paste id"
     // input so the AE can come back and close the loop.
-    setTimeout(() => {
-      const pageId = window.prompt(
+    setTimeout(async () => {
+      const pageId = await promptDialog(
         `Once you've qualified the lead in the form below, paste the page id here to link it back:`,
         ''
       );
@@ -5116,7 +5292,7 @@
   }
 
   // v1.0.0bw: replaced the chain-of-prompts UX with a real modal.
-  // Original implementation fired 4 sequential window.prompt() calls;
+  // Original implementation fired 4 sequential native prompt() calls;
   // Chrome (and others) suppress repeat prompts after a couple, so
   // Edit "didn't work" mid-flow + nothing told the user why. A real
   // form solves both: one screen, all fields, validation, no browser
@@ -5268,7 +5444,7 @@
     if (!u) return;
     // Hard-delete warning — historical lead.owner references stop
     // resolving back to email/role for this name.
-    if (!window.confirm(`Permanently delete ${u.name}?\n\nIf they were ever assigned to a lead, the historical "owner = ${u.name}" reference will no longer resolve to an email/role. Use Deactivate instead unless they were added by mistake.`)) return;
+    if (!await confirmDialog(`Permanently delete ${u.name}?\n\nIf they were ever assigned to a lead, the historical "owner = ${u.name}" reference will no longer resolve to an email/role. Use Deactivate instead unless they were added by mistake.`)) return;
     try {
       await jsonFetch(`/api/settings/users/${encodeURIComponent(userId)}`, {
         method: 'DELETE',
@@ -5502,7 +5678,7 @@
       patch({ summary: e.target.value }).then(u =>
         u && toast('Summary saved', 'success')));
     $('#lv-d-edit').addEventListener('click', async () => {
-      const newName = window.prompt('Rename project:', project.name);
+      const newName = await promptDialog('Rename project:', project.name);
       if (newName === null) return;
       const updated = await patch({ name: newName.trim() });
       if (updated) {
@@ -5710,12 +5886,12 @@
   }
 
   async function _addConcurrentAgency(leadId, projectId) {
-    const name = window.prompt('Agency name:');
+    const name = await promptDialog('Agency name:');
     if (name === null || !name.trim()) return;
-    const scope = window.prompt(
+    const scope = await promptDialog(
       `Scope (what they're doing on the account):`, '');
     if (scope === null) return;
-    const type = window.prompt(
+    const type = await promptDialog(
       'Type — concurrent (alongside MR) | incumbent | previous | competitor:',
       'concurrent');
     if (type === null) return;
@@ -5737,16 +5913,16 @@
   async function _editAgency(leadId, agencyId, agencies) {
     const a = agencies.find(x => x.id === agencyId);
     if (!a) return;
-    const scope = window.prompt('Update scope:', a.scope || '');
+    const scope = await promptDialog('Update scope:', a.scope || '');
     if (scope === null) return;
-    const addContact = window.confirm(
+    const addContact = await confirmDialog(
       `Update scope to "${scope}".\n\nAdd a contact at ${a.name}? (Cancel = just save the scope)`);
     const payload = { ...a, scope: scope.trim() || null };
     if (addContact) {
-      const cname = window.prompt(`Contact name at ${a.name}:`);
+      const cname = await promptDialog(`Contact name at ${a.name}:`);
       if (cname && cname.trim()) {
-        const ctitle = window.prompt('Title (optional):') || '';
-        const cemail = window.prompt('Email (optional):') || '';
+        const ctitle = await promptDialog('Title (optional):') || '';
+        const cemail = await promptDialog('Email (optional):') || '';
         payload.contacts = [
           ...(a.contacts || []),
           { name: cname.trim(),
@@ -5766,7 +5942,7 @@
   }
 
   async function _deleteAgency(leadId, agencyId) {
-    if (!window.confirm('Remove this agency entry?')) return;
+    if (!await confirmDialog('Remove this agency entry?')) return;
     try {
       await jsonFetch(
         `/api/leads/${encodeURIComponent(leadId)}/agencies/${encodeURIComponent(agencyId)}`,
@@ -5849,9 +6025,9 @@
   }
 
   async function _addNewOkr(projectId) {
-    const quarter = window.prompt('Quarter (e.g. "Q2 2026"):', 'Q2 2026');
+    const quarter = await promptDialog('Quarter (e.g. "Q2 2026"):', 'Q2 2026');
     if (quarter === null || !quarter.trim()) return;
-    const objective = window.prompt('Objective for this quarter:', '');
+    const objective = await promptDialog('Objective for this quarter:', '');
     if (objective === null || !objective.trim()) return;
     try {
       await jsonFetch(`/api/live-projects/${encodeURIComponent(projectId)}/okrs`, {
@@ -5865,9 +6041,9 @@
   }
 
   async function _editOkr(projectId, okrId) {
-    const quarter = window.prompt('New quarter label:');
+    const quarter = await promptDialog('New quarter label:');
     if (quarter === null) return;
-    const objective = window.prompt('New objective:');
+    const objective = await promptDialog('New objective:');
     if (objective === null) return;
     const updates = {};
     if (quarter.trim()) updates.quarter = quarter.trim();
@@ -5884,7 +6060,7 @@
   }
 
   async function _deleteOkr(projectId, okrId) {
-    if (!window.confirm('Delete this OKR and all its key results?')) return;
+    if (!await confirmDialog('Delete this OKR and all its key results?')) return;
     try {
       await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}`, { method: 'DELETE' });
       openLiveProjectDetail(projectId);
@@ -5892,11 +6068,11 @@
   }
 
   async function _addKr(projectId, okrId) {
-    const description = window.prompt('Key result (what gets measured):');
+    const description = await promptDialog('Key result (what gets measured):');
     if (description === null || !description.trim()) return;
-    const target = window.prompt('Target value (e.g. "10%", "$5M", "50 users"):', '');
+    const target = await promptDialog('Target value (e.g. "10%", "$5M", "50 users"):', '');
     if (target === null) return;
-    const current = window.prompt('Current value (optional):', '');
+    const current = await promptDialog('Current value (optional):', '');
     if (current === null) return;
     try {
       await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}/key-results`, {
@@ -5914,7 +6090,7 @@
   }
 
   async function _editKr(projectId, okrId, krId) {
-    const current = window.prompt('Update current value (or status: on_track/at_risk/missed/done):');
+    const current = await promptDialog('Update current value (or status: on_track/at_risk/missed/done):');
     if (current === null || !current.trim()) return;
     const STATUSES = ['on_track', 'at_risk', 'missed', 'done'];
     const update = STATUSES.includes(current.trim())
@@ -5931,7 +6107,7 @@
   }
 
   async function _deleteKr(projectId, okrId, krId) {
-    if (!window.confirm('Delete this key result?')) return;
+    if (!await confirmDialog('Delete this key result?')) return;
     try {
       await jsonFetch(`/api/okrs/${encodeURIComponent(okrId)}/key-results/${encodeURIComponent(krId)}`,
         { method: 'DELETE' });
@@ -5971,7 +6147,7 @@
   // v1.0.0bk: Promote-to-Live action on the lead drawer.
   async function _promoteLeadToLive(leadId, leadCompany) {
     if (!leadId) return;
-    const name = window.prompt(
+    const name = await promptDialog(
       'Live project name:', leadCompany || leadId);
     if (name === null || !name.trim()) return;
     try {
@@ -6522,7 +6698,7 @@
 
   async function restoreLeadFromBackup() {
     if (!drawerState.id) return;
-    if (!window.confirm('Restore this lead\'s notes / contacts / project from its Notion backup? Any local data for this lead will be overwritten.')) return;
+    if (!await confirmDialog('Restore this lead\'s notes / contacts / project from its Notion backup? Any local data for this lead will be overwritten.')) return;
     const btn = $('#ld-restore');
     const original = btn.innerHTML;
     btn.disabled = true;
@@ -6643,7 +6819,7 @@
         p => p.name.split(/\s+/).filter(Boolean).length < 2);
       if (stillTruncated.length) {
         const names = stillTruncated.map(p => p.name).join(', ');
-        if (!window.confirm(
+        if (!await confirmDialog(
           `${stillTruncated.length} contact${stillTruncated.length === 1 ? '' : 's'} still missing a last name (${names}).\n\nAdd anyway?`)) {
           return;
         }
@@ -6735,7 +6911,7 @@
         }).join('');
         listEl.querySelectorAll('[data-lcnt-del]').forEach(b => {
           b.addEventListener('click', async () => {
-            if (!window.confirm('Remove this note?')) return;
+            if (!await confirmDialog('Remove this note?')) return;
             try {
               await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contact.id)}/notes/${encodeURIComponent(b.dataset.lcntDel)}`,
                               { method: 'DELETE' });
@@ -6856,7 +7032,7 @@
   }
 
   async function deleteContact(leadId, contactId) {
-    if (!window.confirm('Remove this contact?')) return;
+    if (!await confirmDialog('Remove this contact?')) return;
     try {
       await jsonFetch(`/api/contacts/${encodeURIComponent(leadId)}/${encodeURIComponent(contactId)}`, { method: 'DELETE' });
       await loadLeadContacts(leadId);
@@ -7573,7 +7749,7 @@
   }
 
   async function deleteCall(leadId, callId) {
-    if (!window.confirm('Delete this call/note?')) return;
+    if (!await confirmDialog('Delete this call/note?')) return;
     try {
       await jsonFetch(`/api/calls/${encodeURIComponent(leadId)}/${encodeURIComponent(callId)}`, { method: 'DELETE' });
       await loadLeadCalls(leadId);
@@ -8820,19 +8996,19 @@
     });
   }
 
-  function openCriterionEditor(streamKey, existing) {
+  async function openCriterionEditor(streamKey, existing) {
     // Reuse a simple prompt-based editor. Keeps things minimal; no modal CSS.
     const isEdit = !!existing;
     const c = existing || { key: '', label: '', hint: '', role_driver: '', scale_factor: 0 };
-    const key = isEdit ? c.key : (window.prompt('Criterion key (stable id, snake_case)', c.key) || '').trim();
+    const key = isEdit ? c.key : (await promptDialog('Criterion key (stable id, snake_case)', c.key) || '').trim();
     if (!key) return;
-    const label = (window.prompt('Label (prompt the AE sees)', c.label) || '').trim();
+    const label = (await promptDialog('Label (prompt the AE sees)', c.label) || '').trim();
     if (!label) return;
-    const hint = window.prompt('Hint (optional clarifier)', c.hint || '') || '';
+    const hint = await promptDialog('Hint (optional clarifier)', c.hint || '') || '';
     const roles = Object.keys(pbState.library.role_catalogue || {}).sort();
     const roleHint = `Role driver — blank for none. Options: ${roles.join(', ')}`;
-    const roleDriver = (window.prompt(roleHint, c.role_driver || '') || '').trim();
-    const scaleStr = window.prompt('Scale factor (0 = no driver, 1.0 = strong)', String(c.scale_factor || 0));
+    const roleDriver = (await promptDialog(roleHint, c.role_driver || '') || '').trim();
+    const scaleStr = await promptDialog('Scale factor (0 = no driver, 1.0 = strong)', String(c.scale_factor || 0));
     const scaleFactor = parseFloat(scaleStr || '0') || 0;
     saveCriterion(streamKey, { key, label, hint, role_driver: roleDriver || null, scale_factor: scaleFactor });
   }
@@ -8855,7 +9031,7 @@
   }
 
   async function deleteCriterion(streamKey, key) {
-    if (!window.confirm(`Remove criterion "${key}" from ${streamKey}? Existing project answers for this key will be preserved in storage but no longer shown.`)) return;
+    if (!await confirmDialog(`Remove criterion "${key}" from ${streamKey}? Existing project answers for this key will be preserved in storage but no longer shown.`)) return;
     try {
       const data = await jsonFetch(`/api/admin/criteria/${encodeURIComponent(streamKey)}/${encodeURIComponent(key)}`, {
         method: 'DELETE',
@@ -8868,7 +9044,7 @@
   }
 
   async function resetStreamCriteria(streamKey) {
-    if (!window.confirm(`Reset ${streamKey} criteria to factory defaults? Custom criteria will be removed.`)) return;
+    if (!await confirmDialog(`Reset ${streamKey} criteria to factory defaults? Custom criteria will be removed.`)) return;
     try {
       const data = await jsonFetch(`/api/admin/criteria/${encodeURIComponent(streamKey)}/reset`, {
         method: 'POST',
@@ -9297,7 +9473,7 @@
     const pkgKey = $('#pb-roadmap-pkg').value;
     if (!pkgKey) { toast('Pick a package first', 'error'); return; }
     if (pbState.roadmap?.milestones?.length &&
-        !window.confirm('Replace existing milestones with the package template?')) return;
+        !await confirmDialog('Replace existing milestones with the package template?')) return;
     try {
       const data = await jsonFetch(`/api/roadmap/${encodeURIComponent(pbState.currentLeadId)}/seed-from-package`, {
         method: 'POST',
@@ -9354,12 +9530,12 @@
     } finally { btn.disabled = false; btn.innerHTML = icon('sparkles') + 'Suggest based on notes'; }
   }
 
-  function applySelectedPackage() {
+  async function applySelectedPackage() {
     const key = $('#pb-package').value;
     if (!key) { toast('Pick a package first', 'error'); return; }
     const pkg = (pbState.pricingLibrary?.packages || []).find(p => p.key === key);
     if (!pkg) { toast('Package not found', 'error'); return; }
-    if (!window.confirm(`Apply "${pkg.name}" template? This overwrites the current team allocation (${pkg.total_hours}h across ${pkg.duration_months || 1} month${pkg.duration_months === 1 ? '' : 's'}).`)) return;
+    if (!await confirmDialog(`Apply "${pkg.name}" template? This overwrites the current team allocation (${pkg.total_hours}h across ${pkg.duration_months || 1} month${pkg.duration_months === 1 ? '' : 's'}).`)) return;
 
     // Sum hours per role across the package, then distribute as FTE per phase.
     const roleHoursTotal = {};
@@ -9651,7 +9827,7 @@
     if (!pbState.currentLeadId) { toast('Save and validate scope first', 'error'); return; }
     const status = pbState.current?.validation_status;
     if (status !== 'validated') {
-      const proceed = window.confirm(
+      const proceed = await confirmDialog(
         `Scope hasn't been validated by delivery (current: ${status || 'draft'}). ` +
         `The SOW will include a "needs internal review" banner. Continue?`
       );
@@ -10475,9 +10651,9 @@
     $('#jeff-trigger').textContent = 'J';
   }
 
-  function _jeffClear() {
+  async function _jeffClear() {
     if (!jeffState.messages.length) return;
-    if (!window.confirm('Clear this conversation with Jeff?')) return;
+    if (!await confirmDialog('Clear this conversation with Jeff?')) return;
     jeffState.messages = [];
     _jeffRender();
   }
@@ -11652,7 +11828,7 @@
   async function _clearCompletedTodos() {
     const owner = _currentRecipient();
     if (!owner) return;
-    if (!window.confirm('Clear all completed todos?')) return;
+    if (!await confirmDialog('Clear all completed todos?')) return;
     try {
       await jsonFetch('/api/todos/clear-completed', {
         method: 'POST',
@@ -11685,7 +11861,7 @@
       toast('Pick your profile first (Home → Switch profile)', 'error');
       return;
     }
-    const text = window.prompt(
+    const text = await promptDialog(
       `New todo${label ? ' for ' + label : ''}:`,
       suggestedText || (label ? `Follow up with ${label}` : ''));
     if (text === null) return; // cancelled
@@ -13015,7 +13191,7 @@
     panel.querySelectorAll('[data-enum-reset]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const key = btn.dataset.enumReset;
-        if (!window.confirm(`Reset "${key}" to the platform defaults?`)) return;
+        if (!await confirmDialog(`Reset "${key}" to the platform defaults?`)) return;
         try {
           const updated = await jsonFetch(`/api/settings/enums/${encodeURIComponent(key)}/reset`,
                                             { method: 'POST' });
@@ -13326,7 +13502,7 @@
       // MR owners come from /api/mr_owners (already loaded for the
       // inline owner cells); use a simple prompt for now to avoid
       // building yet another modal.
-      const name = window.prompt(
+      const name = await promptDialog(
         `Reassign ${bulkState.selected.size} contact(s) to which MR owner?\n\n` +
         `(Type the full name. Type "Unassigned" to clear ownership.)`,
         homeState.profile?.name || '');
@@ -13371,13 +13547,13 @@
   // undefined when the user cancels, null when they choose "(clear)",
   // or the picked string. Good enough for v1; can upgrade to a
   // proper dropdown later.
-  function _bulkPickFromEnum(question, options) {
+  async function _bulkPickFromEnum(question, options) {
     if (!options.length) {
       toast('No options configured. Add some in Settings first.', 'error');
       return undefined;
     }
     const numbered = options.map((o, i) => `${i + 1}. ${o}`).join('\n');
-    const raw = window.prompt(
+    const raw = await promptDialog(
       `${question}\n\n${numbered}\n0. (clear / set to none)\n\nType the number:`,
       '1');
     if (raw === null) return undefined;
@@ -13456,7 +13632,7 @@
       toast('Pick your profile first (Home → Switch profile)', 'error');
       return;
     }
-    const name = window.prompt(
+    const name = await promptDialog(
       'Name this preset (e.g. "Champions in QSR"):', '');
     if (name === null) return;
     const trimmed = name.trim();
@@ -13576,7 +13752,7 @@
       toast('Pick your profile first (Home → Switch profile)', 'error');
       return;
     }
-    const name = window.prompt(
+    const name = await promptDialog(
       'Name this Pipeline preset (e.g. "Active Qualified · Strong engagement"):', '');
     if (name === null) return;
     const trimmed = name.trim();
@@ -13620,7 +13796,7 @@
     const id = pipelinePresetsState.selectedId;
     if (!id) return;
     const preset = pipelinePresetsState.items.find(p => p.id === id);
-    if (!window.confirm(`Delete preset "${preset?.name || id}"?`)) return;
+    if (!await confirmDialog(`Delete preset "${preset?.name || id}"?`)) return;
     try {
       await jsonFetch(
         `/api/filter-presets/${encodeURIComponent(id)}?user=${encodeURIComponent(profile.name)}`,
@@ -13640,7 +13816,7 @@
     const id = presetsState.selectedId;
     if (!id) return;
     const preset = presetsState.items.find(p => p.id === id);
-    if (!window.confirm(`Delete preset "${preset?.name || id}"?`)) return;
+    if (!await confirmDialog(`Delete preset "${preset?.name || id}"?`)) return;
     try {
       await jsonFetch(
         `/api/filter-presets/${encodeURIComponent(id)}?user=${encodeURIComponent(profile.name)}`,
@@ -14117,7 +14293,7 @@
     });
     wrap.querySelectorAll('[data-contact-del]').forEach(b => {
       b.addEventListener('click', async () => {
-        if (!window.confirm('Remove this contact?')) return;
+        if (!await confirmDialog('Remove this contact?')) return;
         try {
           await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(b.dataset.contactDel)}`, { method: 'DELETE' });
           await openPartnerDetail(partner.id);
@@ -14780,7 +14956,7 @@
         `).join('');
         listEl.querySelectorAll('[data-note-del]').forEach(b => {
           b.addEventListener('click', async () => {
-            if (!window.confirm('Remove this note?')) return;
+            if (!await confirmDialog('Remove this note?')) return;
             try {
               await jsonFetch(`/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(contactId)}/notes/${encodeURIComponent(b.dataset.noteDel)}`, { method: 'DELETE' });
               await refreshNotes();
