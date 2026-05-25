@@ -3601,6 +3601,9 @@ def _maybe_lazy_retry_ensure_properties():
             # self-heal so the recovery path creates the same set.
             "Partner Source":            {"select": {}},
             "Sourced For":               {"multi_select": {}},
+            # v1.0.0ca: Close Reason — captured when sales_stage flips
+            # to "Closed Lost" or status flips to "Rejected".
+            "Close Reason":              {"rich_text": {}},
         })
         _BACKUP_PROPERTY_READY = result
         if result.get("created"):
@@ -3838,6 +3841,9 @@ def _boot_self_heal_backup_property():
             # without these columns gets them on next boot.
             "Partner Source":            {"select": {}},
             "Sourced For":               {"multi_select": {}},
+            # v1.0.0ca: Close Reason — captured when sales_stage flips
+            # to "Closed Lost" or status flips to "Rejected".
+            "Close Reason":              {"rich_text": {}},
         })
         _BACKUP_PROPERTY_READY = result
         if result.get("created"):

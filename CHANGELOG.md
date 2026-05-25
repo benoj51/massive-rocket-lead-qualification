@@ -5,6 +5,99 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ca] — 2026-05-26 — Editable stages + Closed Won/Lost/Rejected lifecycle
+
+### The ask
+
+> "Should be able to edit the sales stages. e.g. There should be a
+> closed lost opportunities and closed won. Once closed won, there
+> should be a prompt to move it to live. Once closed lost it should
+> be moved to nurture list so it isn't in pipeline for us to review.
+> There should be a rejected list which wouldn't put them in the
+> nurture list."
+
+Four asks bundled together — editable stages, new closed values,
+nurture flow on Closed Lost, separate Rejected list. Plus three
+edge cases Ben picked: reversibility, audit tracking, reason capture.
+
+### Model
+
+Two enums on a lead now, with these defaults (admin-editable):
+
+**Sales stages** (deal motion): Intro Call → Discovery → Technical
+Fit → Proposal → Negotiation → Legal/Procurement → Verbal Commit →
+Signature → **Closed Won** → **Closed Lost**.
+
+**Lead statuses** (lifecycle): New / Researching / Qualified /
+Disqualified / On Hold / **Nurture** / **Rejected**.
+
+`Disqualified` (didn't meet ICP) stays distinct from `Rejected`
+(we decided not to pursue) — same outcome from a visibility
+standpoint but very different signal.
+
+### Three new workflows on Save
+
+1. **`sales_stage → Closed Won`** — post-save, the Promote-to-Live
+   modal auto-opens with the composed name ("Shell — CRM Build")
+   prefilled. User confirms to create the live project or cancels.
+
+2. **`sales_stage → Closed Lost`** — pre-save reason prompt
+   ("Why? Helps the team build a loss-reason dataset"). On confirm:
+   reason saved to `close_reason`, status auto-flips to `Nurture`
+   so the lead leaves the active pipeline view. Cancel aborts the
+   save entirely (no half-flip).
+
+3. **`status → Rejected`** — pre-save prompt with OPTIONAL reason.
+   Lead moves to the Rejected list, out of every active surface.
+   Reversible by changing status back.
+
+### Pipeline view restructured
+
+New filter chips: **In pipeline** (default — excludes Nurture +
+Rejected + Disqualified), Qualified, Borderline, Qualified Out,
+**Nurture**, **Rejected**, All. The default Pipeline view is now
+genuinely "what should I be working today" — Nurture and Rejected
+leads have explicit chips for when you want to scan them.
+
+### Editability
+
+`enum_config_store` extended to accept lead-side enums alongside
+the existing partner-side ones. `Settings → Customise dropdowns`
+panel surfaces **Sales stages** + **Lead statuses** as two new
+editable cards. Lead drawer's Status + Sales Stage `<select>`
+elements hydrate from `/api/settings/enums` on init, so admin
+edits flow through without a code change. Static `<option>` HTML
+stays as the SSR-friendly fallback.
+
+### Notion
+
+- Status select mapping extended to accept `Nurture` and `Rejected`
+- New `close_reason` rich-text field round-trips through `update_page`
+  ↔ `_page_to_detail`
+- Boot self-heal includes `Close Reason` property so freshly-cloned
+  Notion DBs get the column automatically
+
+### Reversibility (Ben's edge-case pick)
+
+Moving a lead OUT of Nurture / Rejected is just changing status
+back to Researching / Qualified / whatever. No state-machine
+gates. The audit log captures both directions via the existing
+`lead_updated` event (with the changed fields list).
+
+### Tests
+
+12 new tests in `test_lead_lifecycle.py`:
+- Constants extended (sales_stages + lead_statuses)
+- enum_config_store surfaces both, admin save round-trips
+- /api/settings/enums returns both keys
+- Notion status mapping accepts Nurture + Rejected
+- `close_reason` writes as rich-text + round-trips via page-detail
+- Boot self-heal spec includes Close Reason at both call sites
+
+Full suite: **1116 passing**. JS syntax check clean.
+
+---
+
 ## [1.0.0bz] — 2026-05-25 — Security pack: 1 High + 4 Mediums
 
 Run-through-the-codebase security audit found one High-severity

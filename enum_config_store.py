@@ -24,23 +24,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import config
 import partner_contacts_store
 
 _DEFAULT_PATH = Path(__file__).parent / "cache" / "enum_config.json"
 _LOCK = threading.Lock()
 
 
-# Which enum keys this store supports. Keep this list aligned with
-# the constants on partner_contacts_store. Adding a new enum is a
-# two-line change: append it here + add the constant in the store.
-_ENUM_KEYS = {
-    "industries":         "INDUSTRIES",
-    "territories":        "TERRITORIES",
-    "regions":            "REGIONS",
-    "statuses":           "STATUSES",
-    "partner_sentiments": "PARTNER_SENTIMENTS",
-    "tiers":              "TIERS",
-    "seniorities":        "SENIORITIES",
+# v1.0.0ca: registry is now (module, constant_name) so we can pull
+# defaults from multiple source modules. Partner-side enums (industries,
+# territories, etc.) still come from partner_contacts_store; lead-side
+# enums (sales stages, lead lifecycle statuses) come from `config`.
+# Adding a new enum is still two lines: append the entry + ensure the
+# constant exists.
+_ENUM_KEYS: dict[str, tuple[Any, str]] = {
+    # partner-side
+    "industries":         (partner_contacts_store, "INDUSTRIES"),
+    "territories":        (partner_contacts_store, "TERRITORIES"),
+    "regions":            (partner_contacts_store, "REGIONS"),
+    "statuses":           (partner_contacts_store, "STATUSES"),
+    "partner_sentiments": (partner_contacts_store, "PARTNER_SENTIMENTS"),
+    "tiers":              (partner_contacts_store, "TIERS"),
+    "seniorities":        (partner_contacts_store, "SENIORITIES"),
+    # lead-side (v1.0.0ca)
+    "sales_stages":       (config, "SALES_STAGES"),
+    "lead_statuses":      (config, "LEAD_STATUSES"),
 }
 
 
@@ -56,11 +64,11 @@ def _now_iso() -> str:
 
 
 def _defaults() -> dict[str, list[str]]:
-    """Pull the in-code defaults from partner_contacts_store. Read every
+    """Pull the in-code defaults from each source module. Read every
     time so module reloads in tests don't snapshot stale values."""
     out: dict[str, list[str]] = {}
-    for ui_key, const_name in _ENUM_KEYS.items():
-        out[ui_key] = list(getattr(partner_contacts_store, const_name, []))
+    for ui_key, (module, const_name) in _ENUM_KEYS.items():
+        out[ui_key] = list(getattr(module, const_name, []))
     return out
 
 

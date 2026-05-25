@@ -405,6 +405,9 @@ def _page_to_detail(page: dict) -> dict:
         "qualified_date": _extract_text(props.get("Qualified Date")),
         "opportunity_source": _extract_text(props.get("Partner Source")),
         "sourced_for_partners": _extract_multi_select(props.get("Sourced For")),
+        # v1.0.0ca: reason captured when a lead closes (Closed Lost
+        # or Rejected). Round-trips through the rich-text writer above.
+        "close_reason": _extract_text(props.get("Close Reason")),
         # v1.0.0g: durable state backup (chunked rich_text). Joined here
         # so the API consumer doesn't have to think about chunking.
         "state_backup": _extract_text(props.get("State Backup")),
@@ -734,7 +737,12 @@ class NotionSync:
                                   # Accept raw select names too
                                   "Qualified": "Qualified", "Researching": "Researching",
                                   "Disqualified": "Disqualified", "New": "New",
-                                  "On Hold": "On Hold"}),
+                                  "On Hold": "On Hold",
+                                  # v1.0.0ca: Nurture (auto-set on
+                                  # Closed Lost) + Rejected (manual
+                                  # decision to not pursue).
+                                  "Nurture": "Nurture",
+                                  "Rejected": "Rejected"}),
             ("sales_stage", "Sales Stage", None),
             ("vertical", "Vertical", None),
             ("opportunity_type", "Opportunity Type",
@@ -787,6 +795,11 @@ class NotionSync:
             ("positive_signals", "Positive Signals"),
             ("disqualifiers", "Disqualifiers"),
             ("lead_summary", "Lead Summary"),
+            # v1.0.0ca: reason captured when sales_stage flips to
+            # "Closed Lost" or status flips to "Rejected". Optional for
+            # Rejected, prompted-for on Closed Lost. Helps the team
+            # build a loss-reason dataset over time.
+            ("close_reason", "Close Reason"),
         ):
             if key in edits:
                 props[prop_name] = {"rich_text": _rich_text(edits[key] or "")}

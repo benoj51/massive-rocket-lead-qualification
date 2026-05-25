@@ -302,7 +302,33 @@ SALES_STAGES = [
     "Negotiation",
     "Legal/Procurement",
     "Verbal Commit",
-    "Signature"
+    "Signature",
+    # v1.0.0ca: terminal stages. Closed Won triggers Promote-to-Live
+    # on save; Closed Lost prompts for a reason + auto-flips status
+    # to "Nurture" so the lead leaves the active pipeline view but
+    # stays visible for periodic touches.
+    "Closed Won",
+    "Closed Lost",
+]
+
+# v1.0.0ca: top-level lead-lifecycle statuses (Notion "Status" select).
+# Separate from `sales_stage` — status is "where in the lifecycle",
+# sales_stage is "how far along the deal motion".
+#
+# - Nurture: closed-lost-but-we-want-to-stay-warm (auto-set when
+#   sales_stage flips to "Closed Lost"; manual move back to active
+#   is allowed)
+# - Rejected: we decided not to pursue. Out of every active surface.
+#   Distinct from Disqualified (which is an ICP signal, not a
+#   relationship decision).
+LEAD_STATUSES = [
+    "New",
+    "Researching",
+    "Qualified",
+    "Disqualified",
+    "On Hold",
+    "Nurture",
+    "Rejected",
 ]
 
 # Output formatting

@@ -1689,11 +1689,18 @@
         <button class="btn ghost" id="pipe-preset-delete" type="button" style="padding:5px 12px;font-size:11px;display:none;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
       </div>
       <div class="filters" id="pipeline-filters">
-        <button class="chip active" data-filter="all" type="button">All</button>
+        <!-- v1.0.0ca: "In pipeline" is the new default — actionable
+             leads only. Nurture (closed-lost but warm) and Rejected
+             (we decided not to pursue) get their own chips so the
+             default Pipeline view stays focused on deals you're
+             actually working. -->
+        <button class="chip active" data-filter="in_pipeline" type="button">In pipeline</button>
         <button class="chip" data-filter="qualify_in" type="button">Qualified</button>
         <button class="chip" data-filter="borderline" type="button">Borderline</button>
         <button class="chip" data-filter="qualify_out" type="button">Qualified Out</button>
-        <button class="chip" data-filter="active" type="button">Active only</button>
+        <button class="chip" data-filter="nurture" type="button">Nurture</button>
+        <button class="chip" data-filter="rejected" type="button">Rejected</button>
+        <button class="chip" data-filter="all" type="button">All</button>
         <select id="pipe-filter-source" style="margin-left: 12px; padding: 5px 10px; font-size: 12px; min-width: 150px;">
           <option value="">All sources</option>
         </select>
@@ -2451,20 +2458,26 @@
       <summary><span data-section-label>Qualification</span></summary>
       <div class="section-body">
       <div class="row-3">
+        <!-- v1.0.0ca: Status + Sales Stage options re-hydrated on init
+             from /api/settings/enums so admin edits in Settings flow
+             through without a code change. Static options are the
+             SSR-friendly fallback that renders before enums land. -->
         <div class="field">
           <label>Status</label>
-          <select data-ld="status">
+          <select data-ld="status" data-enum-hydrate="lead_statuses">
             <option value="">—</option>
-            <option>Qualified</option>
-            <option>Researching</option>
-            <option>Disqualified</option>
             <option>New</option>
+            <option>Researching</option>
+            <option>Qualified</option>
+            <option>Disqualified</option>
             <option>On Hold</option>
+            <option>Nurture</option>
+            <option>Rejected</option>
           </select>
         </div>
         <div class="field">
           <label>Sales Stage</label>
-          <select data-ld="sales_stage">
+          <select data-ld="sales_stage" data-enum-hydrate="sales_stages">
             <option value="">—</option>
             <option>Intro Call</option>
             <option>Discovery</option>
@@ -2474,6 +2487,8 @@
             <option>Legal/Procurement</option>
             <option>Verbal Commit</option>
             <option>Signature</option>
+            <option>Closed Won</option>
+            <option>Closed Lost</option>
           </select>
         </div>
         <div class="field">
@@ -2825,7 +2840,7 @@
     currentResult: null,     // last qualify() payload
     overrides: {},           // user edits to discovered fields
     chart: null,
-    pipeline: { rows: [], filter: 'all', sourceFilter: '', sourcedForFilter: '', groupFilter: '',
+    pipeline: { rows: [], filter: 'in_pipeline', sourceFilter: '', sourcedForFilter: '', groupFilter: '',
                  // v1.0.0av: engagement-band filter + per-lead-id score cache.
                  // The cache lets the filter re-apply on chip changes without
                  // re-fetching, and lets us hide rows whose band doesn't match.
@@ -8207,6 +8222,59 @@
     return edits;
   }
 
+  // v1.0.0ca: pre-save hook for sales-stage / status lifecycle flips.
+  // Three workflows piggy-back on the regular Save:
+  //   • sales_stage → Closed Lost  → prompt for reason, auto-flip
+  //                                   status to Nurture so the lead
+  //                                   leaves the active pipeline.
+  //   • status → Rejected           → optional-reason prompt; lead
+  //                                   moves to the Rejected list.
+  //   • sales_stage → Closed Won    → save normally; the post-save
+  //                                   hook fires the Promote-to-Live
+  //                                   modal (see saveLead body).
+  //
+  // Returns true to proceed with the save, false to abort (user
+  // cancelled the reason prompt — we don't want a half-completed
+  // lifecycle change).
+  async function _maybeHandleLifecycleFlips(edits) {
+    const original = drawerState.original || {};
+    const prevStage = original.sales_stage || '';
+    const prevStatus = original.status || '';
+    const newStage = edits.sales_stage;
+    const newStatus = edits.status;
+
+    // Closed Lost path — REASON PROMPT + auto-flip to Nurture.
+    if (newStage === 'Closed Lost' && prevStage !== 'Closed Lost') {
+      const reason = await promptDialog({
+        title: 'Closing this lead as lost',
+        label: 'Why? (helps the team build a loss-reason dataset)',
+        placeholder: 'e.g. Budget pulled, picked a competitor, no champion',
+        confirmLabel: 'Save & move to Nurture',
+      });
+      if (reason === null) return false;  // user cancelled — abort save
+      edits.close_reason = reason.trim();
+      // Only override status if the user wasn't already explicitly
+      // setting it to something else in the same save.
+      if (!('status' in edits)) {
+        edits.status = 'Nurture';
+      }
+    }
+
+    // Rejected path — OPTIONAL reason.
+    if (newStatus === 'Rejected' && prevStatus !== 'Rejected') {
+      const reason = await promptDialog({
+        title: 'Rejecting this lead',
+        label: 'Reason (optional)',
+        placeholder: 'e.g. Not a fit, do not pursue, redirected to partner',
+        confirmLabel: 'Save as rejected',
+      });
+      if (reason === null) return false;
+      if (reason.trim()) edits.close_reason = reason.trim();
+    }
+
+    return true;
+  }
+
   async function saveLead() {
     if (!drawerState.id) return;
     const edits = collectLeadEdits();
@@ -8218,6 +8286,19 @@
       $('#ld-status').textContent = 'No changes to save';
       return;
     }
+    // v1.0.0ca: lifecycle hooks (Closed Lost reason + Rejected
+    // reason). Runs BEFORE the PATCH so the reason lands in the same
+    // request as the status change — atomic from the server's POV.
+    // User cancelling the reason prompt aborts the save entirely.
+    const proceed = await _maybeHandleLifecycleFlips(edits);
+    if (!proceed) {
+      $('#ld-status').textContent = 'Save cancelled.';
+      return;
+    }
+    // Snapshot the original sales_stage so the post-save Closed Won
+    // hook can detect the flip even after drawerState.original is
+    // mutated by the PATCH response.
+    const _prevStageForCloseDetection = (drawerState.original || {}).sales_stage || '';
     const btn = $('#ld-save');
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…';
     const summary = [];
@@ -8329,6 +8410,18 @@
         await refreshPipeline();
       }
       updateDirtyState();  // values now match originals → button goes back to ghost
+      // v1.0.0ca: Closed Won post-save hook. If the user just flipped
+      // sales_stage TO "Closed Won", auto-open the Promote-to-Live
+      // modal with the composed default name. They confirm to create
+      // the live project, or cancel to defer.
+      if (edits.sales_stage === 'Closed Won'
+            && _prevStageForCloseDetection !== 'Closed Won'
+            && drawerState.original?.id) {
+        const lead = drawerState.original;
+        // _promoteLeadToLive handles the "already exists" case by
+        // showing the existing project — safe to call unconditionally.
+        await _promoteLeadToLive(lead.id, lead.company, lead.opportunity_type);
+      }
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
       $('#ld-status').textContent = e.body?.error || e.message;
@@ -8366,10 +8459,24 @@
   function renderPipeline() {
     const f = state.pipeline.filter;
     let rows = [...state.pipeline.rows];
-    if (f === 'active') rows = rows.filter(r => r.status !== 'Disqualified');
+    // v1.0.0ca: filter map updated for the new lifecycle.
+    // "in_pipeline" (default) = actionable deals; excludes Nurture
+    //                            (closed-lost-but-warm), Rejected, and
+    //                            Disqualified.
+    // "nurture" / "rejected" = explicit show-only lists.
+    // "active" kept as alias for backward compat (old preset URLs).
+    if (f === 'in_pipeline' || f === 'active') {
+      rows = rows.filter(r =>
+        r.status !== 'Disqualified' &&
+        r.status !== 'Nurture' &&
+        r.status !== 'Rejected');
+    }
     else if (f === 'qualify_in') rows = rows.filter(r => r.status === 'Qualified');
     else if (f === 'borderline') rows = rows.filter(r => r.status === 'Researching');
     else if (f === 'qualify_out') rows = rows.filter(r => r.status === 'Disqualified');
+    else if (f === 'nurture') rows = rows.filter(r => r.status === 'Nurture');
+    else if (f === 'rejected') rows = rows.filter(r => r.status === 'Rejected');
+    // f === 'all' → no status filter, show everything.
     // Source / sourced-for filters
     if (state.pipeline.sourceFilter) {
       rows = rows.filter(r => r.opportunity_source === state.pipeline.sourceFilter);
@@ -10522,6 +10629,39 @@
     });
   }
 
+  // v1.0.0ca: hydrate any <select data-enum-hydrate="<key>"> with the
+  // live values from /api/settings/enums. Static HTML options stay as
+  // the SSR-friendly fallback; this runs once on init (and on profile
+  // switch if it bumps the version) so admin edits in Settings flow
+  // through to the lead drawer without a code change.
+  let _enumHydrateCache = null;
+  async function hydrateEnumSelects(root = document) {
+    try {
+      if (!_enumHydrateCache) {
+        _enumHydrateCache = await jsonFetch('/api/settings/enums');
+      }
+    } catch (e) {
+      // Static options are still there as fallback — log + bail.
+      console.warn('[enums] hydrate failed:', e);
+      return;
+    }
+    root.querySelectorAll('[data-enum-hydrate]').forEach(sel => {
+      const key = sel.dataset.enumHydrate;
+      const options = _enumHydrateCache[key] || [];
+      if (!options.length) return;
+      // Preserve the currently-selected value across the option swap.
+      const preserved = sel.value;
+      // Empty leading option for "no value yet" UX consistency with
+      // the static fallback.
+      sel.innerHTML = '<option value="">—</option>' +
+        options.map(o => `<option>${escapeHtml(o)}</option>`).join('');
+      if (preserved) sel.value = preserved;
+    });
+  }
+  // Expose so post-Settings-save can refresh without a page reload.
+  window.refreshEnumSelects = () => { _enumHydrateCache = null;
+                                       return hydrateEnumSelects(); };
+
   // v1.0.0r: inline-editable MR owner cells inside list tables. Generates
   // a <select> that looks like plain text until hovered/focused, so the
   // table reads cleanly but every row is one click from re-assigning.
@@ -10864,6 +11004,10 @@
     // ones (partner-add-form, partner-contact-form) call hydrateOwnerSelects
     // themselves after their template renders.
     hydrateOwnerSelects();
+    // v1.0.0ca: hydrate lead-drawer enum selects (Status, Sales Stage)
+    // from /api/settings/enums so admin edits in Settings flow
+    // through. Fire-and-forget — static options are the fallback.
+    hydrateEnumSelects();
     // v1.0.0ab: hydrate static-HTML icons. JS-rendered surfaces call
     // icon() directly inside their template literals; static markup
     // marked with data-icon="<name>" gets the SVG injected here.
@@ -13153,13 +13297,19 @@
       { key: 'regions',            label: 'Regions',
         hint: 'Geographic regions (UK, EMEA, ...)' },
       { key: 'statuses',           label: 'Contact statuses',
-        hint: 'Lifecycle (active / dormant / left)' },
+        hint: 'Partner-contact lifecycle (active / dormant / left)' },
       { key: 'partner_sentiments', label: 'Partner sentiments',
         hint: 'How they feel about MR (Champion → Blocker)' },
       { key: 'tiers',              label: 'Tiers',
         hint: 'Importance to MR (Critical → Awareness)' },
       { key: 'seniorities',        label: 'Seniorities',
         hint: 'Escalation path (C-Suite → IC)' },
+      // v1.0.0ca: lead-side enums. Editable here too — admins can
+      // rename / reorder / add stages without a code deploy.
+      { key: 'sales_stages',       label: 'Sales stages',
+        hint: 'Deal-motion stages (Intro Call → Signature → Closed Won/Lost)' },
+      { key: 'lead_statuses',      label: 'Lead statuses',
+        hint: 'Lead lifecycle (New / Qualified / Nurture / Rejected / ...)' },
     ];
     panel.innerHTML = `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;box-shadow:var(--shadow);">
