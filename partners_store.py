@@ -47,8 +47,13 @@ def _path() -> Path:
 
 
 def _now() -> str:
-    # microsecond precision so rapid update tests see distinct timestamps
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    # v1.0.0cg: aligned with the rest of the system (second precision).
+    # The original microsecond version was added so a "saves bump
+    # updated_at" test could pass without a 1s sleep — but that drift
+    # meant partner `updated_at` values were inconsistent with every
+    # other store's. The test now sleeps 1.1s; the consistency wins.
+    return datetime.now(timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
 
 
 def _slugify(value: str) -> str:

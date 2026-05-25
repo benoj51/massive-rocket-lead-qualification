@@ -5,6 +5,79 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cg] — 2026-05-26 — Shared helpers: json_file_store + contact_cadence
+
+Duplication-audit Phase 1. Extracts the highest-impact shared
+primitives the audit flagged. Server.py decorators (the third
+audit win) deferred to v1.0.0ch — they're stylistic, not
+bug-preventing, and the diff was already large enough.
+
+### `json_file_store.py` — file-store primitives
+
+Single source of truth for `now_iso()`, `new_id()`, `slugify()`,
+`safe_id()`, `store_dir()`, `load_list()`, `load_dict()`,
+`write_json()`. Module-level `RLock` so all writes share a lock
+(per-store locks were over-engineering for low-contention JSON
+files).
+
+Migrating a store is a 3-line change — replace the local
+`_DEFAULT_DIR` / `_LOCK` / `_now` boilerplate with imports. This
+commit migrates only the stores that share cadence logic (since
+they're touched anyway); the audit's recommendation to migrate
+all 22 stores is deferred — each migration is mechanical but
+risky if done en masse. Future commits can adopt as stores get
+edited.
+
+### `contact_cadence.py` — touch-cadence engine
+
+`contacts_store.annotate_touch_state` and
+`partner_contacts_store.annotate_touch_state` were **byte-identical**.
+The contacts-store version even had the comment "Mirror of
+partner_contacts_store.annotate_touch_state." Both stores now
+re-export from the shared module:
+
+```py
+from contact_cadence import (
+    parse_iso as _parse_iso,
+    annotate_touch_state,
+)
+```
+
+The shim names are kept so any external caller that imports them
+by the old name keeps working. Test confirms `is` identity (real
+shim, not copy).
+
+### `partners_store._now()` precision drift — fixed
+
+The audit flagged: `partners_store._now()` returned **microsecond**
+precision while every other store returned **second** precision.
+A real bug — `updated_at` was inconsistent across the system.
+Aligned to second precision; the one test that depended on
+microsecond resolution (`test_update_preserves_created_at`) now
+sleeps 1.1s before the second save instead of 10ms. Honest tradeoff:
+~1s slower test suite for system-wide timestamp consistency.
+
+### Tests
+
+17 new in `test_shared_helpers.py`:
+- json_file_store: now_iso seconds precision, new_id length + alphabet,
+  slugify, safe_id (accept + reject path-traversal), store_dir env
+  override, load_list/dict round-trip, corrupt-JSON graceful
+- contact_cadence: contacts_store + partner_contacts_store re-export
+  via `is` identity, overdue / never-touched / default-cadence behaviour
+- partners_store: _now() now second precision
+
+Full suite: **1157 passing**.
+
+### Deferred to v1.0.0ch (or later)
+
+- Sweep remaining 22 `*_store.py` files to use `json_file_store`
+- `server.py` `@json_body` + `not_found_if()` decorators (97 + 138
+  call-site simplifications — purely stylistic since the calls all
+  work today)
+
+---
+
 ## [1.0.0cf] — 2026-05-26 — CSV import for lead + expansion target contacts
 
 v1.0.0bv shipped CSV import for partner contacts. Lead contacts and

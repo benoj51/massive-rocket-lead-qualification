@@ -34,7 +34,7 @@ import json
 import os
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -149,39 +149,13 @@ def _validate_stakeholder_enum(value, allowed):
     return s if s in allowed else None
 
 
-def _parse_iso(s: str | None):
-    """Parse our ISO-Z timestamps back to a tz-aware datetime."""
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-
-
-def annotate_touch_state(contact: dict[str, Any]) -> dict[str, Any]:
-    """Add derived touch fields (overdue, days_since_touch, etc.) in
-    place. Mirror of partner_contacts_store.annotate_touch_state."""
-    cadence = int(contact.get("cadence_days") or 30)
-    last = _parse_iso(contact.get("last_touched_at"))
-    baseline = last or _parse_iso(contact.get("added_at"))
-    if baseline is None:
-        contact["next_touch_due"] = None
-        contact["days_since_touch"] = None
-        contact["days_until_due"] = 0
-        contact["overdue"] = False
-        contact["is_due_soon"] = False
-        return contact
-    now = datetime.now(timezone.utc)
-    days_since = (now - baseline).days
-    due_at = baseline + timedelta(days=cadence)
-    days_until_due = (due_at - now).days
-    contact["next_touch_due"] = due_at.isoformat(timespec="seconds").replace("+00:00", "Z")
-    contact["days_since_touch"] = days_since if last else None
-    contact["days_until_due"] = days_until_due
-    contact["overdue"] = days_until_due < 0
-    contact["is_due_soon"] = 0 <= days_until_due <= 7
-    return contact
+# v1.0.0cg: cadence logic moved to contact_cadence.py so partner_contacts_store
+# (which had a byte-identical copy) can share it. _parse_iso + annotate_touch_state
+# kept as thin shims for any external caller that imports them by name.
+from contact_cadence import (
+    parse_iso as _parse_iso,
+    annotate_touch_state,
+)
 
 
 def touch_contact(lead_id: str, contact_id: str, *,

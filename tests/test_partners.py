@@ -49,7 +49,10 @@ class PartnersStoreTests(unittest.TestCase):
     def test_update_preserves_created_at(self):
         import partners_store, time
         first = partners_store.save_partner({"name": "Hightouch"})
-        time.sleep(0.01)  # ensure timestamps differ
+        # v1.0.0cg: was sleep(0.01) when _now() had microsecond precision.
+        # Aligned to second precision system-wide; sleep needs to span
+        # a tick boundary for the timestamp to actually bump.
+        time.sleep(1.1)
         second = partners_store.save_partner({"id": first["id"], "name": "Hightouch",
                                               "description": "Reverse ETL"})
         self.assertEqual(first["created_at"], second["created_at"])
