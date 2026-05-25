@@ -5,6 +5,59 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cd] — 2026-05-26 — Multi-prompt chains → modals
+
+v1.0.0bx retired native `window.prompt` but left three flows that
+still fired `promptDialog` sequentially — Add Expansion Target
+(2 prompts), Add OKR (2 prompts), Add Agency (3 prompts). They
+worked but were clunky.
+
+### New primitive: `multiFieldDialog`
+
+Lives next to `confirmDialog` / `promptDialog`. Builds a one-shot
+form modal from a fields spec:
+
+```js
+const values = await multiFieldDialog({
+  title: 'Add expansion target',
+  fields: [
+    { key: 'name', label: 'Target name', required: true,
+      placeholder: 'e.g. Shell UK' },
+    { key: 'notes', label: 'Notes', type: 'textarea', rows: 3 },
+    { key: 'priority', type: 'select',
+      options: ['low', 'med', 'high'], default: 'med' },
+  ],
+  confirmLabel: 'Add target',
+});
+if (!values) return;  // user cancelled
+```
+
+Supported field types: `text` (default), `textarea`, `email`, `url`,
+`select`, `number`. Required-validation with inline error. Esc
+cancels, Enter submits (Shift+Enter inserts newline in textareas;
+Cmd/Ctrl+Enter submits from a textarea).
+
+### Migrated flows
+
+- **Add Expansion Target** — 2 prompts → 1 modal (added Vertical +
+  Notes fields that the prompt-chain didn't expose)
+- **Add OKR** — 2 prompts → 1 modal (quarter pre-defaults to the
+  current calendar quarter so the user usually just types the
+  objective)
+- **Add Agency** — 3 prompts → 1 modal (type field is now a
+  proper select instead of a free-text prompt)
+
+### What's NOT touched
+
+Editing flows (`_editAgency`, `_editOkr`) still use `promptDialog`.
+They could migrate too, but the edit paths are lower-frequency and
+each needs slightly different field rules — defer to when someone
+actually hits them.
+
+Backend untouched. Full suite: **1129 passing**. JS syntax clean.
+
+---
+
 ## [1.0.0cc] — 2026-05-26 — Jeff KB editor + loss-reason Dashboard card
 
 Two items from the "anything I missed?" list.

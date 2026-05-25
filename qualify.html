@@ -3182,9 +3182,106 @@
     return _openDialog('prompt', opts);
   }
 
+  // v1.0.0cd: multi-field dialog. Builds a one-shot form modal for
+  // small data captures (Add Expansion Target, Add OKR, Add Agency,
+  // etc.) — replaces the chain-of-prompts pattern those flows used.
+  //
+  //   const values = await multiFieldDialog({
+  //     title: 'Add expansion target',
+  //     fields: [
+  //       { key: 'name', label: 'Name', required: true,
+  //         placeholder: 'e.g. Shell UK' },
+  //       { key: 'region', label: 'Region', placeholder: 'EMEA' },
+  //       { key: 'notes', label: 'Notes', type: 'textarea', rows: 3 },
+  //       { key: 'priority', label: 'Priority', type: 'select',
+  //         options: ['low', 'med', 'high'], default: 'med' },
+  //     ],
+  //     confirmLabel: 'Add target',
+  //   });
+  //   if (!values) return;  // user cancelled
+  //
+  // Each field: { key, label, type?, default?, placeholder?, required?,
+  //               options?, rows? }
+  //   type: 'text' (default) | 'textarea' | 'email' | 'url' |
+  //         'select' | 'number'
+  async function multiFieldDialog(opts) {
+    const fields = (opts.fields || []).filter(f => f && f.key);
+    if (!fields.length) return null;
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;';
+      const fieldHtml = fields.map((f, i) => {
+        const id = `mf-field-${i}`;
+        const reqMark = f.required ? ' <span style="color:var(--red);">*</span>' : '';
+        const labelHtml = `<label for="${id}" style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(f.label || f.key)}${reqMark}</label>`;
+        if (f.type === 'textarea') {
+          return `<div style="margin-bottom:10px;">${labelHtml}<textarea id="${id}" rows="${f.rows || 3}" placeholder="${escapeAttr(f.placeholder || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;font-family:inherit;resize:vertical;">${escapeHtml(f.default || '')}</textarea></div>`;
+        }
+        if (f.type === 'select') {
+          const optHtml = (f.options || []).map(o =>
+            `<option value="${escapeAttr(o)}" ${o === f.default ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+          return `<div style="margin-bottom:10px;">${labelHtml}<select id="${id}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;">${optHtml}</select></div>`;
+        }
+        const inputType = f.type || 'text';
+        return `<div style="margin-bottom:10px;">${labelHtml}<input id="${id}" type="${inputType}" value="${escapeAttr(f.default || '')}" placeholder="${escapeAttr(f.placeholder || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;" /></div>`;
+      }).join('');
+      overlay.innerHTML = `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:480px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.4);overflow:hidden;">
+          <header style="padding:14px 18px 4px;">
+            <h3 style="margin:0 0 4px;font-size:15px;font-weight:600;">${escapeHtml(opts.title || 'New')}</h3>
+            ${opts.message ? `<p class="muted" style="margin:0;font-size:12px;line-height:1.45;">${escapeHtml(opts.message)}</p>` : ''}
+          </header>
+          <div style="padding:12px 18px 0;">${fieldHtml}
+            <div id="mf-error" style="color:var(--red);font-size:11px;display:none;margin-top:4px;"></div>
+          </div>
+          <footer style="padding:14px 18px;display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn ghost" id="mf-cancel" type="button" style="padding:6px 14px;font-size:12px;">Cancel</button>
+            <button class="btn" id="mf-confirm" type="button" style="padding:6px 14px;font-size:12px;">${escapeHtml(opts.confirmLabel || 'Save')}</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(overlay);
+      // Focus the first field after paint.
+      setTimeout(() => {
+        const first = overlay.querySelector('input, textarea, select');
+        if (first) first.focus();
+      }, 30);
+      const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+      overlay.querySelector('#mf-cancel').addEventListener('click', () => close(null));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+      const errEl = overlay.querySelector('#mf-error');
+      const submit = () => {
+        const values = {};
+        for (let i = 0; i < fields.length; i++) {
+          const f = fields[i];
+          const el = overlay.querySelector(`#mf-field-${i}`);
+          values[f.key] = (el?.value || '').trim();
+          if (f.required && !values[f.key]) {
+            errEl.textContent = `${f.label || f.key} is required.`;
+            errEl.style.display = 'block';
+            if (el) el.focus();
+            return;
+          }
+        }
+        close(values);
+      };
+      overlay.querySelector('#mf-confirm').addEventListener('click', submit);
+      overlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
+        // Enter submits on inputs/selects; Shift+Enter newline in textarea.
+        else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+          e.preventDefault(); submit();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          // Cmd/Ctrl+Enter from textarea also submits.
+          e.preventDefault(); submit();
+        }
+      });
+    });
+  }
+
   // Expose globally for ad-hoc use from the console / extension code.
   window.confirmDialog = confirmDialog;
   window.promptDialog = promptDialog;
+  window.multiFieldDialog = multiFieldDialog;
 
   function authHeaders() {
     const t = state.authToken;
@@ -4773,21 +4870,34 @@
   }
 
   async function _addExpansionTarget(anchorLeadId) {
-    const name = await promptDialog('Expansion target (e.g. "Shell UK"):');
-    if (name === null || !name.trim()) return;
-    const region = await promptDialog('Region (optional, e.g. "EMEA"):', '');
-    if (region === null) return;
+    // v1.0.0cd: one-shot modal instead of 2 chained prompts.
+    const values = await multiFieldDialog({
+      title: 'Add expansion target',
+      message: 'A region or business unit you want to expand into from this account.',
+      fields: [
+        { key: 'name', label: 'Target name', required: true,
+          placeholder: 'e.g. Shell UK' },
+        { key: 'region', label: 'Region', placeholder: 'e.g. EMEA' },
+        { key: 'vertical', label: 'Vertical', placeholder: 'e.g. Energy' },
+        { key: 'notes', label: 'Notes', type: 'textarea', rows: 3,
+          placeholder: 'Anything you know about who, why, when…' },
+      ],
+      confirmLabel: 'Add target',
+    });
+    if (!values) return;
     try {
       const data = await jsonFetch('/api/expansion-targets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           anchor_lead_id: anchorLeadId,
-          name: name.trim(),
-          region: region.trim() || null,
+          name:     values.name,
+          region:   values.region || null,
+          vertical: values.vertical || null,
+          notes:    values.notes || null,
         }),
       });
-      toast(`Added "${name.trim()}" as expansion target`, 'success');
+      toast(`Added "${values.name}" as expansion target`, 'success');
       await loadExpansion();
       openExpansionTarget(data.target.id);
     } catch (e) {
@@ -6012,23 +6122,30 @@
   }
 
   async function _addConcurrentAgency(leadId, projectId) {
-    const name = await promptDialog('Agency name:');
-    if (name === null || !name.trim()) return;
-    const scope = await promptDialog(
-      `Scope (what they're doing on the account):`, '');
-    if (scope === null) return;
-    const type = await promptDialog(
-      'Type — concurrent (alongside MR) | incumbent | previous | competitor:',
-      'concurrent');
-    if (type === null) return;
+    // v1.0.0cd: replaces 3 chained prompts with one modal.
+    const values = await multiFieldDialog({
+      title: 'Add agency',
+      message: 'A third-party agency working on this account.',
+      fields: [
+        { key: 'name', label: 'Agency name', required: true,
+          placeholder: 'e.g. VML' },
+        { key: 'scope', label: 'Scope', type: 'textarea', rows: 2,
+          placeholder: "What they're doing on the account" },
+        { key: 'type', label: 'Relationship', type: 'select',
+          options: ['concurrent', 'incumbent', 'previous', 'competitor'],
+          default: 'concurrent' },
+      ],
+      confirmLabel: 'Add agency',
+    });
+    if (!values) return;
     try {
       await jsonFetch(`/api/leads/${encodeURIComponent(leadId)}/agencies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
-          scope: scope.trim() || null,
-          type: type.trim() || 'concurrent',
+          name:   values.name,
+          scope:  values.scope || null,
+          type:   values.type || 'concurrent',
           source: 'manual',
         }),
       });
@@ -6151,15 +6268,32 @@
   }
 
   async function _addNewOkr(projectId) {
-    const quarter = await promptDialog('Quarter (e.g. "Q2 2026"):', 'Q2 2026');
-    if (quarter === null || !quarter.trim()) return;
-    const objective = await promptDialog('Objective for this quarter:', '');
-    if (objective === null || !objective.trim()) return;
+    // v1.0.0cd: replaces 2 chained prompts with one modal.
+    // Default quarter computed from today so the user usually just
+    // hits Enter on quarter and types the objective.
+    const today = new Date();
+    const q = Math.floor(today.getMonth() / 3) + 1;
+    const defaultQuarter = `Q${q} ${today.getFullYear()}`;
+    const values = await multiFieldDialog({
+      title: 'Add OKR',
+      fields: [
+        { key: 'quarter', label: 'Quarter', required: true,
+          default: defaultQuarter, placeholder: 'e.g. Q2 2026' },
+        { key: 'objective', label: 'Objective', required: true,
+          type: 'textarea', rows: 3,
+          placeholder: 'What outcome are we chasing this quarter?' },
+      ],
+      confirmLabel: 'Add OKR',
+    });
+    if (!values) return;
     try {
       await jsonFetch(`/api/live-projects/${encodeURIComponent(projectId)}/okrs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quarter: quarter.trim(), objective: objective.trim() }),
+        body: JSON.stringify({
+          quarter:   values.quarter,
+          objective: values.objective,
+        }),
       });
       toast('OKR added', 'success');
       openLiveProjectDetail(projectId);
