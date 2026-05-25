@@ -5,6 +5,66 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0by] — 2026-05-25 — Promote-to-Live name = "Company — Opportunity Type"
+
+### The ask
+
+> "Promote live should take the existing pipeline name and then use
+> the type of project to be listed in the live area"
+
+Live Projects list used to show bare company names. So when the
+same anchor account had multiple workstreams over time — Shell
+finishes a CRM Build, then starts a Retention engagement — every
+row read "Shell" and you couldn't tell them apart at a glance.
+
+### Fix
+
+New naming convention: **`<company> — <opportunity type>`**
+
+- "Shell North America — CRM Build"
+- "Popeyes — Retention"
+- "BP — Migration"
+
+### Where the composition happens
+
+A single helper, `_compose_live_project_name(company, opp_type)`,
+lives in `server.py` and is mirrored in `qualify.html` as
+`_composeLiveProjectName()`. Same logic both sides:
+
+- Both set → `"<company> — <opp>"`
+- Opp type missing or "Unknown" (case-insensitive) → bare company
+- Company missing → bare opp
+- Both missing → fallback (the `lead_id` server-side)
+
+Trims whitespace on both inputs.
+
+### Plumbing
+
+- **Server**: `/api/lead/<id>/promote-to-live` reads
+  `opportunity_type` from the Notion page and uses the composed
+  name as the default. Explicit `body.name` still wins (UI can
+  override), so the contract stays symmetric.
+- **UI**: Lead drawer's Promote button now passes
+  `lead.opportunity_type` through to `_promoteLeadToLive`, which
+  pre-fills the new modal prompt with the composed default. User
+  can still edit it before confirming.
+- **Prompt itself** also got upgraded to the options-object form
+  (added in v1.0.0bx): proper title, label, placeholder, "Promote"
+  confirm button — was a bare one-liner before.
+
+### Tests
+
+4 new in `test_live_projects.py`:
+- Default composes from opportunity type
+- "Unknown" opp falls back to bare company
+- Explicit body name overrides default
+- Direct unit test on the helper covering the matrix (both set,
+  missing, blank, "Unknown", whitespace, fallback)
+
+Full suite: **1093 passing**. JS syntax check clean.
+
+---
+
 ## [1.0.0bx] — 2026-05-25 — In-app dialog primitives; native prompt/confirm retired
 
 ### The pattern problem

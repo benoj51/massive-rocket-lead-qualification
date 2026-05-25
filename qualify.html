@@ -6115,9 +6115,24 @@
     } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
   }
 
+  // v1.0.0by: compose default live-project name from the pipeline's
+  // company + opportunity type. Mirrors _compose_live_project_name on
+  // the server so the UI default matches what the server would pick
+  // if name were omitted from the POST body.
+  function _composeLiveProjectName(company, oppType) {
+    const c = (company || '').trim();
+    const o = (oppType || '').trim();
+    if (o && o.toLowerCase() !== 'unknown') {
+      return c ? `${c} — ${o}` : o;
+    }
+    return c || '(unnamed)';
+  }
+
   // v1.0.0bk: refresh the Promote-to-Live drawer button. If a live
   // project already exists, the button becomes "Open Live Project →".
-  async function _refreshPromoteToLiveButton(leadId, leadCompany) {
+  // v1.0.0by: also takes opportunity_type so the promote prompt can
+  // default to "<company> — <opp type>".
+  async function _refreshPromoteToLiveButton(leadId, leadCompany, oppType) {
     const btn = $('#ld-promote-live');
     if (!btn) return;
     btn.style.display = 'inline-flex';
@@ -6140,15 +6155,23 @@
     } else {
       fresh.textContent = 'Promote to Live →';
       fresh.title = 'Move this account into Live Projects';
-      fresh.addEventListener('click', () => _promoteLeadToLive(leadId, leadCompany));
+      fresh.addEventListener('click', () => _promoteLeadToLive(leadId, leadCompany, oppType));
     }
   }
 
   // v1.0.0bk: Promote-to-Live action on the lead drawer.
-  async function _promoteLeadToLive(leadId, leadCompany) {
+  // v1.0.0by: default to "<company> — <opp type>" so the Live list
+  // distinguishes multiple workstreams on the same account.
+  async function _promoteLeadToLive(leadId, leadCompany, oppType) {
     if (!leadId) return;
-    const name = await promptDialog(
-      'Live project name:', leadCompany || leadId);
+    const defaultName = _composeLiveProjectName(leadCompany || leadId, oppType);
+    const name = await promptDialog({
+      title: 'Promote to Live Projects',
+      label: 'Live project name',
+      default: defaultName,
+      placeholder: 'e.g. Shell — CRM Build',
+      confirmLabel: 'Promote',
+    });
     if (name === null || !name.trim()) return;
     try {
       const data = await jsonFetch(
@@ -7840,7 +7863,9 @@
       // v1.0.0bk: Promote-to-Live button. Hidden by default; shown
       // with appropriate label based on whether a live project
       // already exists.
-      _refreshPromoteToLiveButton(pageId, lead.company);
+      // v1.0.0by: pass opportunity_type so the promote prompt
+      // defaults to "<company> — <opp type>".
+      _refreshPromoteToLiveButton(pageId, lead.company, lead.opportunity_type);
       // Reset dirty state — freshly loaded data is the new baseline.
       updateDirtyState();
     } catch (e) {

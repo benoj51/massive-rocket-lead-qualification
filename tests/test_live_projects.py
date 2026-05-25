@@ -259,11 +259,68 @@ class LiveProjectsEndpointTests(unittest.TestCase):
         self.assertEqual(r.status_code, 201)
         body = r.get_json()
         self.assertTrue(body["created"])
-        # Default name pulled from Notion company.
+        # No opportunity_type → falls back to bare company name.
         self.assertEqual(body["project"]["name"], "Shell")
         # Default owner from lead.
         self.assertEqual(body["project"]["owner"], "Ben Ojuolape")
         self.assertEqual(body["project"]["status"], "active")
+
+    # ---- v1.0.0by: name composition tests ---------------------------
+
+    def test_default_name_composes_from_opportunity_type(self):
+        """Name should be '<company> — <opp type>' when both are set."""
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.get_page.return_value = {
+                "id": "lead-shell-na", "company": "Shell North America",
+                "owner": "Ben",
+                "opportunity_type": "CRM Build"}
+            MockSync.return_value.list_pipeline.return_value = []
+            r = self.client.post(
+                "/api/lead/lead-shell-na/promote-to-live",
+                json={})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.get_json()["project"]["name"],
+                          "Shell North America — CRM Build")
+
+    def test_default_name_falls_back_when_opp_type_unknown(self):
+        """`opportunity_type: 'Unknown'` shouldn't pollute the name."""
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.get_page.return_value = {
+                "id": "lead-x", "company": "Foo Co",
+                "opportunity_type": "Unknown"}
+            MockSync.return_value.list_pipeline.return_value = []
+            r = self.client.post("/api/lead/lead-x/promote-to-live",
+                                  json={})
+        self.assertEqual(r.get_json()["project"]["name"], "Foo Co")
+
+    def test_explicit_body_name_overrides_default(self):
+        """If the UI passes an explicit name, the server uses it
+        verbatim — composition is just the default fallback."""
+        with patch.object(self.server, "NotionSync") as MockSync:
+            MockSync.return_value.get_page.return_value = {
+                "id": "lead-shell", "company": "Shell",
+                "opportunity_type": "Retention"}
+            MockSync.return_value.list_pipeline.return_value = []
+            r = self.client.post(
+                "/api/lead/lead-shell/promote-to-live",
+                json={"name": "Custom Project Title"})
+        self.assertEqual(r.get_json()["project"]["name"],
+                          "Custom Project Title")
+
+    def test_compose_helper_unit(self):
+        """Direct unit on the helper — covers the matrix without
+        round-tripping through the endpoint each time."""
+        c = self.server._compose_live_project_name
+        self.assertEqual(c("Shell", "CRM Build"), "Shell — CRM Build")
+        self.assertEqual(c("Shell", None), "Shell")
+        self.assertEqual(c("Shell", ""), "Shell")
+        self.assertEqual(c("Shell", "Unknown"), "Shell")
+        self.assertEqual(c("Shell", "unknown"), "Shell")  # case-insensitive
+        self.assertEqual(c(None, "CRM Build"), "CRM Build")
+        self.assertEqual(c("", "CRM Build"), "CRM Build")
+        self.assertEqual(c(None, None, fallback="lead-xyz"), "lead-xyz")
+        self.assertEqual(c("  Shell  ", "  CRM Build  "),
+                          "Shell — CRM Build")  # trims whitespace
 
     def test_promote_idempotent(self):
         """Second promote returns the existing project, doesn't error."""

@@ -176,6 +176,34 @@ def _actor() -> str:
         return "anon"
 
 
+def _compose_live_project_name(company: str | None,
+                                 opportunity_type: str | None,
+                                 *, fallback: str = "(unnamed)") -> str:
+    """v1.0.0by: live project naming convention.
+
+    Format: "<company> — <opportunity type>"
+    e.g. "Shell North America — CRM Build"
+
+    Why: the Live Projects list previously showed bare company names,
+    so when the same anchor account had multiple workstreams over
+    time ("Shell — CRM Build" finishes, then "Shell — Retention"
+    starts) every row read identically. Appending the opportunity
+    type gives each row a unique, scannable identity.
+
+    Falls back gracefully:
+    - No opp_type / "Unknown" → bare company name
+    - No company → fallback (typically the lead_id)
+    - Both missing → fallback
+    """
+    company = (company or "").strip()
+    ot = (opportunity_type or "").strip()
+    if ot and ot.lower() != "unknown":
+        if company:
+            return f"{company} — {ot}"
+        return ot
+    return company or fallback
+
+
 @app.route("/api/qualify", methods=["POST"])
 def api_qualify():
     body = request.get_json(silent=True) or {}
@@ -4700,13 +4728,21 @@ def api_promote_lead_to_live(lead_id: str):
     # Pull lead context for sensible defaults.
     company = None
     lead_owner = None
+    opp_type = None
     try:
         lead = NotionSync().get_page(lead_id) or {}
         company = (lead.get("company") or "").strip() or None
         lead_owner = (lead.get("owner") or "").strip() or None
+        opp_type = (lead.get("opportunity_type") or "").strip() or None
     except Exception as e:
         log.warning("promote-to-live: lead lookup failed: %s", e)
-    name = (body.get("name") or company or lead_id).strip()
+    # v1.0.0by: name defaults to "<company> — <opportunity type>" so the
+    # Live Projects list distinguishes "Shell — CRM Build" from
+    # "Shell — Retention" when the same anchor has multiple workstreams
+    # over time. UI passes its composed default; if the body omits a
+    # name we recompose server-side so the contract is symmetric.
+    default_name = _compose_live_project_name(company, opp_type, fallback=lead_id)
+    name = (body.get("name") or default_name).strip() or default_name
     owner = (body.get("owner") or lead_owner or _actor() or "").strip() or None
     started_at = (body.get("started_at") or "").strip() or None
     summary = (body.get("summary") or "").strip() or None
