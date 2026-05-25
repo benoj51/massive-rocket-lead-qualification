@@ -5,6 +5,48 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cc] — 2026-05-26 — Jeff KB editor + loss-reason Dashboard card
+
+Two items from the "anything I missed?" list.
+
+### #5 — Jeff KB editor in Settings
+
+`/api/jeff/knowledge` GET + PUT have existed since v1.0.0bs but
+needed a UI. New `Settings → Jeff KB` tab: full-width markdown
+textarea, Reload / Save buttons, status line showing char count +
+whether Jeff is currently on. Lazy-loads the first time the tab
+opens. Edits take effect on the next chat turn — no deploy needed.
+
+### #13 — Top loss reasons on the Dashboard
+
+After v1.0.0ca's Closed Lost flow captures `close_reason`, the team
+needed the aggregation. New endpoint:
+
+- `GET /api/dashboard/loss-reasons?limit=N` — buckets Nurture +
+  Rejected leads by their close_reason (case + whitespace
+  normalised so "Budget pulled" and "budget pulled" merge), ranked
+  by count, tie-broken by recency
+
+New Dashboard card surfaces the top 10. Each reason shows count +
+up to 3 clickable lead chips that open the lead drawer. Totals
+strip shows closed count / with-reason / without-reason so the
+team can see how often they're forgetting to capture a reason.
+
+`_row_from_page` (Notion pipeline mapping) now includes
+`close_reason` so the aggregator doesn't need a second fetch per
+lead.
+
+### Tests
+
+8 new in `test_loss_reasons.py`: empty pipeline, active leads
+excluded, case-insensitive bucketing, sort by count desc,
+missing-reason counted separately, limit clamping, lead-preview
+cap at 5, Notion-outage graceful fallback.
+
+Full suite: **1129 passing**.
+
+---
+
 ## [1.0.0cb] — 2026-05-26 — Small wins bundle
 
 Five small items from the "anything I missed?" review, each too

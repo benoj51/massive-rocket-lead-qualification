@@ -5846,6 +5846,109 @@ def api_engagement_leaderboard():
     })
 
 
+# v1.0.0cc: loss-reason aggregation. After v1.0.0ca introduced the
+# Closed Lost flow that captures a `close_reason`, the team needs to
+# see the pattern over time — "we keep losing to X" is the kind of
+# signal that should drive product / pricing conversations.
+#
+# The aggregator walks the pipeline (Notion + cache fallback), buckets
+# leads with status=Nurture or status=Rejected by their close_reason,
+# and returns frequency counts + the most recent lead per bucket.
+@app.route("/api/dashboard/loss-reasons", methods=["GET"])
+def api_dashboard_loss_reasons():
+    """Top close-reasons across recently-closed leads.
+
+    Query:
+      limit — max reasons to return (default 10, max 50)
+
+    Returns:
+      {
+        "reasons": [
+          {"reason": "Budget pulled", "count": 4,
+           "leads": [{"id": "...", "company": "...", "status": "Nurture",
+                       "last_edited": "..."}], }
+        ],
+        "totals": {"closed_count": 12, "with_reason": 9, "without_reason": 3},
+        "generated_at": iso,
+      }
+    """
+    from datetime import datetime, timezone
+    try:
+        limit = max(1, min(50, int(request.args.get("limit", "10"))))
+    except ValueError:
+        limit = 10
+
+    # Pull pipeline once; tolerate Notion outages with an empty list.
+    try:
+        rows = NotionSync().list_pipeline(limit=500)
+    except Exception as e:
+        log.warning("loss_reasons: pipeline fetch failed: %s", e)
+        rows = []
+
+    # Closed leads = Nurture (came from Closed Lost) or Rejected.
+    closed_statuses = {"Nurture", "Rejected"}
+    closed_rows = [r for r in rows
+                    if (r.get("status") or "") in closed_statuses]
+
+    # Each pipeline row exposes `close_reason` via _row_from_page.
+    by_reason: dict[str, list[dict]] = {}
+    without_reason = 0
+    for r in closed_rows:
+        reason = (r.get("close_reason") or "").strip()
+        if not reason:
+            without_reason += 1
+            continue
+        # Normalise: strip + collapse internal whitespace + lower
+        # for the bucket key so "Budget pulled" and "budget pulled"
+        # don't fragment. Display the first canonical seen.
+        key = " ".join(reason.split()).lower()
+        bucket = by_reason.setdefault(key, [])
+        bucket.append({
+            "id":          r.get("id"),
+            "company":     r.get("company"),
+            "status":      r.get("status"),
+            "owner":       r.get("owner"),
+            "last_edited": r.get("last_edited"),
+            "reason_text": reason,  # preserves casing
+        })
+
+    # Build ranked output. Tie-break by most-recent-edit so a freshly
+    # populated bucket surfaces over a stale one of the same size.
+    ranked = []
+    for key, leads in by_reason.items():
+        leads.sort(key=lambda lx: lx.get("last_edited") or "", reverse=True)
+        ranked.append({
+            "reason":      leads[0]["reason_text"],
+            "count":       len(leads),
+            "leads":       leads[:5],  # cap per-bucket preview
+            "most_recent": leads[0].get("last_edited"),
+        })
+    ranked.sort(key=lambda x: (-x["count"], -(_iso_to_sortable(x["most_recent"]))))
+
+    return jsonify({
+        "reasons": ranked[:limit],
+        "totals": {
+            "closed_count":   len(closed_rows),
+            "with_reason":    sum(len(b) for b in by_reason.values()),
+            "without_reason": without_reason,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(
+            timespec="seconds").replace("+00:00", "Z"),
+    })
+
+
+def _iso_to_sortable(iso_str: str | None) -> float:
+    """Tiny helper for sort-by-recency. Returns 0 for unparseable
+    timestamps so they sort last."""
+    if not iso_str:
+        return 0.0
+    try:
+        from datetime import datetime as _dt
+        return _dt.fromisoformat(str(iso_str).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     """Manager dashboard: touch/call counts per MR owner + per partner

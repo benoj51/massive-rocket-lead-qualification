@@ -438,6 +438,9 @@ def _row_from_page(page: dict) -> dict:
         "expected_close_date": _extract_text(props.get("Expected Close Date")),
         "region": _extract_text(props.get("Region")),
         "last_edited": page.get("last_edited_time"),
+        # v1.0.0cc: surfaced in pipeline rows so the Dashboard's
+        # loss-reason aggregator doesn't need a second fetch per lead.
+        "close_reason": _extract_text(props.get("Close Reason")),
     }
 
 

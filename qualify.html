@@ -1835,6 +1835,11 @@
            fan-out doesn't block the touch-counts paint. -->
       <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Engagement leaderboard</div>
       <div id="db-engagement-leaderboard" class="muted" style="font-size:12px;">Loading…</div>
+      <!-- v1.0.0cc: loss-reason aggregation. After v1.0.0ca's Closed
+           Lost flow captures `close_reason` per lead, the team can
+           finally see "we keep losing for the same reason" patterns. -->
+      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Top loss reasons</div>
+      <div id="db-loss-reasons" class="muted" style="font-size:12px;">Loading…</div>
       <!-- Coverage health -->
       <div id="db-coverage" style="margin-top:18px;"></div>
       <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
@@ -2162,6 +2167,12 @@
         <button class="tab-btn" type="button" data-settings-tab="integrations">
           Integrations
         </button>
+        <!-- v1.0.0cc: Jeff KB editor — admins edit the
+             best-practices markdown inline; takes effect on the
+             next Jeff turn (no deploy needed). -->
+        <button class="tab-btn" type="button" data-settings-tab="jeff-kb">
+          Jeff KB
+        </button>
       </div>
 
       <!-- USERS TAB -->
@@ -2187,6 +2198,30 @@
           changing env vars.
         </p>
         <div id="settings-integrations-list" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
+      <!-- v1.0.0cc: JEFF KB TAB -->
+      <div class="tab-pane" data-settings-pane="jeff-kb">
+        <p class="muted" style="margin:0 0 8px;font-size:11px;">
+          Jeff's best-practice guidance (the soft layer; pricing facts
+          read live from the code).
+          <strong>Edits take effect on the next chat turn — no deploy needed.</strong>
+        </p>
+        <p class="muted" style="margin:0 0 12px;font-size:11px;">
+          Standard markdown. Headings, lists, bold, code blocks all
+          fine. Keep guidance concrete + specific — "When the client
+          says X, respond Y" beats abstract principles.
+        </p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span id="settings-jeff-kb-status" class="muted" style="font-size:11px;"></span>
+          <div class="btn-row">
+            <button id="settings-jeff-kb-reload" class="btn ghost" type="button" style="padding:4px 10px;font-size:11px;">Reload</button>
+            <button id="settings-jeff-kb-save" class="btn" type="button" style="padding:4px 12px;font-size:11px;">Save</button>
+          </div>
+        </div>
+        <textarea id="settings-jeff-kb-body" rows="22"
+                  style="width:100%;font-family:var(--mono);font-size:11px;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);box-sizing:border-box;resize:vertical;line-height:1.5;"
+                  placeholder="Loading…"></textarea>
       </div>
     </div>
   </section>
@@ -5231,6 +5266,59 @@
     } catch (e) {
       const list = $('#settings-users-list');
       if (list) list.innerHTML = `<div style="color:var(--red);">Failed to load settings: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+    // v1.0.0cc: Jeff KB is its own fetch — lazy-loaded the first time
+    // the user opens the tab, then cached in dataset.loaded so we
+    // don't refetch every time they switch tabs.
+    _loadJeffKbIfNotLoaded();
+  }
+
+  // v1.0.0cc: Jeff knowledge-base editor — load + save the
+  // admin-editable best-practices doc from /api/jeff/knowledge.
+  async function _loadJeffKbIfNotLoaded(force) {
+    const ta = $('#settings-jeff-kb-body');
+    if (!ta) return;
+    if (!force && ta.dataset.loaded === '1') return;
+    ta.placeholder = 'Loading…';
+    ta.value = '';
+    try {
+      const data = await jsonFetch('/api/jeff/knowledge');
+      ta.value = data.body || '';
+      ta.dataset.loaded = '1';
+      const status = $('#settings-jeff-kb-status');
+      if (status) {
+        const chars = data.chars || 0;
+        const cfg = data.configured ? 'Jeff is on' : 'Jeff is offline (set ANTHROPIC_API_KEY)';
+        status.textContent = `${chars.toLocaleString()} chars · ${cfg}`;
+      }
+    } catch (e) {
+      ta.placeholder = `Load failed: ${e.body?.error || e.message}`;
+    }
+  }
+
+  async function _saveJeffKb() {
+    const ta = $('#settings-jeff-kb-body');
+    const btn = $('#settings-jeff-kb-save');
+    if (!ta || !btn) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      const data = await jsonFetch('/api/jeff/knowledge', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: ta.value || '' }),
+      });
+      toast(`Saved (${(data.chars || 0).toLocaleString()} chars). ` +
+            `Jeff picks up the new doc on his next chat turn.`,
+            'success');
+      const status = $('#settings-jeff-kb-status');
+      if (status) status.textContent = `${(data.chars || 0).toLocaleString()} chars · saved just now`;
+    } catch (e) {
+      toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
     }
   }
 
@@ -11230,6 +11318,11 @@
     });
     const addUserBtn = $('#settings-user-add');
     if (addUserBtn) addUserBtn.addEventListener('click', _addSettingsUser);
+    // v1.0.0cc: Jeff KB save / reload wiring.
+    const kbSave = $('#settings-jeff-kb-save');
+    if (kbSave) kbSave.addEventListener('click', _saveJeffKb);
+    const kbReload = $('#settings-jeff-kb-reload');
+    if (kbReload) kbReload.addEventListener('click', () => _loadJeffKbIfNotLoaded(true));
     const expRefresh = $('#exp-refresh');
     if (expRefresh) expRefresh.addEventListener('click', loadExpansion);
     document.querySelectorAll('[data-exp-filter]').forEach(b => {
@@ -12649,6 +12742,9 @@
       // Slower than the dashboard itself (scoring fan-out), so let the
       // main paint happen first and backfill the leaderboard card.
       _loadEngagementLeaderboard();
+      // v1.0.0cc: loss-reasons aggregation. Cheap — same pipeline
+      // payload the dashboard already pulled.
+      _loadLossReasons();
     } catch (e) {
       $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {
@@ -12724,6 +12820,60 @@
       });
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;padding:10px;">Leaderboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  // v1.0.0cc: loss-reason aggregation card. After v1.0.0ca added
+  // close_reason capture on Closed Lost / Rejected, the team needs to
+  // see "we keep losing for the same reason" patterns. Backend bucket
+  // is case-insensitive so "Budget pulled" and "budget pulled" merge.
+  async function _loadLossReasons() {
+    const el = $('#db-loss-reasons');
+    if (!el) return;
+    try {
+      const data = await jsonFetch('/api/dashboard/loss-reasons?limit=10');
+      const reasons = data.reasons || [];
+      const t = data.totals || {};
+      if (!reasons.length && !t.closed_count) {
+        el.innerHTML = '<div class="muted" style="font-size:12px;color:var(--text-muted);padding:8px 0;">No closed-lost or rejected leads yet — once your team starts capturing close reasons, top patterns will surface here.</div>';
+        return;
+      }
+      const totalsStrip = `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+          <strong style="color:var(--text);">${t.closed_count || 0}</strong> closed leads ·
+          <strong style="color:var(--text);">${t.with_reason || 0}</strong> with reason ·
+          <strong style="color:var(--yellow);">${t.without_reason || 0}</strong> missing reason
+        </div>`;
+      const rows = reasons.map(r => {
+        const leadChips = (r.leads || []).slice(0, 3).map(l => {
+          const colour = l.status === 'Rejected' ? 'var(--red)' : 'var(--yellow)';
+          return `<span style="display:inline-block;font-size:10px;padding:2px 8px;background:var(--surface-2);color:${colour};border:1px solid var(--border);border-radius:8px;margin-right:4px;margin-top:2px;cursor:pointer;" data-loss-lead="${escapeAttr(l.id || '')}" title="Open ${escapeAttr(l.company || '')}">${escapeHtml(l.company || '(unnamed)')}</span>`;
+        }).join('');
+        const moreCount = (r.leads || []).length - 3;
+        const more = moreCount > 0 ? `<span class="muted" style="font-size:10px;">+${moreCount} more</span>` : '';
+        return `
+          <tr>
+            <td style="padding:8px 6px;font-size:12px;">
+              <div style="font-weight:600;margin-bottom:3px;">${escapeHtml(r.reason)}</div>
+              <div>${leadChips} ${more}</div>
+            </td>
+            <td style="padding:8px 6px;text-align:right;vertical-align:top;">
+              <span style="display:inline-block;background:rgba(239,68,68,.12);color:var(--red);font-size:13px;font-weight:700;padding:3px 10px;border-radius:14px;">${r.count}</span>
+            </td>
+          </tr>`;
+      }).join('');
+      el.innerHTML = totalsStrip + `
+        <table style="width:100%;border-collapse:collapse;">
+          <tbody>${rows}</tbody>
+        </table>`;
+      el.querySelectorAll('[data-loss-lead]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const id = chip.dataset.lossLead;
+          if (id) openLeadDrawer(id);
+        });
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;padding:10px;">Loss reasons failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 
