@@ -320,6 +320,51 @@
     border-color: transparent;
   }
 
+  /* v1.0.0ce: inline multi-tag cell — clickable container that opens
+     a checkbox popover. At-rest looks like a row of chips (the same
+     `tag signal` look the static cell had) plus a hover-only pencil
+     affordance. Click → popover with checkboxes + Save/Cancel. */
+  .inline-multi-tag-cell {
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 3px;
+    min-height: 22px;
+    transition: border-color .12s, background-color .12s;
+  }
+  .inline-multi-tag-cell:hover,
+  .inline-multi-tag-cell:focus {
+    outline: none;
+    border-color: var(--border);
+    background-color: var(--surface-2);
+  }
+  .inline-multi-tag-cell .multi-tag-chip {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .inline-multi-tag-cell .multi-tag-empty {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+  .inline-multi-tag-cell .multi-tag-edit {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-left: 4px;
+    opacity: 0;
+    transition: opacity .12s;
+  }
+  .inline-multi-tag-cell:hover .multi-tag-edit,
+  .inline-multi-tag-cell:focus .multi-tag-edit { opacity: 1; }
+
   /* v1.0.0bs: Jeff — floating chat assistant. Bottom-right button +
      slide-up chat panel. Brand-coloured trigger so it reads as
      "MR thing"; surface-coloured panel so it doesn't compete with
@@ -13587,6 +13632,140 @@
       </select>`;
   }
 
+  // v1.0.0ce: inline multi-tag cell — partner contacts table.
+  // Renders current tags as chips + a "+" affordance. Clicking the
+  // cell opens a popover with checkboxes for each enum option. Save
+  // PATCHes the contact with the new array. Click outside or Esc
+  // closes the popover without saving (a separate Save button inside
+  // the popover commits the change so the user can stage multi-tag
+  // edits atomically).
+  //
+  // Field is `territories` / `regions` / `industries` (plural keys
+  // on the server). UI exposes both singular `territory`/`region`
+  // (first tag) + the plural array; we always write the plural here.
+  function _renderInlineMultiTagCell(currentValues, options, partnerId,
+                                       contactId, field) {
+    const safe = Array.isArray(currentValues) ? currentValues : [];
+    const chips = safe.length
+      ? safe.map(t => `<span class="multi-tag-chip">${escapeHtml(t)}</span>`).join('')
+      : '<span class="multi-tag-empty">—</span>';
+    return `
+      <div class="inline-multi-tag-cell"
+            data-pc-multi-field="${escapeAttr(field)}"
+            data-pc-multi-partner="${escapeAttr(partnerId)}"
+            data-pc-multi-contact="${escapeAttr(contactId)}"
+            data-pc-multi-options="${escapeAttr(JSON.stringify(options || []))}"
+            data-pc-multi-current="${escapeAttr(JSON.stringify(safe))}"
+            tabindex="0"
+            role="button"
+            title="Click to edit ${escapeAttr(field)}">
+        ${chips}
+        <span class="multi-tag-edit">✎</span>
+      </div>`;
+  }
+
+  // Document-level handler for the multi-tag popover. Single
+  // listener handles every cell on the page.
+  document.addEventListener('click', async (e) => {
+    const cell = e.target.closest('.inline-multi-tag-cell');
+    if (!cell) {
+      // Click outside any cell — close any open popover.
+      const open = document.querySelector('.multi-tag-popover');
+      if (open && !e.target.closest('.multi-tag-popover')) {
+        open.remove();
+      }
+      return;
+    }
+    // Click on the cell itself — open the popover.
+    if (cell.dataset.popoverOpen === '1') return;
+    _openMultiTagPopover(cell);
+  });
+
+  async function _openMultiTagPopover(cell) {
+    // Tear down any other open popovers first.
+    document.querySelectorAll('.multi-tag-popover').forEach(p => p.remove());
+    document.querySelectorAll('.inline-multi-tag-cell').forEach(c => {
+      delete c.dataset.popoverOpen;
+    });
+    cell.dataset.popoverOpen = '1';
+    const options = JSON.parse(cell.dataset.pcMultiOptions || '[]');
+    const current = new Set(JSON.parse(cell.dataset.pcMultiCurrent || '[]'));
+    const partnerId = cell.dataset.pcMultiPartner;
+    const contactId = cell.dataset.pcMultiContact;
+    const field = cell.dataset.pcMultiField;
+    const pop = document.createElement('div');
+    pop.className = 'multi-tag-popover';
+    const rect = cell.getBoundingClientRect();
+    pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;z-index:90;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.28);padding:8px;min-width:220px;max-height:300px;overflow-y:auto;`;
+    if (!options.length) {
+      pop.innerHTML = `<div class="muted" style="padding:8px;font-size:11px;">No options configured. Add some in Settings → Customise dropdowns.</div>`;
+    } else {
+      const list = options.map(o => {
+        const checked = current.has(o) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
+          <input type="checkbox" value="${escapeAttr(o)}" ${checked} style="margin:0;" />
+          <span>${escapeHtml(o)}</span>
+        </label>`;
+      }).join('');
+      pop.innerHTML = `
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:4px 6px;">${escapeHtml(field)}</div>
+        <div>${list}</div>
+        <div style="display:flex;justify-content:flex-end;gap:6px;border-top:1px solid var(--border);padding-top:6px;margin-top:4px;">
+          <button class="btn ghost" data-multi-cancel type="button" style="padding:3px 10px;font-size:11px;">Cancel</button>
+          <button class="btn" data-multi-save type="button" style="padding:3px 12px;font-size:11px;">Save</button>
+        </div>`;
+    }
+    document.body.appendChild(pop);
+    // Close handlers — Esc, Cancel, click outside (handled above).
+    const closePop = () => {
+      pop.remove();
+      delete cell.dataset.popoverOpen;
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') closePop(); };
+    document.addEventListener('keydown', onKey);
+    const cancelBtn = pop.querySelector('[data-multi-cancel]');
+    if (cancelBtn) cancelBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); closePop();
+    });
+    const saveBtn = pop.querySelector('[data-multi-save]');
+    if (saveBtn) saveBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const picked = Array.from(pop.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(cb => cb.value);
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        const body = { [field]: picked };
+        // Singular alias for backward-compat readers.
+        if (field === 'territories') body.territory = picked[0] || null;
+        if (field === 'regions')     body.region    = picked[0] || null;
+        const data = await jsonFetch(
+          `/api/partners/${encodeURIComponent(partnerId)}/contacts/${encodeURIComponent(contactId)}`,
+          { method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body) });
+        // Patch the cell in place so the user sees the update without
+        // a full table re-render.
+        const saved = data.contact?.[field] || [];
+        cell.dataset.pcMultiCurrent = JSON.stringify(saved);
+        const chipsHtml = saved.length
+          ? saved.map(t => `<span class="multi-tag-chip">${escapeHtml(t)}</span>`).join('')
+          : '<span class="multi-tag-empty">—</span>';
+        cell.innerHTML = chipsHtml + '<span class="multi-tag-edit">✎</span>';
+        toast(`Saved`, 'success');
+        closePop();
+      } catch (err) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        toast(`Save failed: ${err.body?.error || err.message}`, 'error');
+      }
+    });
+    // Stop bubbling so clicks inside the popover don't trigger the
+    // outside-click close.
+    pop.addEventListener('click', (e) => e.stopPropagation());
+  }
+
   // Friendly relative date — "today", "1d ago", "12d ago", "3mo ago".
   function _fmtDaysAgo(days) {
     if (days == null) return 'never';
@@ -14665,6 +14844,10 @@
     const tierOpts = enums.tiers || [];
     const sentimentOpts = enums.partner_sentiments || [];
     const seniorityOpts = enums.seniorities || [];
+    // v1.0.0ce: multi-tag option lists for the inline tag-picker cells.
+    const territoryOpts = enums.territories || [];
+    const regionOpts = enums.regions || [];
+    const industryOpts = enums.industries || [];
     const filtered = all.filter(c => {
       // v1.0.0e: multi-tag — match if filter is in the tag list.
       if (f.territory && !_tagListIncludes(c, 'territories', 'territory', f.territory)) return false;
@@ -14740,10 +14923,12 @@
               <td>${_renderInlineEnumCell(c.tier, tierOpts, partner.id, c.id, 'tier', { kind: 'plain' })}</td>
               <td>${_renderInlineEnumCell(c.partner_sentiment, sentimentOpts, partner.id, c.id, 'partner_sentiment', { kind: 'sentiment' })}</td>
               <td>${_renderInlineEnumCell(c.seniority, seniorityOpts, partner.id, c.id, 'seniority', { kind: 'muted' })}</td>
-              <td>${(_tagList(c, 'territories', 'territory').map(t => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(t)}</span>`).join('')) || '—'}</td>
-              <td>${(_tagList(c, 'regions', 'region').map(r => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(r)}</span>`).join('')) || '—'}</td>
+              <!-- v1.0.0ce: inline multi-tag cells (was static chip rows).
+                   Click → popover with checkboxes + Save. -->
+              <td>${_renderInlineMultiTagCell(_tagList(c, 'territories', 'territory'), territoryOpts, partner.id, c.id, 'territories')}</td>
+              <td>${_renderInlineMultiTagCell(_tagList(c, 'regions', 'region'), regionOpts, partner.id, c.id, 'regions')}</td>
               <td>${c.country ? escapeHtml(c.country) : '—'}</td>
-              <td>${(c.industries || []).map(i => `<span class="tag signal" style="font-size:10px;margin-right:3px;">${escapeHtml(i)}</span>`).join('') || '—'}</td>
+              <td>${_renderInlineMultiTagCell(c.industries || [], industryOpts, partner.id, c.id, 'industries')}</td>
               <td style="white-space:nowrap;">${renderInlineOwnerCell(c.mr_owner, 'partner_contact', { partner: partner.id, contact: c.id }, 'mr_owner')}</td>
               <td style="white-space:nowrap;">${touchCell(c)}</td>
               <td style="text-align:right;white-space:nowrap;">

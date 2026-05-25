@@ -5,6 +5,44 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ce] — 2026-05-26 — Multi-tag inline edit (Territory / Region / Industries)
+
+v1.0.0bt added inline single-select cells (Tier / Sentiment /
+Seniority). The three multi-tag cells alongside them (Territory,
+Region, Industries) stayed display-only — you had to open the
+contact form to change them. Closing that gap.
+
+### New primitive: `_renderInlineMultiTagCell` + popover
+
+Renders the current tags as small chips + a hover-only pencil
+affordance. Click the cell → popover opens below with checkboxes
+for every enum option. Stage your edits, hit **Save** to commit
+(PATCH the contact with the new array). **Cancel**, **Esc**, or
+click outside discards.
+
+The popover stages changes atomically — you can tick/untick five
+options without firing five separate PATCHes. The change-handler
+keeps the singular `territory` / `region` alias in sync so any
+older reader that consumes `c.region` (not `c.regions[0]`) keeps
+working.
+
+### Visual
+
+At rest the cell looks identical to the previous static chip row
+(same `tag signal` styling). On hover the cell border + pencil
+icon surface so the affordance is discoverable. The popover uses
+the same surface / border / shadow tokens as the other modals.
+
+### Backend
+
+No new endpoint — the existing partner-contact PATCH already
+accepts `territories` / `regions` / `industries` (allowlisted in
+v1.0.0cb). UI just calls it with the new array per save.
+
+Backend untouched. **1129 still passing.** JS syntax clean.
+
+---
+
 ## [1.0.0cd] — 2026-05-26 — Multi-prompt chains → modals
 
 v1.0.0bx retired native `window.prompt` but left three flows that
