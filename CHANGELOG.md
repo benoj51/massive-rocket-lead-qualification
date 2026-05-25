@@ -5,6 +5,70 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cf] — 2026-05-26 — CSV import for lead + expansion target contacts
+
+v1.0.0bv shipped CSV import for partner contacts. Lead contacts and
+expansion target embedded contacts had no bulk-add path until now.
+
+### Refactor: shared `_import_csv_into_store` helper
+
+The partner endpoint was 175 lines; extracting the parsing /
+matching / dry-run logic into `_import_csv_into_store` shrank it
+to 22 lines and let the two new endpoints reuse the same code.
+Each call site supplies four callbacks:
+
+- `list_existing()` → contacts to match against
+- `save_one(payload)` → store-specific save
+- `normalise_one(payload)` → store-specific shape preview (dry-run)
+- `save_error` → exception class the store raises on validation
+
+Plus an optional `allowed_keys` set for stores with narrower
+schemas (expansion target contacts only support
+name/title/email/source/notes; tier/region/etc. from the CSV are
+silently dropped instead of erroring the row).
+
+### New endpoints
+
+- `POST /api/contacts/<lead_id>/import-csv` — bulk-add prospect
+  contacts after a discovery call. Full `contacts_store` schema
+  including stakeholder_role + cadence.
+- `POST /api/expansion-targets/<id>/contacts/import-csv` — bulk-add
+  contacts at a greenfield target. Narrower schema; the adapter
+  also routes name-matched rows to `update_contact` instead of
+  `add_contact` so re-importing the same list doesn't duplicate.
+
+### UI
+
+The CSV import modal (built in v1.0.0bv) refactored to accept a
+config object:
+
+```js
+openCsvImportModal({
+  endpoint:   '/api/contacts/lead-abc/import-csv',
+  targetName: 'Shell Loyalty',
+  onSuccess:  () => loadLeadContacts('lead-abc'),
+});
+```
+
+Backward-compatible: passing a partner object (old signature) still
+works. New "↑ Import CSV" buttons in:
+- Lead drawer → Contacts section (next to Add contact)
+- Expansion target detail (next to + Add contact)
+
+### Tests
+
+11 new in `test_contacts_csv_import.py`:
+- Lead contacts: dry-run, commit, update-by-name, empty CSV 400,
+  row-without-identity errors, stakeholder fields round-trip
+- Expansion target contacts: unknown target 404, commit writes
+  embedded, narrower schema drops extra fields, update-by-name
+  doesn't duplicate, row-without-identity errors
+
+Partner CSV import (20 tests) still passes through the refactored
+helper unchanged. Full suite: **1140 passing**. JS clean.
+
+---
+
 ## [1.0.0ce] — 2026-05-26 — Multi-tag inline edit (Territory / Region / Industries)
 
 v1.0.0bt added inline single-select cells (Tier / Sentiment /

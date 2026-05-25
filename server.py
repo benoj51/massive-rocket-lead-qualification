@@ -3114,183 +3114,259 @@ def _csv_split_multi(value: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-@app.route("/api/partners/<partner_id>/contacts/import-csv", methods=["POST"])
-def api_partner_contacts_import_csv(partner_id: str):
-    """Parse a CSV string + preview (dry_run=true) or commit the import.
+def _parse_csv_to_payloads(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
+    """Pure CSV → payload extractor. Returns
+    (payloads_per_row, headers_seen, unknown_headers).
 
-    Body:
-      { "csv": "<string>", "dry_run": true|false }
-
-    Returns:
-      {
-        "rows": [
-          {"row": 2, "action": "add"|"update"|"error",
-           "contact": {...}, "matched_id": "..."|None, "reason": "..."|None},
-          ...
-        ],
-        "summary": {"total": N, "would_add": N, "would_update": N,
-                     "errored": N, "committed": bool},
-      }
+    Each payload is the row's data with synonyms mapped to canonical
+    keys, multi-tag values split, city stashed in tags, empty cells
+    omitted (so update-merges don't clobber). The 'preserve order +
+    skip blanks' contract is identical across all three importers
+    (partner / lead / expansion) — that's why this lives here.
     """
     import csv as _csv
     import io as _io
-
-    body = request.get_json(silent=True) or {}
-    csv_text = body.get("csv") or ""
-    dry_run = bool(body.get("dry_run", True))
-    if not csv_text.strip():
-        return jsonify({"error": "csv body required"}), 400
-
-    # Verify the partner exists; we still parse on a missing partner
-    # so the user gets the validation feedback either way.
-    partner = partners_store.get_partner(partner_id)
-    if not partner:
-        return jsonify({"error": "partner_not_found"}), 404
-
-    # Parse — be tolerant of BOMs (Excel exports) + trailing whitespace.
-    try:
-        reader = _csv.DictReader(_io.StringIO(csv_text.lstrip("﻿")))
-        raw_rows = list(reader)
-    except Exception as e:
-        return jsonify({"error": f"csv parse failed: {e}"}), 400
+    reader = _csv.DictReader(_io.StringIO(csv_text.lstrip("﻿")))
+    raw_rows = list(reader)
     headers = reader.fieldnames or []
-    if not headers:
-        return jsonify({"error": "no headers detected"}), 400
-
-    # Map raw → normalised header. Unknown headers are kept in a
-    # warnings list so the UI can flag typos.
     header_map: dict[str, str] = {}
-    unknown_headers: list[str] = []
+    unknown: list[str] = []
     for h in headers:
         norm = _csv_normalise_header(h)
         if norm:
             header_map[h] = norm
         else:
-            unknown_headers.append(h)
-
-    # Snapshot existing roster ONCE so name/email matching is O(N).
-    existing = partner_contacts_store.list_contacts(partner_id)
-    by_name = {(c.get("name") or "").strip().lower(): c
-                for c in existing if c.get("name")}
-    by_email = {(c.get("email") or "").strip().lower(): c
-                 for c in existing if c.get("email")}
-
-    rows_out: list[dict] = []
-    counts = {"add": 0, "update": 0, "error": 0}
-
-    for idx, raw in enumerate(raw_rows, start=2):  # row 1 = header
-        # Build the canonical payload from this row.
+            unknown.append(h)
+    payloads = []
+    for raw in raw_rows:
         payload: dict = {}
-        city_extra: str | None = None
+        city_extra = None
         for raw_h, norm in header_map.items():
             value = (raw.get(raw_h) or "").strip()
             if not value:
-                continue  # empty cell — don't clobber existing on update
+                continue
             if norm == "_city":
                 city_extra = value
                 continue
             if norm == "_notes":
-                # No per-row note creation in v1 — log + skip cleanly.
                 continue
             if norm in _MULTI_TAG_FIELDS:
                 payload[norm] = _csv_split_multi(value)
             else:
                 payload[norm] = value
-        # City lives in tags so the info survives the schema gap.
         if city_extra:
             payload.setdefault("tags", []).append(city_extra)
+        payloads.append(payload)
+    return payloads, headers, unknown
 
+
+def _import_csv_into_store(
+    csv_text: str,
+    *,
+    dry_run: bool,
+    list_existing,        # () -> list of existing contacts
+    save_one,             # (payload) -> saved dict; raises store-specific error
+    normalise_one,        # (payload) -> normalised dict for dry-run preview
+    save_error,           # exception class raised by save_one on validation fail
+    audit_event: str,
+    audit_extra: dict,
+    allowed_keys: set | None = None,
+) -> dict:
+    """v1.0.0cf: store-agnostic CSV-import orchestrator. Each endpoint
+    plugs in its own list / save / normalise callbacks; this helper
+    handles parsing, matching, dry-run/commit branching, and the
+    response shape. Match by name (case-insensitive) OR email.
+    """
+    try:
+        payloads, headers, unknown_headers = _parse_csv_to_payloads(csv_text)
+    except Exception as e:
+        return {"_status": 400, "error": f"csv parse failed: {e}"}
+    if not headers:
+        return {"_status": 400, "error": "no headers detected"}
+
+    # Snapshot existing roster for matching.
+    existing = list_existing()
+    by_name = {(c.get("name") or "").strip().lower(): c
+                for c in existing if c.get("name")}
+    by_email = {(c.get("email") or "").strip().lower(): c
+                 for c in existing if c.get("email")}
+    rows_out: list[dict] = []
+    counts = {"add": 0, "update": 0, "error": 0}
+
+    for idx, payload in enumerate(payloads, start=2):  # row 1 = header
+        # Optional narrowing for stores with limited field sets
+        # (e.g. expansion target contacts have name/title/email/source/notes
+        # only — no tier/sentiment/etc.).
+        if allowed_keys is not None:
+            payload = {k: v for k, v in payload.items() if k in allowed_keys}
         name = (payload.get("name") or "").strip()
         email = (payload.get("email") or "").strip().lower()
         if not name and not email:
-            rows_out.append({
-                "row":     idx,
-                "action":  "error",
-                "reason":  "row needs at least a name or email",
-                "contact": payload,
-            })
+            rows_out.append({"row": idx, "action": "error",
+                              "reason": "row needs at least a name or email",
+                              "contact": payload})
             counts["error"] += 1
             continue
-
-        # Match against existing roster.
         matched = None
         if name:
             matched = by_name.get(name.lower())
         if not matched and email:
             matched = by_email.get(email)
-
-        if matched:
-            # Build the merged payload: existing fields + CSV values
-            # (CSV wins where non-empty, which is guaranteed since we
-            # skip empty cells above).
-            merged = {**matched, **payload, "id": matched["id"],
-                       "partner_id": matched["partner_id"]}
-            try:
-                if dry_run:
-                    contact = partner_contacts_store._normalise(partner_id, merged)
-                else:
-                    contact = partner_contacts_store.save_contact(partner_id, merged)
-            except partner_contacts_store.PartnerContactsStoreError as e:
-                rows_out.append({
-                    "row":     idx,
-                    "action":  "error",
-                    "reason":  str(e),
-                    "contact": payload,
-                })
-                counts["error"] += 1
-                continue
-            rows_out.append({
-                "row":        idx,
-                "action":     "update",
-                "matched_id": matched["id"],
-                "contact":    contact,
-            })
-            counts["update"] += 1
-        else:
-            try:
-                if dry_run:
-                    contact = partner_contacts_store._normalise(partner_id, payload)
-                else:
-                    contact = partner_contacts_store.save_contact(partner_id, payload)
-                    # Index immediately so a CSV that lists "Jane" twice
-                    # doesn't add two rows.
+        try:
+            if matched:
+                merged = {**matched, **payload, "id": matched["id"]}
+                # Preserve any store-specific foreign-key fields the
+                # caller has populated on `matched`.
+                contact = normalise_one(merged) if dry_run else save_one(merged)
+                rows_out.append({"row": idx, "action": "update",
+                                  "matched_id": matched["id"],
+                                  "contact": contact})
+                counts["update"] += 1
+            else:
+                contact = normalise_one(payload) if dry_run else save_one(payload)
+                if not dry_run:
+                    # Index immediately so a CSV that lists the same
+                    # name twice doesn't add two rows.
                     nm = (contact.get("name") or "").strip().lower()
                     em = (contact.get("email") or "").strip().lower()
                     if nm: by_name[nm] = contact
                     if em: by_email[em] = contact
-            except partner_contacts_store.PartnerContactsStoreError as e:
-                rows_out.append({
-                    "row":     idx,
-                    "action":  "error",
-                    "reason":  str(e),
-                    "contact": payload,
-                })
-                counts["error"] += 1
-                continue
-            rows_out.append({
-                "row":     idx,
-                "action":  "add",
-                "contact": contact,
-            })
-            counts["add"] += 1
+                rows_out.append({"row": idx, "action": "add",
+                                  "contact": contact})
+                counts["add"] += 1
+        except save_error as e:
+            rows_out.append({"row": idx, "action": "error",
+                              "reason": str(e), "contact": payload})
+            counts["error"] += 1
 
     if not dry_run:
-        audit.log_event("partner_contacts_csv_import", actor=_actor(),
-                         partner_id=partner_id,
+        audit.log_event(audit_event, actor=_actor(),
                          added=counts["add"], updated=counts["update"],
-                         errored=counts["error"])
+                         errored=counts["error"], **audit_extra)
 
-    return jsonify({
+    return {
         "rows":    rows_out,
         "summary": {
-            "total":           len(raw_rows),
+            "total":           len(payloads),
             "would_add":       counts["add"],
             "would_update":    counts["update"],
             "errored":         counts["error"],
             "committed":       (not dry_run),
             "unknown_headers": unknown_headers,
         },
-    })
+    }
+
+
+@app.route("/api/partners/<partner_id>/contacts/import-csv", methods=["POST"])
+def api_partner_contacts_import_csv(partner_id: str):
+    """Parse a CSV + preview (dry_run=true) or commit. See
+    _import_csv_into_store for the response shape."""
+    body = request.get_json(silent=True) or {}
+    csv_text = body.get("csv") or ""
+    if not csv_text.strip():
+        return jsonify({"error": "csv body required"}), 400
+    if not partners_store.get_partner(partner_id):
+        return jsonify({"error": "partner_not_found"}), 404
+    dry_run = bool(body.get("dry_run", True))
+    result = _import_csv_into_store(
+        csv_text,
+        dry_run=dry_run,
+        list_existing=lambda: partner_contacts_store.list_contacts(partner_id),
+        save_one=lambda p: partner_contacts_store.save_contact(partner_id, p),
+        normalise_one=lambda p: partner_contacts_store._normalise(partner_id, p),
+        save_error=partner_contacts_store.PartnerContactsStoreError,
+        audit_event="partner_contacts_csv_import",
+        audit_extra={"partner_id": partner_id},
+    )
+    status = result.pop("_status", 200)
+    return jsonify(result), status
+
+
+# v1.0.0cf: CSV import for lead-side contacts. Same shape as the
+# partner endpoint — one rich format, the helper handles parsing +
+# matching + dry-run. Useful for pasting a prospect's stakeholder
+# list after a discovery call.
+@app.route("/api/contacts/<lead_id>/import-csv", methods=["POST"])
+def api_lead_contacts_import_csv(lead_id: str):
+    body = request.get_json(silent=True) or {}
+    csv_text = body.get("csv") or ""
+    if not csv_text.strip():
+        return jsonify({"error": "csv body required"}), 400
+    dry_run = bool(body.get("dry_run", True))
+    result = _import_csv_into_store(
+        csv_text,
+        dry_run=dry_run,
+        list_existing=lambda: contacts_store.list_contacts(lead_id),
+        save_one=lambda p: contacts_store.save_contact(lead_id, p),
+        # contacts_store._normalise takes just the contact dict
+        # (lead_id is implicit via the file path).
+        normalise_one=lambda p: contacts_store._normalise(p),
+        save_error=Exception,  # contacts_store raises generic ValueError
+        audit_event="lead_contacts_csv_import",
+        audit_extra={"lead_id": lead_id},
+    )
+    status = result.pop("_status", 200)
+    return jsonify(result), status
+
+
+# v1.0.0cf: CSV import for expansion-target embedded contacts. The
+# schema is narrower — only name / title / email / source / notes —
+# so we cap the payload to those keys via `allowed_keys`. The
+# normalise/save adapters here also do the embedded-list manipulation
+# (expansion targets store contacts inside the target document).
+@app.route("/api/expansion-targets/<target_id>/contacts/import-csv",
+            methods=["POST"])
+def api_expansion_target_contacts_import_csv(target_id: str):
+    body = request.get_json(silent=True) or {}
+    csv_text = body.get("csv") or ""
+    if not csv_text.strip():
+        return jsonify({"error": "csv body required"}), 400
+    target = expansion_targets_store.get(target_id)
+    if not target:
+        return jsonify({"error": "target_not_found"}), 404
+    dry_run = bool(body.get("dry_run", True))
+
+    def _list_existing():
+        # Fresh fetch — the store may have mutated mid-import.
+        t = expansion_targets_store.get(target_id) or {}
+        return t.get("contacts") or []
+
+    def _save_one(payload):
+        # Helper passes merged payload with `id` set when it matched
+        # an existing contact — route to update_contact in that case
+        # so we don't double-add. add_contact for new rows.
+        cid = payload.get("id")
+        existing_ids = {c.get("id")
+                         for c in _list_existing() if c.get("id")}
+        if cid and cid in existing_ids:
+            updates = {k: v for k, v in payload.items()
+                        if k in {"name", "title", "email", "source",
+                                  "notes"} and v is not None}
+            updated = expansion_targets_store.update_contact(
+                target_id, cid, **updates)
+            return updated or payload
+        # Strip id so add_contact mints a fresh one.
+        payload = {k: v for k, v in payload.items() if k != "id"}
+        return expansion_targets_store.add_contact(target_id, payload)
+
+    def _normalise_one(payload):
+        # Re-normalise via the store's contact normaliser for a
+        # consistent preview shape.
+        return expansion_targets_store._normalise_contact(payload)
+
+    result = _import_csv_into_store(
+        csv_text,
+        dry_run=dry_run,
+        list_existing=_list_existing,
+        save_one=_save_one,
+        normalise_one=_normalise_one,
+        save_error=expansion_targets_store.ExpansionTargetsStoreError,
+        audit_event="expansion_target_contacts_csv_import",
+        audit_extra={"target_id": target_id},
+        allowed_keys={"name", "title", "email", "phone", "tags"},
+    )
+    status = result.pop("_status", 200)
+    return jsonify(result), status
 
 
 @app.route("/api/partners/<partner_id>/contacts/<contact_id>", methods=["DELETE"])

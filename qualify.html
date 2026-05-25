@@ -2916,6 +2916,8 @@
             </div>
             <div class="btn-row">
               <button id="ld-add-contact" class="btn" type="button" style="padding:6px 14px;font-size:12px;">Add contact</button>
+              <!-- v1.0.0cf: bulk import via CSV (mirrors the partner pattern). -->
+              <button id="ld-import-csv" class="btn ghost" type="button" style="padding:6px 14px;font-size:12px;">↑ Import CSV</button>
             </div>
           </div>
         </details>
@@ -5015,7 +5017,12 @@
           Contacts <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px;">— who you know in this region</span>
         </h4>
         <div id="exp-d-contacts"></div>
-        <button class="btn ghost" id="exp-d-add-contact" type="button" style="padding:4px 10px;font-size:11px;margin-top:6px;">+ Add contact</button>
+        <div class="btn-row" style="margin-top:6px;gap:6px;">
+          <button class="btn ghost" id="exp-d-add-contact" type="button" style="padding:4px 10px;font-size:11px;">+ Add contact</button>
+          <!-- v1.0.0cf: bulk import via CSV — same pattern as
+               Partner detail + Lead drawer. -->
+          <button class="btn ghost" id="exp-d-import-csv" type="button" style="padding:4px 10px;font-size:11px;">↑ Import CSV</button>
+        </div>
       </div>
     `;
     const patch = async (fields) => {
@@ -5064,6 +5071,15 @@
       openLeadDrawer(t.converted_lead_id));
     $('#exp-d-add-contact').addEventListener('click', () =>
       _addExpansionTargetContact(t.id));
+    // v1.0.0cf: CSV import on the expansion target detail.
+    const expCsv = $('#exp-d-import-csv');
+    if (expCsv) expCsv.addEventListener('click', () => {
+      openCsvImportModal({
+        endpoint:   `/api/expansion-targets/${encodeURIComponent(t.id)}/contacts/import-csv`,
+        targetName: t.name || 'target',
+        onSuccess:  () => openExpansionTarget(t.id),
+      });
+    });
     _renderExpansionTargetContacts(t.id, t.contacts || []);
   }
 
@@ -11663,6 +11679,15 @@
     $('#ld-add-contact').addEventListener('click', () => {
       if (drawerState.id) addContactManual(drawerState.id);
     });
+    // v1.0.0cf: CSV import on the lead drawer Contacts section.
+    $('#ld-import-csv').addEventListener('click', () => {
+      if (!drawerState.id) return;
+      openCsvImportModal({
+        endpoint:   `/api/contacts/${encodeURIComponent(drawerState.id)}/import-csv`,
+        targetName: drawerState.original?.company || 'this lead',
+        onSuccess:  () => loadLeadContacts(drawerState.id),
+      });
+    });
     $('#ld-contacts-search').addEventListener('click', () => {
       if (drawerState.id) searchApolloContacts(drawerState.id);
     });
@@ -15159,9 +15184,19 @@
         reader.readAsText(f);
       });
     }
-    // Stash the partner for the preview/commit handlers.
-    overlay.dataset.partnerId = partner.id;
-    $('#csv-import-partner-name').textContent = `→ ${partner.name}`;
+    // v1.0.0cf: support 3 call sites via a config object. Backward-compat:
+    // if `partner` is a partner-shaped object (has id + name + type),
+    // build the partner endpoint inline so the old call still works.
+    const cfg = partner.endpoint
+      ? partner
+      : {
+          endpoint:   `/api/partners/${encodeURIComponent(partner.id)}/contacts/import-csv`,
+          targetName: partner.name,
+          onSuccess:  () => openPartnerDetail(partner.id),
+        };
+    overlay.dataset.endpoint = cfg.endpoint;
+    _csvImportSuccessCb = cfg.onSuccess || null;
+    $('#csv-import-partner-name').textContent = `→ ${cfg.targetName || ''}`;
     // Reset to step 1.
     $('#csv-import-step-upload').style.display = 'block';
     $('#csv-import-step-preview').style.display = 'none';
@@ -15197,9 +15232,13 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // v1.0.0cf: stashed onSuccess callback (can't put functions in
+  // dataset). Set by openCsvImportModal, cleared on close.
+  let _csvImportSuccessCb = null;
+
   async function _csvImportPreview() {
     const overlay = $('#csv-import-overlay');
-    const partnerId = overlay.dataset.partnerId;
+    const endpoint = overlay.dataset.endpoint;
     const csv = ($('#csv-import-text').value || '').trim();
     if (!csv) {
       toast('Paste CSV or upload a file first', 'error');
@@ -15209,11 +15248,10 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Parsing…';
     try {
-      const data = await jsonFetch(
-        `/api/partners/${encodeURIComponent(partnerId)}/contacts/import-csv`,
-        { method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ csv, dry_run: true }) });
+      const data = await jsonFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv, dry_run: true }) });
       _csvImportRenderPreview(data);
     } catch (e) {
       toast(`Parse failed: ${e.body?.error || e.message}`, 'error');
@@ -15289,21 +15327,24 @@
 
   async function _csvImportCommit() {
     const overlay = $('#csv-import-overlay');
-    const partnerId = overlay.dataset.partnerId;
+    const endpoint = overlay.dataset.endpoint;
     const csv = ($('#csv-import-text').value || '').trim();
     if (!csv) return;
     const btn = $('#csv-import-commit');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Importing…';
     try {
-      const data = await jsonFetch(
-        `/api/partners/${encodeURIComponent(partnerId)}/contacts/import-csv`,
-        { method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ csv, dry_run: false }) });
+      const data = await jsonFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv, dry_run: false }) });
       _csvImportRenderResult(data);
-      // Refresh the partner detail so the new rows show.
-      await openPartnerDetail(partnerId);
+      // v1.0.0cf: caller-supplied refresh hook so the right surface
+      // re-renders (partner detail, lead drawer contacts, expansion
+      // target detail).
+      if (typeof _csvImportSuccessCb === 'function') {
+        await _csvImportSuccessCb();
+      }
     } catch (e) {
       toast(`Import failed: ${e.body?.error || e.message}`, 'error');
       btn.disabled = false;
