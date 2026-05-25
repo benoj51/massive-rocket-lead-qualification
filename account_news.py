@@ -204,8 +204,11 @@ def fetch_for_company(company_name: str, *,
         resp = requests.get(url, timeout=15,
                              headers={"User-Agent": "MR-LeadPlatform/1.0"})
         if not resp.ok:
-            log.warning("Google News fetch %s: %s",
-                          resp.status_code, resp.text[:200])
+            # v1.0.0cb: log status code only — response bodies can
+            # echo the query (which contains the company name) into
+            # log destinations we don't necessarily control.
+            log.warning("Google News fetch returned HTTP %s",
+                          resp.status_code)
             return []
     except requests.RequestException as e:
         log.warning("Google News fetch failed for %s: %s", company_name, e)

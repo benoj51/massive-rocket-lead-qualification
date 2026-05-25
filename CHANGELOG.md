@@ -5,6 +5,78 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cb] — 2026-05-26 — Small wins bundle
+
+Five small items from the "anything I missed?" review, each too
+trivial for its own commit but coherent as a group.
+
+### #9 — Engagement scoring excludes Nurture + Rejected
+
+Three places in `server.py` used `status not in {"Disqualified",
+"On Hold", "Closed Lost"}` to filter the "needs attention" list +
+related at-risk computations. After v1.0.0ca added Nurture +
+Rejected, those statuses were getting flagged for low engagement
+when by definition they're not in active rotation. Extended the
+exclusion set to `{Disqualified, On Hold, Closed Lost, Nurture,
+Rejected}` everywhere.
+
+### #11 — Drawer-header inline stage + status edit
+
+Status chip in the drawer header is now an inline `<select>`
+(hydrated from `/api/settings/enums`). Same for a new Sales Stage
+chip. Click → native dropdown → on change, mirrors into the form's
+`[data-ld]` select and fires an input event so the existing dirty
+state + saveLead flow (incl. the Closed Won/Lost workflows) picks
+it up. No new save code path. Removes the friction of opening the
+collapsed Qualification accordion just to change status.
+
+### #12 — Settings → Integrations clearer AI hint
+
+The AI (Claude) row previously said "Note synthesis + contact
+extraction" — accurate when first written, but Jeff + news
+relevance scoring also depend on the same key now. Updated hint:
+"Powers Jeff, note synthesis, contact extraction, account-news
+relevance scoring. Set ANTHROPIC_API_KEY in Railway → Variables."
+
+### #7 — Three low-sev security items from the audit
+
+- **Partner mass-assignment allowlist** — `/api/partners/<id>` and
+  `/api/partners/<id>/contacts/<id>` PATCH endpoints used
+  `{**existing, **body}` with no input filter. Client-submitted
+  keys like `created_at`, `id`, or arbitrary fields would silently
+  merge into the stored record. Added explicit allowlists
+  (`_PARTNER_PATCH_FIELDS`, `_PARTNER_CONTACT_PATCH_FIELDS`) and a
+  shared `_filter_body()` helper.
+- **Jeff context value cleaning** — values flowing into the system
+  prompt from `context.lead.vertical` etc. are now stripped of
+  newlines, leading markdown control chars, and capped at 120
+  chars. Defends against `"\n\n## SYSTEM OVERRIDE: …"`-style
+  injection.
+- **Google News response body redacted from logs** — was
+  `resp.text[:200]` which can echo the query (company name) into
+  log destinations we don't fully control. Now status code only.
+
+### #10 — `filter=all` preset migration
+
+No code change. Just noting: existing saved presets with
+`filter=all` still mean "literal all rows" (including Nurture +
+Rejected), so a long-time user's preset shows MORE rows than the
+new "In pipeline" default. They'll only notice if they re-save the
+preset. Worth a heads-up in any team comms about v1.0.0ca.
+
+### Tests
+
+5 new in `test_security_hardening.py`:
+- Partner PATCH strips arbitrary keys + spoofed `created_at` / `id`
+- Partner-contact PATCH same
+- Jeff context: newlines stripped (no SYSTEM OVERRIDE injection)
+- Jeff context: long values truncated to 120 chars
+- Jeff context: leading markdown chars stripped
+
+Full suite: **1121 passing**.
+
+---
+
 ## [1.0.0ca] — 2026-05-26 — Editable stages + Closed Won/Lost/Rejected lifecycle
 
 ### The ask

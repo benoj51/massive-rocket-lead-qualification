@@ -2799,9 +2799,33 @@ def api_partners_get(partner_id: str):
     return jsonify({"partner": p})
 
 
+# v1.0.0cb: explicit allowlist on partner / partner-contact PATCH bodies.
+# Previously `{**existing, **body}` accepted arbitrary keys, so a client
+# could submit (e.g.) `created_at`, `partner_id`, `id` and have them
+# silently merge into the stored record. Only _normalise was the line of
+# defense, and not every field passes through it. The allowlist makes
+# trust-boundary intent explicit: server says exactly what's editable.
+_PARTNER_PATCH_FIELDS = frozenset({
+    "name", "type", "tier", "regions", "industries", "website",
+    "owner", "status", "notes", "logo_url",
+})
+_PARTNER_CONTACT_PATCH_FIELDS = frozenset({
+    "name", "title", "email", "linkedin_url", "phone",
+    "territories", "territory", "regions", "region",
+    "country", "industries", "mr_owner", "reports_to_id",
+    "status", "partner_sentiment", "tier", "seniority",
+    "tags", "cadence_days", "last_touched_at",
+})
+
+
+def _filter_body(body: dict, allowed: frozenset) -> dict:
+    return {k: v for k, v in (body or {}).items() if k in allowed}
+
+
 @app.route("/api/partners/<partner_id>", methods=["PATCH"])
 def api_partners_update(partner_id: str):
-    body = request.get_json(silent=True) or {}
+    body = _filter_body(request.get_json(silent=True) or {},
+                         _PARTNER_PATCH_FIELDS)
     existing = partners_store.get_partner(partner_id)
     if not existing:
         return jsonify({"error": "not_found"}), 404
@@ -2867,7 +2891,9 @@ def api_partner_contacts_update(partner_id: str, contact_id: str):
     existing = partner_contacts_store.get_contact(partner_id, contact_id)
     if not existing:
         return jsonify({"error": "not_found"}), 404
-    body = request.get_json(silent=True) or {}
+    # v1.0.0cb: explicit allowlist — see _filter_body above.
+    body = _filter_body(request.get_json(silent=True) or {},
+                         _PARTNER_CONTACT_PATCH_FIELDS)
     merged = {**existing, **body, "id": contact_id, "partner_id": existing["partner_id"]}
     try:
         saved = partner_contacts_store.save_contact(partner_id, merged)
@@ -4011,7 +4037,7 @@ def api_home():
     leads_owned = [
         r for r in pipeline_rows
         if (r.get("owner") or "").lower() == owner_name.lower()
-        and (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost"}
+        and (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost", "Nurture", "Rejected"}
     ]
     leads_owned.sort(key=lambda r: r.get("last_edited") or "", reverse=True)
     active_leads_top = [{
@@ -4102,7 +4128,7 @@ def api_home():
             ),
             "total_in_pipeline": sum(
                 1 for r in pipeline_rows
-                if (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost"}
+                if (r.get("status") or "") not in {"Disqualified", "On Hold", "Closed Lost", "Nurture", "Rejected"}
             ),
         }
 
@@ -5782,7 +5808,7 @@ def api_engagement_leaderboard():
     # Group active leads by owner, cap each owner's batch.
     by_owner: dict[str, list[dict]] = {}
     for r in pipeline_rows:
-        if (r.get("status") or "") in {"Disqualified", "On Hold", "Closed Lost"}:
+        if (r.get("status") or "") in {"Disqualified", "On Hold", "Closed Lost", "Nurture", "Rejected"}:
             continue
         owner = (r.get("owner") or "").strip() or "Unassigned"
         by_owner.setdefault(owner, []).append(r)

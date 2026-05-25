@@ -158,8 +158,23 @@ def _context_block(context: dict[str, Any] | None) -> str:
     you should...") rather than generic ones."""
     if not context:
         return ""
+
+    # v1.0.0cb: defensive context-value normalisation. Each value is
+    # capped at 120 chars and stripped of newlines / markdown control
+    # chars so a lead "vertical" or "deal_size" can't inject extra
+    # system-prompt sections (e.g. `\n## SYSTEM OVERRIDE:`). In-house
+    # tool, low blast radius — this is hygiene, not a panic fix.
+    def _clean(v) -> str:
+        if v is None:
+            return ""
+        s = str(v).replace("\r", " ").replace("\n", " ")
+        # Strip leading/trailing markdown control chars to make
+        # heading-injection harder.
+        s = s.strip().lstrip("#").lstrip("*").lstrip("-").strip()
+        return s[:120]
+
     parts: list[str] = ["## User context"]
-    view = (context.get("view") or "").strip()
+    view = _clean(context.get("view"))
     if view:
         parts.append(f"- Current view: **{view}**")
     lead = context.get("lead") or {}
@@ -169,7 +184,7 @@ def _context_block(context: dict[str, Any] | None) -> str:
                             ("status", "Status"), ("opportunity_type", "Opportunity"),
                             ("region", "Region"),
                             ("deal_size", "Deal size estimate")):
-            v = lead.get(key)
+            v = _clean(lead.get(key))
             if v:
                 bits.append(f"{label}: {v}")
         if bits:
@@ -182,8 +197,8 @@ def _context_block(context: dict[str, Any] | None) -> str:
                             ("months", "Duration (months)"),
                             ("project_ops_pct", "Project ops %"),
                             ("contingency_pct", "Contingency %")):
-            v = pricing_cfg.get(key)
-            if v is not None and v != "":
+            v = _clean(pricing_cfg.get(key))
+            if v:
                 bits.append(f"{label}: {v}")
         if bits:
             parts.append("- Pricing config in progress: " + " · ".join(bits))

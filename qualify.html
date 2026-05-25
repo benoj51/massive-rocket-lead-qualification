@@ -2335,6 +2335,25 @@
                 title="Watch this account for relevant news"
                 style="display:none;background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:3px 9px;border-radius:14px;cursor:pointer;font-size:11px;line-height:1;margin-left:4px;display:none;align-items:center;gap:4px;"></button>
         <span class="status-chip" id="ld-status-chip" style="display:none;"></span>
+        <!-- v1.0.0cb: inline-editable status + stage selects in the
+             drawer header. Click → native dropdown. On change we mirror
+             into the hidden [data-ld] form selects + fire `input` so
+             the existing dirty-state + saveLead flow handles the
+             actual persistence (incl. the Closed Won/Lost workflows). -->
+        <select id="ld-header-status" class="inline-enum-cell"
+                data-enum-hydrate="lead_statuses"
+                data-mirror-to='[data-ld="status"]'
+                title="Change status"
+                style="display:none;">
+          <option value="">—</option>
+        </select>
+        <select id="ld-header-stage" class="inline-enum-cell"
+                data-enum-hydrate="sales_stages"
+                data-mirror-to='[data-ld="sales_stage"]'
+                title="Change sales stage"
+                style="display:none;">
+          <option value="">— stage</option>
+        </select>
         <span id="ld-group-chip"></span>
       </div>
     </div>
@@ -5283,7 +5302,11 @@
       { name: 'AI (Claude)',
         status: h.ai?.configured ? 'on' : 'off',
         ok: !!h.ai?.configured,
-        hint: 'Note synthesis + contact extraction. Configure with ANTHROPIC_API_KEY.' },
+        // v1.0.0cb: full surface list — Jeff + news relevance also
+        // need this key. Off = these features degrade gracefully but
+        // visibly (Jeff shows "offline", news relevance falls back to
+        // heuristics, summaries don't auto-generate).
+        hint: 'Powers Jeff, note synthesis, contact extraction, account-news relevance scoring. Set ANTHROPIC_API_KEY in Railway → Variables.' },
       { name: 'HubSpot',
         status: h.hubspot?.enabled ? 'enabled' : 'disabled',
         ok: !!h.hubspot?.enabled,
@@ -7809,7 +7832,28 @@
       statusEl.style.display = 'none';
       statusEl.textContent = '';
     }
+    // v1.0.0cb: keep the header chip-select in sync with the rendered
+    // chip text. Cheap; means saveLead's refresh of the chip after a
+    // PATCH also bumps the chip-select.
+    const hStatus = $('#ld-header-status');
+    if (hStatus && txt && hStatus.value !== txt) hStatus.value = txt;
   }
+
+  // v1.0.0cb: mirror handler for header-row enum selects. Change in
+  // the header select → mirror to the matching form select →
+  // dispatch input event so the existing dirty-state + saveLead flow
+  // picks it up (no separate save path to maintain).
+  // Single document-level listener; data-mirror-to lives on the
+  // select element itself so we don't have to wire each one.
+  document.addEventListener('change', (e) => {
+    const sel = e.target;
+    if (!sel || !sel.matches || !sel.matches('[data-mirror-to]')) return;
+    const target = document.querySelector(sel.dataset.mirrorTo);
+    if (!target) return;
+    target.value = sel.value;
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 
   async function loadLead(pageId) {
     try {
@@ -7836,12 +7880,22 @@
       // option at the moment `el.value = value` runs, and the value
       // would silently fall back to "Unassigned".
       await hydrateOwnerSelects($('#lead-drawer'));
+      // v1.0.0cb: hydrate the header status + stage selects from
+      // /api/settings/enums so they show the live editable lists.
+      await hydrateEnumSelects($('#lead-drawer'));
       // Populate all fields by their data-ld key
       $$('#lead-drawer [data-ld]').forEach(el => {
         const key = el.dataset.ld;
         const value = lead[key] != null ? String(lead[key]) : '';
         el.value = value;
       });
+      // v1.0.0cb: now sync the header chip-selects to match the form
+      // and surface them. Hidden by default in static HTML so the
+      // drawer doesn't flash empty selects on load.
+      const hStatus = $('#ld-header-status');
+      const hStage = $('#ld-header-stage');
+      if (hStatus) { hStatus.value = lead.status || ''; hStatus.style.display = 'inline-block'; }
+      if (hStage)  { hStage.value  = lead.sales_stage || ''; hStage.style.display = 'inline-block'; }
       renderDrawerSourcedFor(lead.sourced_for_partners || []);
       // v1.0.0be: tech-stack chips below the input.
       _renderTechStackChips(lead.tech_stack || '');
