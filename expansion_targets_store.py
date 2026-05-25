@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -96,8 +97,22 @@ def _store_dir() -> Path:
     return d
 
 
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_id(value: str) -> str:
+    """v1.0.0bz: strict ID guard. IDs are generated server-side as
+    uuid4 hex (32 chars of [0-9a-f]). A client-supplied id that
+    doesn't match the safe alphabet is rejected outright — defends
+    against `../../etc/passwd` style escapes from any future code
+    path that ever calls _path with non-URL input."""
+    if not isinstance(value, str) or not _ID_RE.match(value):
+        raise ExpansionTargetsStoreError(f"invalid id: {value!r}")
+    return value
+
+
 def _path(target_id: str) -> Path:
-    return _store_dir() / f"{target_id}.json"
+    return _store_dir() / f"{_safe_id(target_id)}.json"
 
 
 def _now() -> str:

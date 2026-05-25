@@ -5,6 +5,77 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0bz] — 2026-05-25 — Security pack: 1 High + 4 Mediums
+
+Run-through-the-codebase security audit found one High-severity
+information disclosure + four Medium-severity hardening gaps. All
+five fixed in this commit. No Criticals — auth is correctly gated,
+no RCE / SQLi vectors, no unsafe deserialisation, secrets aren't
+logged.
+
+### High — stack trace exposed to client
+
+`/api/qualify` returned `traceback.format_exc()` in the JSON
+response when the handler crashed. Auth-gated, so external
+attackers couldn't reach it, but any logged-in user (or XSS-pivoted
+attacker) got file paths, line numbers, and frame locals — exactly
+what's useful for planning follow-on exploits. The full trace stays
+in `log.exception` + audit; the client just gets the short error
+message. (`server.py:234`)
+
+### Medium — CSV formula injection in pipeline export
+
+A lead named `=cmd|'/c calc'!A1` or `@SUM(...)` would execute when
+an analyst opened `pipeline.csv` in Excel or Google Sheets — the
+classic CSV injection. Added `_csv_safe()` helper that prefixes
+cells starting with `=`, `+`, `-`, `@`, tab, or CR with a single
+quote. Excel hides the leading quote when rendering, so visible
+output is unchanged for safe values. (`server.py:1588-1623`)
+
+### Medium — no MAX_CONTENT_LENGTH cap
+
+Flask happily JSON-parsed multi-MB bodies on every POST/PATCH
+endpoint. An authenticated abuser (or hijacked session) could DoS
+the Railway dyno or fill the persistent volume with repeated large
+writes. Now capped at 4MB (`MAX_CONTENT_LENGTH` env var to
+override). 413 on oversize. (`server.py:82-90`)
+
+### Medium — path-traversal latent in three stores
+
+`expansion_targets_store`, `live_projects_store`, and
+`live_project_okrs_store` all wrote files at
+`cache/<dir>/{id}.json` with the raw ID. Flask's URL converter
+blocks `/`, so URL-route exploitation wasn't possible today — but
+any future code path (e.g. a bulk-import endpoint) that called
+`_path` with non-URL-sourced data could escape the cache dir. Added
+a strict `_safe_id()` guard in each that rejects anything outside
+`[A-Za-z0-9_-]{1,64}`. (3 store files)
+
+### Medium — CORS wildcard + token-in-query
+
+`CORS(app)` allowed any origin to read responses, and the auth
+layer accepted `?token=<secret>` in the query string. Query tokens
+end up in: server access logs, browser history, the `Referer`
+header (so any outbound link from the app leaked the token to the
+third party). Now:
+
+- CORS pinned to env-configured origins (`CORS_ORIGINS` comma
+  list), with explicit opt-in for permissive (`CORS_ALLOW_ANY=1`).
+  Production default is same-origin only.
+- Query-string token rejected by default. Set
+  `AUTH_TOKEN_ALLOW_QUERY=1` to opt back in for any legacy tooling.
+  (`server.py:82-110, 121-152`)
+
+### Tests
+
+11 new tests in `test_security_hardening.py` — one regression test
+per fix. Mocks the Anthropic / Notion boundary so the pure
+hardening behaviour is what's pinned.
+
+Backend-only change. Full suite: **1104 passing**.
+
+---
+
 ## [1.0.0by] — 2026-05-25 — Promote-to-Live name = "Company — Opportunity Type"
 
 ### The ask

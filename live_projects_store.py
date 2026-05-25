@@ -77,8 +77,19 @@ def _store_dir() -> Path:
     return d
 
 
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_id(value: str) -> str:
+    """v1.0.0bz: strict ID guard — same pattern as expansion_targets_store.
+    See that file's _safe_id docstring for rationale."""
+    if not isinstance(value, str) or not _ID_RE.match(value):
+        raise LiveProjectsStoreError(f"invalid id: {value!r}")
+    return value
+
+
 def _path(project_id: str) -> Path:
-    return _store_dir() / f"{project_id}.json"
+    return _store_dir() / f"{_safe_id(project_id)}.json"
 
 
 def _now() -> str:

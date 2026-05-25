@@ -21,7 +21,6 @@ import io
 import json
 import logging
 import os
-import traceback
 from typing import Any
 
 from flask import Flask, Response, jsonify, request
@@ -81,7 +80,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("mr.qualify")
 
 app = Flask(__name__, static_folder=None)
-CORS(app)
+
+# v1.0.0bz: cap request body size. Without this, an authenticated
+# abuser (or hijacked session) can DoS the Railway dyno or fill the
+# persistent volume by POSTing multi-MB JSON. 4MB is generous for
+# every legitimate flow (CSV import + Jeff conversations) without
+# leaving the door open for resource exhaustion.
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.environ.get("MAX_CONTENT_LENGTH", str(4 * 1024 * 1024)))
+
+# v1.0.0bz: pin CORS to the production origin(s) by default. The old
+# `CORS(app)` allowed any origin to read responses — fine for local
+# dev, sloppy for production. Set `CORS_ORIGINS` env var (comma-
+# separated) to override; falling back to `*` for the local dev case
+# only when explicitly enabled so production never silently goes wide.
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "").strip()
+if _cors_origins_raw:
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    CORS(app, origins=_cors_origins)
+elif os.environ.get("CORS_ALLOW_ANY") == "1":
+    # Explicit opt-in for local dev only.
+    CORS(app)
+else:
+    # Production default: same-origin only (Flask-CORS without a
+    # configured origin list still adds permissive headers, so install
+    # the extension with an empty allowlist — no cross-origin access).
+    CORS(app, origins=[])
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -96,18 +120,29 @@ except OSError:
 
 # ---- Auth -----------------------------------------------------------------
 # Shared-secret gate. If APP_AUTH_TOKEN is set, every /api/* request must
-# include either `Authorization: Bearer <token>` or `?token=<token>`. The
-# HTML entrypoint stays open so the UI can render the auth prompt.
+# include `Authorization: Bearer <token>`. The HTML entrypoint stays open
+# so the UI can render the auth prompt.
 # Leave APP_AUTH_TOKEN unset in dev to disable.
+#
+# v1.0.0bz: removed the `?token=<token>` query-string fallback. Query
+# strings end up in: webserver access logs, browser history, the
+# Referer header (so any outbound link from the app leaks the token
+# to the third party), and shoulder-surfing screenshots. The header
+# path is the only safe surface for a long-lived shared secret.
+# AUTH_TOKEN_ALLOW_QUERY=1 keeps the old behaviour for any tooling
+# that hasn't migrated yet — set it explicitly to opt back in.
 
 AUTH_TOKEN = os.environ.get("APP_AUTH_TOKEN", "").strip()
+AUTH_ALLOW_QUERY_TOKEN = os.environ.get("AUTH_TOKEN_ALLOW_QUERY") == "1"
 
 
 def _request_token() -> str:
     auth_hdr = request.headers.get("Authorization", "")
     if auth_hdr.lower().startswith("bearer "):
         return auth_hdr[7:].strip()
-    return request.args.get("token", "").strip()
+    if AUTH_ALLOW_QUERY_TOKEN:
+        return request.args.get("token", "").strip()
+    return ""
 
 
 @app.before_request
@@ -229,9 +264,14 @@ def api_qualify():
         audit.log_event("qualify_failed", actor=_actor(), company=name, reason=str(e)[:200])
         return jsonify({"error": f"Apollo error: {e}"}), 502
     except Exception as e:
+        # v1.0.0bz: don't ship the traceback to the client — file paths
+        # and stack frames are an information-disclosure gift for
+        # follow-on attacks. The full trace stays in `log.exception` +
+        # audit; the client just gets the short error message.
         log.exception("Qualification crash for %s", name)
-        audit.log_event("qualify_crash", actor=_actor(), company=name, reason=str(e)[:200])
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        audit.log_event("qualify_crash", actor=_actor(), company=name,
+                        reason=str(e)[:200])
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/lead/extract", methods=["POST"])
@@ -1581,6 +1621,21 @@ def api_lead_update(page_id: str):
         return jsonify({"error": str(e)}), 502
 
 
+# v1.0.0bz: CSV-injection guard. Excel + Google Sheets evaluate cells
+# starting with =, +, -, @, tab, or CR as formulas. A lead named
+# `=cmd|'/c calc'!A1` would execute when an analyst opens the export.
+# Prepending a single quote neutralises this without altering the
+# visible value (Excel hides the leading quote when rendering).
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value) -> str:
+    s = "" if value is None else str(value)
+    if s and s[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + s
+    return s
+
+
 @app.route("/api/pipeline/export.csv", methods=["GET"])
 def api_pipeline_csv():
     try:
@@ -1598,7 +1653,7 @@ def api_pipeline_csv():
     writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     writer.writeheader()
     for r in rows:
-        writer.writerow({k: r.get(k, "") for k in cols})
+        writer.writerow({k: _csv_safe(r.get(k, "")) for k in cols})
     return Response(
         buf.getvalue(),
         mimetype="text/csv",
