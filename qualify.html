@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cw</title>
+<title>Massive Rocket Lead Qualification · v1.0.0cx</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2518,8 +2518,13 @@
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
         <input type="text" id="dir-search" placeholder="Search…"
                style="flex:1;min-width:240px;padding:8px 12px;font-size:13px;" />
-        <button id="dir-refresh" class="btn ghost" type="button"
-                style="padding:7px 12px;font-size:12px;">Refresh</button>
+        <!-- v1.0.0cx: quick-add account from Directory. Opens a modal
+             that creates either a skinny lead row (POST /api/notion/sync)
+             or an expansion target (POST /api/expansion-targets). For
+             when you just want the company tracked without running
+             the full Qualify flow. -->
+        <button id="dir-add-account" class="btn sm" type="button">+ Add account</button>
+        <button id="dir-refresh" class="btn ghost sm" type="button">Refresh</button>
       </div>
       <div class="tab-strip">
         <button class="tab-btn active" type="button" data-dir-tab="accounts">
@@ -5844,6 +5849,118 @@
 
   async function loadDirectory() {
     await Promise.all([loadDirectoryAccounts(), loadDirectoryContacts()]);
+  }
+
+  // v1.0.0cx: Quick-add account from Directory. Avoids forcing the
+  // user through the full Qualify flow when they just want a company
+  // tracked. Two paths: skinny lead (POST /api/notion/sync with
+  // minimal payload) OR expansion target (POST /api/expansion-targets
+  // under a picked anchor).
+  async function _openDirectoryAddAccount() {
+    // Build an anchor list (existing leads in the pipeline) for the
+    // expansion-target path. Best effort - if the directory accounts
+    // aren't loaded yet, the picker stays empty and the user can
+    // still create a lead.
+    const anchorOptions = (directoryState.accounts || [])
+      .filter(a => a.lead_id && (a.surface === 'lead' || a.surface === 'live_project'))
+      .map(a => ({ value: a.lead_id, label: a.company || a.lead_id }));
+
+    const values = await multiFieldDialog({
+      title: 'Add account to directory',
+      message: 'For when you want a company tracked without running the full Qualify flow.',
+      fields: [
+        { key: 'name', label: 'Company name', required: true,
+          placeholder: 'e.g. Domino\'s Pizza Mexico' },
+        { key: 'url',  label: 'Website (optional)',
+          placeholder: 'e.g. dominos.com.mx' },
+        { key: 'kind', label: 'Add as', type: 'select', required: true,
+          options: [
+            { value: 'lead',      label: 'Lead (goes into Pipeline)' },
+            { value: 'expansion', label: 'Expansion target (under an anchor)' },
+          ],
+          default: 'lead' },
+        // Anchor picker only meaningful for expansion targets; we
+        // include it always since multiFieldDialog doesn't support
+        // conditional fields. Empty value just gets ignored if the
+        // kind is "lead".
+        ...(anchorOptions.length ? [{
+          key: 'anchor_lead_id', label: 'Anchor account (expansion only)',
+          type: 'select',
+          options: [{ value: '', label: '- none -' }, ...anchorOptions],
+        }] : []),
+        { key: 'notes', label: 'Notes (optional)', type: 'textarea', rows: 3,
+          placeholder: 'Any quick context - who flagged it, why we care.' },
+      ],
+      confirmLabel: 'Create account',
+    });
+    if (!values) return;
+
+    const name = (values.name || '').trim();
+    if (!name) { toast('Name required', 'error'); return; }
+    const kind = values.kind || 'lead';
+
+    try {
+      if (kind === 'expansion') {
+        const anchorId = (values.anchor_lead_id || '').trim();
+        if (!anchorId) {
+          toast('Pick an anchor account, or change "Add as" to Lead.', 'error');
+          return;
+        }
+        const res = await jsonFetch('/api/expansion-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            anchor_lead_id: anchorId,
+            name,
+            notes: (values.notes || '').trim() || null,
+          }),
+        });
+        toast(`Added "${name}" as an expansion target`, 'success');
+      } else {
+        // Skinny lead path. /api/notion/sync expects the qualify
+        // result shape - we build a minimal one (company + url, owner,
+        // default status). The Notion side will create the row; the
+        // platform pulls it on next Directory refresh.
+        const profile = (typeof homeState !== 'undefined' && homeState.profile) || _readSavedProfile();
+        const ownerName = profile?.name || 'Ben Ojuolape';
+        const payload = {
+          company: { name, url: (values.url || '').trim() || null },
+          owner: ownerName,
+          status: 'New',
+          sales_stage: '',
+          // Skip discovered/meddicc/score etc - server handles missing
+          // gracefully and writes whatever's there.
+        };
+        const res = await jsonFetch('/api/notion/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const newPageId = res.page_id;
+        // If notes were entered, attach as a 'note' call.
+        const notes = (values.notes || '').trim();
+        if (notes && newPageId) {
+          try {
+            await jsonFetch(`/api/calls/${encodeURIComponent(newPageId)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'note',
+                title: 'Directory add',
+                content: notes,
+                company_name: name,
+              }),
+            });
+          } catch (e) {
+            console.warn('[dir-add] note attach failed', e);
+          }
+        }
+        toast(`Created "${name}" as a Lead`, 'success');
+      }
+      loadDirectory();
+    } catch (e) {
+      toast(`Add failed: ${e.body?.error || e.message}`, 'error');
+    }
   }
 
   async function loadDirectoryAccounts() {
@@ -12147,6 +12264,10 @@
     }
     const dirRefresh = $('#dir-refresh');
     if (dirRefresh) dirRefresh.addEventListener('click', loadDirectory);
+    // v1.0.0cx: + Add account button on Directory. Opens a modal that
+    // creates either a skinny lead (Notion row) or an expansion target.
+    const dirAdd = $('#dir-add-account');
+    if (dirAdd) dirAdd.addEventListener('click', _openDirectoryAddAccount);
 
     // v1.0.0bq: Settings view (gear icon, between Insights + Qualify).
     const navSet = $('#nav-settings');

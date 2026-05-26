@@ -5,6 +5,32 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cx] - 2026-05-26 - Add account from Directory
+
+Ben: "Should be able to add an account to the directory as well."
+
+The Directory page was read-only until now. Accounts landed in
+there only via the full Qualify flow or by promoting to live.
+Now there's a + Add account button next to the search box.
+
+Clicking opens a single-shot modal:
+- Company name (required)
+- Website (optional)
+- Add as: Lead (skinny Notion row, lands in Pipeline) or
+  Expansion target (under a picked anchor account)
+- Anchor account picker - shown when there are existing anchors
+- Notes (optional) - if set on a Lead path, attached as a 'note'
+  type call after the page is created
+
+Lead path posts to /api/notion/sync with a minimal payload
+(company name + URL + owner + status="New"). The full pipeline
+runs Notion-side, the platform pulls the row on next directory
+refresh.
+
+Expansion-target path posts to /api/expansion-targets with the
+picked anchor. Anchor picker only renders if there's at least
+one valid candidate (lead or live-project) in the directory.
+
 ## [1.0.0cw] - 2026-05-26 - Note-loss audit + Expansion polish + AI associates
 
 Three things landed together since they're all Expansion / data-
