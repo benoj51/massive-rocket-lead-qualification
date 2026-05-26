@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cm</title>
+<title>Massive Rocket Lead Qualification · v1.0.0cn</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -669,6 +669,51 @@
      field is interactive without making it feel busy. */
   input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus) {
     border-color: var(--text-muted);
+  }
+  /* v1.0.0cn: scoped opt-out for filter toolbars. The global rule
+     forces inputs/selects to width:100%, which is correct for form
+     fields stacked inside cards but wrong inside a flex toolbar
+     (every select stretches and forces a vertical stack). Add
+     .filter-row to a wrapper to put its inputs back to natural
+     width and keep them flowing horizontally. */
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .filter-row input[type="text"],
+  .filter-row input[type="url"],
+  .filter-row select,
+  .filter-row textarea {
+    width: auto;
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+  .filter-row > details {
+    /* Collapsible filter group - lets us hide a big filter set
+       behind one "Filters" summary so the contact list isn't
+       buried under 8 dropdowns by default. */
+    width: 100%;
+  }
+  .filter-row > details > summary {
+    cursor: pointer; padding: 6px 12px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+    list-style: none; user-select: none;
+  }
+  .filter-row > details > summary::-webkit-details-marker { display: none; }
+  .filter-row > details > summary::before {
+    content: '▸'; font-size: 10px; transition: transform .12s;
+  }
+  .filter-row > details[open] > summary::before { transform: rotate(90deg); }
+  .filter-row > details > summary:hover {
+    border-color: var(--text-muted); color: var(--text);
+  }
+  .filter-row > details[open] > summary {
+    background: var(--surface); border-color: var(--text-muted);
+  }
+  .filter-row > details > .filter-row-body {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
   }
   input:focus, textarea:focus, select:focus {
     outline: none; border-color: var(--accent-text); background: var(--input-focus-bg);
@@ -14938,34 +14983,41 @@
         </div>
       </div>
 
-      <h4 style="margin:16px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">Filter contacts</h4>
-      <!-- v1.0.0ay: saved preset picker row. Hydrated after render
-           because we need the current profile name to fetch presets.
-           Hidden until a profile is set. -->
-      <div id="ptn-preset-row" style="display:none;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-        <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;">Preset:</span>
-        <select id="ptn-preset-picker" style="padding:5px 10px;font-size:12px;min-width:200px;">
-          <option value="">- pick a saved view -</option>
-        </select>
-        <button class="btn ghost" id="ptn-preset-save" type="button" style="padding:5px 12px;font-size:11px;">Save current</button>
-        <button class="btn ghost" id="ptn-preset-delete" type="button" style="padding:5px 12px;font-size:11px;display:none;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
-        <select id="ptn-filter-territory" style="padding:5px 10px;font-size:12px;">${optEmpty('Any territory')}${optGen(enums.territories || [], f.territory)}</select>
-        <select id="ptn-filter-region" style="padding:5px 10px;font-size:12px;">${optEmpty('Any region')}${optGen(enums.regions || [], f.region)}</select>
-        <input id="ptn-filter-country" type="text" placeholder="Country contains…" value="${escapeAttr(f.country)}" style="padding:5px 10px;font-size:12px;width:160px;" />
-        <select id="ptn-filter-industry" style="padding:5px 10px;font-size:12px;">${optEmpty('Any industry')}${optGen(enums.industries || [], f.industry)}</select>
-        <select id="ptn-filter-status" style="padding:5px 10px;font-size:12px;">${optEmpty('Any status')}${optGen(enums.statuses || [], f.status)}</select>
-        <!-- v1.0.0ac: filter chips for the three new dimensions. -->
-        <select id="ptn-filter-sentiment" style="padding:5px 10px;font-size:12px;">${optEmpty('Any sentiment')}${optGen(enums.partner_sentiments || [], f.sentiment)}</select>
-        <select id="ptn-filter-tier" style="padding:5px 10px;font-size:12px;">${optEmpty('Any tier')}${optGen(enums.tiers || [], f.tier)}</select>
-        <select id="ptn-filter-seniority" style="padding:5px 10px;font-size:12px;">${optEmpty('Any seniority')}${optGen(enums.seniorities || [], f.seniority)}</select>
-        <!-- v1.0.0aj: "My contacts" toggle - reads the localStorage
-             profile (set in the Home view) and scopes the table to
-             contacts where mr_owner matches. -->
-        <button class="chip ${f.mine ? 'active' : ''}" id="ptn-filter-mine" type="button" style="font-size:11px;padding:6px 12px;">My contacts</button>
-        <button class="btn ghost" id="ptn-import-csv" type="button" style="margin-left:auto;padding:6px 12px;font-size:12px;">↑ Import CSV</button>
-        <button class="btn ghost" id="ptn-add-contact" type="button" style="padding:6px 12px;font-size:12px;">+ Add contact</button>
+      <!-- v1.0.0cn: collapsed filter toolbar. Ben caught that 8 enum
+           filters stacked vertically (v1.0.0ci's global select width
+           100% bug) buried the contact list under ~600px of dropdowns.
+           Now: single horizontal toolbar with My-contacts toggle +
+           Import/Add inline; the 8 enum filters tucked behind a
+           "Filters" <details> that's closed by default. Active-filter
+           count surfaces in the summary text so users see at a glance
+           whether anything is filtered. -->
+      <div class="filter-row" style="margin:14px 0 12px;">
+        <details id="ptn-filter-panel">
+          <summary>Filters <span id="ptn-filter-count" class="muted" style="font-size:11px;font-weight:400;"></span></summary>
+          <div class="filter-row-body">
+            <!-- v1.0.0ay: saved preset picker. Hidden via JS until a
+                 profile is set. -->
+            <div id="ptn-preset-row" style="display:none;align-items:center;gap:8px;width:100%;flex-wrap:wrap;">
+              <span class="muted" style="font-size:11px;">Preset</span>
+              <select id="ptn-preset-picker" style="min-width:200px;">
+                <option value="">- pick a saved view -</option>
+              </select>
+              <button class="btn ghost sm" id="ptn-preset-save" type="button">Save current</button>
+              <button class="btn ghost sm" id="ptn-preset-delete" type="button" style="display:none;color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+            </div>
+            <select id="ptn-filter-territory">${optEmpty('Any territory')}${optGen(enums.territories || [], f.territory)}</select>
+            <select id="ptn-filter-region">${optEmpty('Any region')}${optGen(enums.regions || [], f.region)}</select>
+            <input id="ptn-filter-country" type="text" placeholder="Country contains…" value="${escapeAttr(f.country)}" style="width:160px;" />
+            <select id="ptn-filter-industry">${optEmpty('Any industry')}${optGen(enums.industries || [], f.industry)}</select>
+            <select id="ptn-filter-status">${optEmpty('Any status')}${optGen(enums.statuses || [], f.status)}</select>
+            <select id="ptn-filter-sentiment">${optEmpty('Any sentiment')}${optGen(enums.partner_sentiments || [], f.sentiment)}</select>
+            <select id="ptn-filter-tier">${optEmpty('Any tier')}${optGen(enums.tiers || [], f.tier)}</select>
+            <select id="ptn-filter-seniority">${optEmpty('Any seniority')}${optGen(enums.seniorities || [], f.seniority)}</select>
+          </div>
+        </details>
+        <button class="chip ${f.mine ? 'active' : ''}" id="ptn-filter-mine" type="button">My contacts</button>
+        <button class="btn ghost sm" id="ptn-import-csv" type="button" style="margin-left:auto;">↑ Import CSV</button>
+        <button class="btn ghost sm" id="ptn-add-contact" type="button">+ Add contact</button>
       </div>
 
       <!-- v1.0.0aj: horizontal-scroll wrapper. The contacts table now
@@ -15003,14 +15055,32 @@
         renderPartnerContactsForCurrentView(p);
       });
     }
+    // v1.0.0cn: surface active-filter count next to the Filters
+     // summary so users see at a glance whether anything is filtered
+     // even when the details panel is collapsed.
+    function _updatePtnFilterCount() {
+      const countEl = $('#ptn-filter-count');
+      if (!countEl) return;
+      const f = partnersState.filter;
+      const keys = ['territory','region','country','industry','status','sentiment','tier','seniority'];
+      const active = keys.filter(k => (f[k] || '').trim() !== '').length;
+      countEl.textContent = active > 0 ? `(${active} active)` : '';
+      // Auto-open the panel if any filter is set so users can see
+      // what's filtered.
+      const panel = $('#ptn-filter-panel');
+      if (panel && active > 0 && !panel.open) panel.open = true;
+    }
+    _updatePtnFilterCount();
     ['territory','region','industry','status','sentiment','tier','seniority'].forEach(k => {
       $('#ptn-filter-' + k).addEventListener('change', (e) => {
         partnersState.filter[k] = e.target.value;
+        _updatePtnFilterCount();
         renderPartnerContactsForCurrentView(p);
       });
     });
     $('#ptn-filter-country').addEventListener('input', (e) => {
       partnersState.filter.country = e.target.value;
+      _updatePtnFilterCount();
       renderPartnerContactsForCurrentView(p);
     });
     $('#ptn-add-contact').addEventListener('click', () => openContactForm(p, null));

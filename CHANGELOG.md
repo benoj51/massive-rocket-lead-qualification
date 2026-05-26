@@ -5,6 +5,49 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cn] - 2026-05-26 - Collapse partner filter row
+
+Ben caught: the Hightouch (and every other) partner detail view
+was burying the contact table under 600+ pixels of stacked
+filter dropdowns. The 8 enum filters (Territory, Region, Country,
+Industry, Status, Sentiment, Tier, Seniority) plus the preset
+picker meant you had to scroll past a wall of empty dropdowns to
+see contacts.
+
+Root cause: v1.0.0ci's global `select { width: 100% }` made every
+dropdown stretch to the full row width. Even though the parent
+was `display: flex; flex-wrap: wrap`, each 100%-wide select
+forced a vertical stack.
+
+Fix in two layers:
+
+1. **Scoped width override** - new `.filter-row` class wraps any
+   filter toolbar. Children get `width: auto`, putting them back
+   to natural size so they flow horizontally.
+
+2. **Collapsible panel** - wrapped the 8 enum filters + preset
+   row in a `<details>` element. Closed by default. Pill-shaped
+   `<summary>` shows "Filters (N active)" with N counted from the
+   filter state. Panel auto-opens if any filter is non-empty so
+   users can see what's filtered.
+
+Inline actions kept visible: "My contacts" toggle, "Import CSV",
+"+ Add contact" stay on the main row.
+
+### Numbers
+
+- Closed state: 75px tall (was ~600px)
+- Open state: 212px tall (a 2-row wrap grid of selects)
+- 8× space savings when collapsed
+
+### Verified
+
+- node --check on both inline scripts: clean
+- Preview MCP: panel opens/closes via click, count text updates
+  live as filters change
+- Screenshots before/after show the contact table now visible
+  above the fold
+
 ## [1.0.0cm] - 2026-05-26 - Drop em-dashes (no AI tone)
 
 Per Ben's writing-style memory ("drop em-dashes and the polished
