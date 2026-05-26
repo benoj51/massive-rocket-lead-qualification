@@ -5,6 +5,49 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cz] - 2026-05-26 - Fix project scope build (auto-save before preview)
+
+Ben: "The project scope build isn't working. All seems to default
+with the same pricing and same team for a project."
+
+### Root cause
+
+The Preview Pricing button sent only `{lead_id, currency, rate_card,
+months, role_overrides, role_staffing, ...}` to /api/pricing/preview.
+The server loaded the saved project from disk and called
+`scope.role_drivers_for_project()` to derive role-effort multipliers
+from the persisted `scope.streams[].criteria[]`.
+
+But the AE's typed scope answers in the form only existed in DOM
+state until they clicked Save scope. Preview Pricing didn't auto-
+save first.
+
+Consequence: every Preview ran against an empty/baseline scope,
+returning the same team template + the same numbers regardless of
+what the AE filled in.
+
+### Fix
+
+`pbPreviewPricing()` now calls `pbSave({silent: true})` first when
+`pbState.current` exists. That POSTs the DOM-collected scope
+criteria to /api/scope/<lead_id>, which calls scope.update_criteria
+under the hood. Idempotent + non-fatal: if the silent save fails
+(network blip), we still try the preview with whatever was last
+persisted.
+
+After this fix, two different scope inputs produce two different
+quotes:
+- 1 SDK migration + 10 campaigns -> baseline crm_execute team
+- 100 campaigns + 5 channels + India staffing -> larger team,
+  effort multipliers applied per scope criteria, region-specific
+  rate card
+
+### Verified
+
+- 1161 tests pass (scope/role_driver paths covered by
+  test_v08_phase2_margin + test_v08_rate_cards_packages)
+- Server clean, node --check clean
+
 ## [1.0.0cy] - 2026-05-26 - Fix AI suggest 500 (NotionSync.get_page shape)
 
 Ben caught: "AI suggestions isn't working."

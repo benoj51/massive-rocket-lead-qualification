@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cy</title>
+<title>Massive Rocket Lead Qualification · v1.0.0cz</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -10490,6 +10490,28 @@
   async function pbPreviewPricing() {
     if (!pbState.currentLeadId) { toast('Save the scope first', 'error'); return; }
     try {
+      // v1.0.0cz: auto-save scope before preview so the pricing engine
+      // sees the AE's actual criteria.
+      //
+      // The bug: currentPricingInputs() sends only lead_id. The server
+      // loads the project from disk and reads scope.streams[].criteria
+      // to derive role-effort multipliers (scope.role_drivers_for_project).
+      // If the AE edited criteria in the form but never clicked "Save
+      // scope", the persisted project has empty criteria → empty
+      // multipliers → baseline team template → identical pricing
+      // for every project (the exact symptom Ben hit).
+      //
+      // pbSave() POSTs the DOM-collected scope updates to /api/scope/<id>,
+      // which calls scope.update_criteria(). It's idempotent + silent.
+      if (pbState.current) {
+        try {
+          await pbSave({ silent: true });
+        } catch (e) {
+          // Non-fatal - we'll still try the preview with whatever was
+          // last persisted.
+          console.warn('[pricing] silent scope save before preview failed', e);
+        }
+      }
       await pbLoadPricingLibrary();
       const q = await jsonFetch('/api/pricing/preview', {
         method: 'POST',
