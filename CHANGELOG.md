@@ -5,6 +5,66 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ch] — 2026-05-26 — Design modernization (tokens + key components)
+
+Pure CSS refresh — zero structure change, zero JS touched, every
+ID + class preserved. The platform looks more modern without
+risking anything functional.
+
+### Token scale
+
+Replaced single-shadow `--shadow` with a layered scale:
+`--shadow-xs` → `--shadow-xl`. Each token stacks a tight contact
+shadow with a softer ambient diffuse one — surfaces now look "lit"
+rather than "cut out". Light + dark themes both get refined values.
+
+Radius scale made explicit: `--radius-xs / sm / (default) / lg /
+xl / pill`. Components opt into the right curve by name instead
+of hard-coding pixels.
+
+Dark theme borders softened (`#2a2a3a` → `#32323f` border,
+matching `#3a3a4d` → `#42424f` border-strong) so cards don't have
+that sharp Lego look. Muted text lifted slightly across the board.
+
+### Components polished
+
+- **Cards** — radius 12 → 16, layered shadow at rest, gentle lift on
+  hover (was just a border-colour change)
+- **Buttons** — dropped the heavy red-glow on hover (felt mid-2010s),
+  added a subtle shadow at rest + a tighter brightness shift on
+  hover. `.btn.ghost` is cleaner — no shadow until you interact.
+- **Inputs** — added a subtle hover state (border darkens) +
+  tightened focus ring (3px → 2px). Affordance without busyness.
+- **Tags / chips** — softer at-rest, smoother transitions
+- **Tiles** — radius bumped, shadow lift on hover
+- **Nav buttons** — tighter horizontal spacing, hover now adds
+  background tint instead of just colour change
+- **+ Qualify CTA** — proper layered red shadow instead of
+  brightness-only hover
+- **Dialog primitives** (modal overlays) — backdrop now blurred
+  (2px) instead of just darkened, dialog radius 12 → 16, shadow
+  upgraded to `--shadow-xl`
+- **Drawer** — layered edge shadow (sharp contact + diffuse
+  ambient) instead of single `-16px 40px`
+- **Jeff panel** — same layered shadow + radius treatment
+- **Toasts** — radius bumped, shadow upgraded
+
+### What I deliberately did NOT touch
+
+- Layout (no restructuring)
+- View structure (Home / Pipeline / Live / Expansion / Directory /
+  Partners / Insights / Settings unchanged)
+- JS event wiring (every `data-*` attribute, every ID, every class
+  the JS depends on is preserved)
+- Drawer structure
+- Table renders
+- Anything outside `<style>` other than 2 inline overlay styles
+
+Pure tokens + component polish. Backend untouched. Full suite:
+**1157 passing**. JS syntax clean.
+
+---
+
 ## [1.0.0cg] — 2026-05-26 — Shared helpers: json_file_store + contact_cadence
 
 Duplication-audit Phase 1. Extracts the highest-impact shared

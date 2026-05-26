@@ -32,24 +32,42 @@
     --mr-blue:       #355881;
     --mr-postit:     #fff2cc;
 
-    /* Dark theme (default) */
+    /* Dark theme (default).
+       v1.0.0ch: borders softened (less stark contrast with surface),
+       muted text lifted slightly for readability. */
     --bg: #0a0a0f;
-    --surface: var(--mr-dark-gray);        /* was #13131a — now MR Dark Gray */
-    --surface-2: #2a2b32;                   /* derived: surface +12% lightness */
-    --border: #2a2a3a;
-    --border-strong: #3a3a4d;
-    --text: #e8e8f0;
-    --text-dim: #9898aa;
-    --text-muted: #6a6a80;
+    --surface: var(--mr-dark-gray);        /* MR Dark Gray #212227 */
+    --surface-2: #2a2b32;                   /* +12% lightness */
+    --surface-3: #34353d;                   /* +20% — for elevated chrome */
+    --border: #32323f;                      /* was #2a2a3a — softer */
+    --border-strong: #42424f;               /* was #3a3a4d */
+    --text: #ececf2;                        /* slight lift from e8e8f0 */
+    --text-dim: #a0a0b2;                    /* slight lift from 9898aa */
+    --text-muted: #74748a;                  /* slight lift from 6a6a80 */
     --accent: var(--mr-red);                /* was #e82b23 — MR Red brand */
     --accent-dim: #b8211b;                  /* slightly darker MR Red */
     --green: var(--mr-green);               /* was #4ade80 — MR Green */
     --yellow: var(--mr-yellow);             /* was #fbbf24 — MR Yellow */
     --red: #ef4444;                         /* kept as semantic alert red */
     --blue: #6e94c5;                        /* lighter shade of MR blue for dark-mode legibility */
-    --shadow: 0 8px 24px rgba(0,0,0,.32);
-    --radius: 12px;
-    --pad: 20px;
+    /* v1.0.0ch: layered shadow scale. Single-shadow tokens flatten in
+       depth; modern UIs stack a tight contact shadow with an ambient
+       diffuse one so surfaces look "lit" rather than "cut out". */
+    --shadow-xs: 0 1px 2px rgba(0,0,0,.20);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.20), 0 2px 6px rgba(0,0,0,.16);
+    --shadow:    0 1px 3px rgba(0,0,0,.22), 0 6px 18px rgba(0,0,0,.24);
+    --shadow-md: 0 2px 6px rgba(0,0,0,.24), 0 10px 28px rgba(0,0,0,.28);
+    --shadow-lg: 0 4px 10px rgba(0,0,0,.28), 0 18px 44px rgba(0,0,0,.34);
+    --shadow-xl: 0 8px 16px rgba(0,0,0,.32), 0 28px 64px rgba(0,0,0,.40);
+    /* Radius scale — explicit names so components can opt into the
+       right curve without hard-coding pixels. */
+    --radius-xs: 4px;
+    --radius-sm: 8px;
+    --radius:    12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-pill: 999px;
+    --pad: 22px;       /* v1.0.0ch: 20 → 22, gives cards more breathing room */
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
     /* Theme-derived effects (separated so light can override) */
@@ -72,22 +90,29 @@
        darker AA-compliant variants when used as TEXT (the brand-bright
        values #34a853 / #fbbc04 fail contrast on white). For tints +
        backgrounds we use rgba() over the brand hex elsewhere. */
-    --bg: var(--mr-light-gray);    /* was #f7f7f2 — MR Light Grey #f6f6f6 */
+    --bg: var(--mr-light-gray);
     --surface: #ffffff;
-    --surface-2: #f1f1ec;
-    --border: #e3e3dc;
-    --border-strong: #c8c8c0;
-    --text: var(--mr-dark-gray);   /* was #1a1a24 — MR Dark Gray #212227 */
-    --text-dim: #4a4a52;           /* ~8:1 on white */
-    --text-muted: #5a5a62;         /* ~7:1 on white — passes AA */
-    --accent: var(--mr-red);       /* MR Red — 5.0:1 on white, passes AA */
+    --surface-2: #f4f4ef;
+    --surface-3: #ebebe5;
+    --border: #e6e6df;             /* slight soften */
+    --border-strong: #cccdc4;
+    --text: var(--mr-dark-gray);
+    --text-dim: #4a4a52;
+    --text-muted: #5a5a62;
+    --accent: var(--mr-red);
     --accent-dim: #b8211b;
-    --accent-text: #c4231c;        /* slightly darker for AA when used as text */
-    --green: #1f7a3f;              /* dark green for AA text on white (MR Green #34a853 fails) */
-    --yellow: #8b6914;             /* dark amber for AA (MR Yellow #fbbc04 fails badly on white) */
-    --red: #b91c1c;                /* alert red — passes AA */
-    --blue: var(--mr-blue);        /* MR Blue #355881 — ~6.8:1 on white */
-    --shadow: 0 4px 14px rgba(33,34,39,.06);   /* MR Dark Gray-tinted */
+    --accent-text: #c4231c;
+    --green: #1f7a3f;
+    --yellow: #8b6914;
+    --red: #b91c1c;
+    --blue: var(--mr-blue);
+    /* v1.0.0ch: layered light shadows. Tighter contact + softer ambient. */
+    --shadow-xs: 0 1px 2px rgba(33,34,39,.04);
+    --shadow-sm: 0 1px 2px rgba(33,34,39,.06), 0 2px 6px rgba(33,34,39,.04);
+    --shadow:    0 1px 3px rgba(33,34,39,.06), 0 4px 14px rgba(33,34,39,.06);
+    --shadow-md: 0 2px 6px rgba(33,34,39,.07), 0 8px 24px rgba(33,34,39,.07);
+    --shadow-lg: 0 4px 10px rgba(33,34,39,.08), 0 16px 40px rgba(33,34,39,.10);
+    --shadow-xl: 0 8px 16px rgba(33,34,39,.09), 0 24px 56px rgba(33,34,39,.12);
     --bg-glass: rgba(246,246,246,.85);
     --bg-drawer-glass: rgba(255,255,255,.85);
     --bg-radial-1: rgba(232,43,35,.05);
@@ -183,14 +208,24 @@
     color: var(--text); display: flex; align-items: center; gap: 10px;
   }
   header.top .brand .dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 16px var(--accent); }
-  header.top nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+  header.top nav { display: flex; gap: 2px; margin-left: auto; align-items: center; }
+  /* v1.0.0ch: gentler nav buttons. Tighter spacing between items
+     (4 → 2px gap) for a denser horizontal row; subtler hover state
+     uses a background tint instead of just colour. */
   header.top nav button {
     background: transparent; color: var(--text-dim); border: 1px solid transparent;
-    padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
-    font-weight: 600;
+    padding: 7px 13px; border-radius: var(--radius-sm); font-size: 13px;
+    cursor: pointer; font-weight: 600;
+    transition: background-color .12s ease-out, color .12s ease-out,
+                border-color .12s ease-out;
   }
-  header.top nav button.active { background: var(--surface); color: var(--text); border-color: var(--border); }
-  header.top nav button:hover { color: var(--text); }
+  header.top nav button:hover { color: var(--text); background: var(--surface-2); }
+  header.top nav button.active {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+    box-shadow: var(--shadow-xs);
+  }
   /* v1.0.0bm: nav dropdown. Click the parent button → child panel
      appears below. Close on outside click. Active state propagates
      up so the parent button looks selected when a child view is
@@ -222,11 +257,22 @@
      the nav. */
   header.top nav .nav-cta {
     background: var(--mr-red, #e82b23); color: #fff;
-    padding: 8px 14px; border-radius: 8px; font-size: 13px;
+    padding: 8px 14px; border-radius: var(--radius-sm); font-size: 13px;
     cursor: pointer; font-weight: 600; border: 0; margin-left: 8px;
     display: inline-flex; align-items: center; gap: 4px;
+    /* v1.0.0ch: refined CTA — subtle shadow for elevation, smoother
+       hover. Drops the brightness-only hover for something more tactile. */
+    box-shadow: 0 1px 2px rgba(232,43,35,.20), 0 4px 12px rgba(232,43,35,.18);
+    transition: box-shadow .15s ease-out, filter .15s ease-out;
   }
-  header.top nav .nav-cta:hover { filter: brightness(1.08); }
+  header.top nav .nav-cta:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 2px 4px rgba(232,43,35,.24), 0 6px 16px rgba(232,43,35,.26);
+  }
+  header.top nav .nav-cta:active {
+    filter: brightness(.96);
+    box-shadow: 0 1px 2px rgba(232,43,35,.18);
+  }
   /* v1.0.0bm: tab strip for Home (and any other tabbed surface).
      Sits above tab content; one chip per tab; active chip gets
      surface bg + accent underline. */
@@ -392,8 +438,8 @@
     width: 420px; max-width: calc(100vw - 48px);
     height: 600px; max-height: calc(100vh - 140px);
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 18px 48px rgba(0,0,0,.28), 0 6px 14px rgba(0,0,0,.16);
+    border-radius: var(--radius-lg);   /* v1.0.0ch: 12 → 16 */
+    box-shadow: var(--shadow-xl);
     display: none; flex-direction: column; overflow: hidden;
   }
   #jeff-panel.open { display: flex; }
@@ -506,16 +552,20 @@
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);     /* v1.0.0ch: 12 → 16 */
     padding: var(--pad);
     margin-bottom: 18px;
     box-shadow: var(--shadow);
-    /* v0.10.0p polish: subtle top-edge highlight so cards feel slightly lit.
-       Pseudo-element gradient on the inside top border. */
+    /* v0.10.0p / v1.0.0ch: subtle top-edge highlight so cards feel
+       slightly lit (more pronounced now via the layered shadow). */
     position: relative;
     background-image: linear-gradient(180deg, var(--surface-tint) 0%, transparent 4%);
+    transition: border-color .15s ease-out, box-shadow .2s ease-out;
   }
-  .card:hover { border-color: var(--border-strong); }
+  .card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);         /* v1.0.0ch: gentle lift on hover */
+  }
   .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
   .card h3 { margin: 18px 0 10px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
   .row { display: grid; gap: 14px; }
@@ -529,28 +579,48 @@
 
   input[type="text"], input[type="url"], textarea, select {
     width: 100%; background: var(--input-bg); color: var(--text);
-    border: 1px solid var(--border-strong); border-radius: 8px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
     padding: 10px 12px; font-size: 14px; font-family: var(--sans);
+    transition: border-color .15s ease-out, box-shadow .15s ease-out,
+                background-color .15s ease-out;
+  }
+  /* v1.0.0ch: subtle hover state on inputs — affordance that the
+     field is interactive without making it feel busy. */
+  input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus) {
+    border-color: var(--text-muted);
   }
   input:focus, textarea:focus, select:focus {
     outline: none; border-color: var(--accent-text); background: var(--input-focus-bg);
-    /* v0.10.0p: soft focus ring; tinted intensity differs per theme. */
-    box-shadow: 0 0 0 3px var(--focus-ring);
+    /* v1.0.0ch: tighter, more refined focus ring (2px instead of 3px). */
+    box-shadow: 0 0 0 2px var(--focus-ring);
   }
   textarea { resize: vertical; min-height: 60px; }
 
   button.btn {
     display: inline-flex; align-items: center; gap: 8px;
     background: var(--accent); color: #fff; border: 0;
-    padding: 10px 18px; border-radius: 8px; font-weight: 600;
-    cursor: pointer; font-size: 14px; transition: filter .15s, transform .05s;
+    padding: 10px 18px; border-radius: var(--radius-sm); font-weight: 600;
+    cursor: pointer; font-size: 14px;
+    /* v1.0.0ch: cleaner button — drop the lift+glow on hover (felt
+       heavy), use a brightness shift + subtle shadow instead. */
+    transition: filter .15s ease-out, box-shadow .15s ease-out,
+                background-color .15s ease-out;
+    box-shadow: var(--shadow-xs);
   }
-  button.btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(232,43,35,.25); }
-  button.btn:active { transform: translateY(0); }
-  button.btn.ghost:hover { box-shadow: none; }
-  button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; }
-  button.btn.ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
-  button.btn.ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+  button.btn:hover {
+    filter: brightness(1.06);
+    box-shadow: var(--shadow-sm);
+  }
+  button.btn:active { filter: brightness(.96); box-shadow: var(--shadow-xs); }
+  button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; box-shadow: none; }
+  button.btn.ghost {
+    background: transparent; color: var(--text-dim); border: 1px solid var(--border);
+    box-shadow: none;
+  }
+  button.btn.ghost:hover {
+    color: var(--text); border-color: var(--border-strong); background: var(--surface-2);
+    filter: none;
+  }
   button.btn.success { background: var(--green); color: #07120a; }
   .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
 
@@ -559,10 +629,15 @@
   .tile {
     background: var(--surface-2);
     background-image: linear-gradient(180deg, var(--tile-tint) 0%, transparent 30%);
-    border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 14px; position: relative;
+    border: 1px solid var(--border); border-radius: var(--radius);  /* v1.0.0ch: 10 → 12 */
+    padding: 14px 16px; position: relative;
+    transition: border-color .15s ease-out, box-shadow .15s ease-out, transform .12s ease-out;
   }
-  .tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+  .tile:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+  }
   .tile.manual { border-color: rgba(232,43,35,.4); background-color: rgba(232,43,35,.04); }
   .tile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
   .tile .val { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--text); }
@@ -717,9 +792,21 @@
 
   /* Tags ------------------------------------------------------- */
   .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
-  .tag { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; }
-  .tag.signal { background: rgba(74,222,128,.10); color: var(--green); border-color: rgba(74,222,128,.3); }
-  .tag.dq { background: rgba(239,68,68,.10); color: var(--red); border-color: rgba(239,68,68,.3); }
+  /* v1.0.0ch: softer pill geometry, slightly tighter padding, line-height
+     reset so chips line up properly when used inside dense tables. */
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    line-height: 1.5;
+    border: 1px solid transparent;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border-color: var(--border);
+  }
+  .tag.signal { background: rgba(52,168,83,.10); color: var(--green); border-color: rgba(52,168,83,.28); }
+  .tag.dq { background: rgba(239,68,68,.10); color: var(--red); border-color: rgba(239,68,68,.28); }
 
   /* Stakeholder table ----------------------------------------- */
   table.stakeholders, table.pipeline {
@@ -776,20 +863,29 @@
   ol.next-steps li { margin: 6px 0; }
 
   /* Filters ---------------------------------------------------- */
-  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  /* v1.0.0ch: cleaner chip pills — softer at-rest, smoother hover. */
   .chip {
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 6px 14px; border-radius: 999px; font-size: 12px; cursor: pointer;
-    font-weight: 500;
+    padding: 6px 14px; border-radius: var(--radius-pill); font-size: 12px;
+    cursor: pointer; font-weight: 500;
+    transition: background-color .12s ease-out, color .12s ease-out,
+                border-color .12s ease-out;
   }
-  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent-text); }
-  .chip:hover:not(.active) { color: var(--text); border-color: var(--border-strong); }
+  .chip.active {
+    background: var(--accent); color: #fff; border-color: transparent;
+    box-shadow: var(--shadow-xs);
+  }
+  .chip:hover:not(.active) {
+    color: var(--text); border-color: var(--border-strong);
+    background: var(--surface-3, var(--surface-2));
+  }
 
   /* Toasts ---------------------------------------------------- */
   .toast {
     position: fixed; bottom: 24px; right: 24px; z-index: 100;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 16px; font-size: 13px; box-shadow: var(--shadow);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; font-size: 13px; box-shadow: var(--shadow-md);
     max-width: 360px; opacity: 0; pointer-events: none; transform: translateY(8px);
     transition: opacity .2s, transform .2s;
   }
@@ -1059,7 +1155,10 @@
     position: fixed; top: 0; right: 0; bottom: 0;
     width: min(560px, 100vw); background: var(--surface);
     border-left: 1px solid var(--border);
-    z-index: 90; box-shadow: -16px 0 40px rgba(0,0,0,.4);
+    z-index: 90;
+    /* v1.0.0ch: layered shadow on drawer edge — tight contact +
+       diffuse ambient, matches the global shadow scale. */
+    box-shadow: -1px 0 4px rgba(0,0,0,.20), -16px 0 40px rgba(0,0,0,.30);
     transform: translateX(100%);
     transition: transform .22s ease-out;
     display: flex; flex-direction: column;
@@ -3088,10 +3187,10 @@
     o = document.createElement('div');
     o.id = 'mr-dialog-overlay';
     o.className = 'mr-dialog-overlay';
-    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:none;align-items:center;justify-content:center;padding:20px;';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);z-index:80;display:none;align-items:center;justify-content:center;padding:20px;';
     o.innerHTML = `
       <div class="mr-dialog" role="dialog" aria-modal="true"
-            style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.4);overflow:hidden;">
+            style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:440px;width:100%;box-shadow:var(--shadow-xl);overflow:hidden;">
         <header style="padding:14px 18px 0;">
           <h3 class="mr-dialog-title" style="margin:0 0 4px;font-size:15px;font-weight:600;color:var(--text);"></h3>
           <p class="mr-dialog-message muted" style="margin:0;font-size:12px;line-height:1.45;white-space:pre-wrap;"></p>
