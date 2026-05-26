@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket — Lead Qualification · v1.0.0ck</title>
+<title>Massive Rocket — Lead Qualification · v1.0.0cl</title>
 <!-- v1.0.0cj: Inter (Google Fonts) — the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -3383,7 +3383,10 @@
     o = document.createElement('div');
     o.id = 'mr-dialog-overlay';
     o.className = 'mr-dialog-overlay';
-    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);z-index:80;display:none;align-items:center;justify-content:center;padding:20px;';
+    // v1.0.0cl: z-index bumped 80 → 120 so prompt/confirm dialogs
+    // render ABOVE the lead drawer (z-index: 90). Ben caught the
+    // Closed Lost reason prompt being clipped by the open drawer.
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);z-index:120;display:none;align-items:center;justify-content:center;padding:20px;';
     o.innerHTML = `
       <div class="mr-dialog" role="dialog" aria-modal="true"
             style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:440px;width:100%;box-shadow:var(--shadow-xl);overflow:hidden;">
@@ -3551,7 +3554,8 @@
     if (!fields.length) return null;
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;';
+      // v1.0.0cl: z-index 80 → 120 — render above drawer (90).
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;';
       const fieldHtml = fields.map((f, i) => {
         const id = `mf-field-${i}`;
         const reqMark = f.required ? ' <span style="color:var(--red);">*</span>' : '';

@@ -5,6 +5,25 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cl] — 2026-05-26 — Dialog z-index above drawer
+
+Ben caught: when flipping a lead to Closed Lost, the "Closing this
+lead as lost" reason prompt was being clipped on the right side
+by the open lead drawer. The dialog was rendering BEHIND the
+drawer, so its visible area shrank to the gap left of the drawer.
+
+Root cause: dialog overlay z-index was 80, drawer is at 90. CSS
+stacking ordered them wrong way around.
+
+Fix: bump both dialog overlay z-indexes 80 → 120 so they always
+render above the drawer (90), notif-panel (100), and toast (100).
+
+- `_dialogOverlay()` (covers confirmDialog + promptDialog)
+- `multiFieldDialog()` (its own overlay)
+
+These are the only two dialog primitive overlays in the file;
+all 30+ confirm/prompt sites route through them. Surgical fix.
+
 ## [1.0.0ck] — 2026-05-26 — KPI alignment fix
 
 Ben caught a real bug on the live v1.0.0cj build: when one stat
