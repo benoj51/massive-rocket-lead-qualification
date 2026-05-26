@@ -5,6 +5,21 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0da] - 2026-05-26 - Show owner on Expansion page
+
+Ben: "Need to make sure who the accounts are assigned to on the
+expansion page is included."
+
+Server: /api/expansion/overview builds an `owner_by_lead` index
+alongside `name_by_lead` from the pipeline rows it already pulls.
+Each anchor dict gets an `owner` field (pipeline owner first,
+live_project owner as fallback). Already-present `pipeline_match`
+on targets continues to carry its own owner.
+
+UI: anchor header now shows the owner as a small chip with a red
+dot, or "unassigned" italic when missing. Each target row that
+has a pipeline_match shows the matched lead's owner inline.
+
 ## [1.0.0cz] - 2026-05-26 - Fix project scope build (auto-save before preview)
 
 Ben: "The project scope build isn't working. All seems to default

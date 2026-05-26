@@ -5545,11 +5545,16 @@ def api_expansion_overview():
     # Pipeline had no visible link back; users couldn't tell whether
     # they were duplicating an existing account.
     lead_by_name: dict[str, dict] = {}
+    # v1.0.0da: also index owner by lead_id so anchor cards can show
+    # who the account is assigned to.
+    owner_by_lead: dict[str, str] = {}
     try:
         pipeline_rows = NotionSync().list_pipeline(limit=500)
         for r in pipeline_rows:
             if r.get("id") and r.get("company"):
                 name_by_lead[r["id"]] = r["company"]
+                if r.get("owner"):
+                    owner_by_lead[r["id"]] = r["owner"]
                 key = (r.get("company") or "").strip().lower()
                 if key:
                     lead_by_name[key] = {
@@ -5575,6 +5580,9 @@ def api_expansion_overview():
             "anchor_id":      p.get("id"),
             "lead_id":        lid,
             "company":        name_by_lead.get(lid) or lid,
+            # v1.0.0da: owner from the anchor's Notion lead row, falling
+            # back to the live project's recorded owner.
+            "owner":          owner_by_lead.get(lid) or p.get("owner"),
             "project_name":   p.get("name"),
             "project_status": p.get("status"),
             "targets":        [],
@@ -5587,6 +5595,7 @@ def api_expansion_overview():
                 "anchor_id":      None,
                 "lead_id":        lid,
                 "company":        name_by_lead.get(lid) or lid,
+                "owner":          owner_by_lead.get(lid),
                 "project_name":   None,
                 "project_status": None,
                 "targets":        [],

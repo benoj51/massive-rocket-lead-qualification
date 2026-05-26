@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cz</title>
+<title>Massive Rocket Lead Qualification · v1.0.0da</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -5364,15 +5364,19 @@
 
     el.innerHTML = filtered.map(a => `
       <div style="border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:14px;background:var(--surface);box-shadow:var(--shadow-xs);overflow:hidden;transition:box-shadow .15s, border-color .15s;">
-        <!-- v1.0.0cv: anchor header refreshed. Bigger company name,
-             clearer project-status pill, plus an "Open account" button
-             that drops into the lead drawer so users can act on the
-             parent account without leaving the expansion view. -->
+        <!-- v1.0.0cv: anchor header. v1.0.0da: surface owner so it's
+             obvious at a glance who the account is assigned to. -->
         <div style="padding:16px 18px;border-bottom:1px solid var(--border);background:linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <div style="min-width:0;flex:1;">
-            <div style="display:flex;align-items:center;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
               <div style="font-size:16px;font-weight:600;color:var(--text);letter-spacing:-.01em;">${escapeHtml(a.company || a.lead_id || '-')}</div>
               ${a.project_status ? projectStatusChip(a.project_status) : ''}
+              ${a.owner
+                ? `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:2px 9px;font-size:11px;color:var(--text-dim);" title="Account owner">
+                     <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);"></span>
+                     ${escapeHtml(a.owner)}
+                   </span>`
+                : `<span style="font-size:11px;color:var(--text-muted);font-style:italic;">unassigned</span>`}
             </div>
             <div class="muted" style="font-size:12px;margin-top:4px;">
               ${escapeHtml(a.project_name || a.company || 'No live project')}
@@ -5410,6 +5414,9 @@
                     <div style="margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                       ${statusChip(t.status || 'greenfield')}
                       ${inPipelineBadge}
+                      ${pm && pm.owner
+                        ? `<span style="font-size:10px;color:var(--text-muted);"><span style="width:5px;height:5px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:4px;vertical-align:middle;"></span>${escapeHtml(pm.owner)}</span>`
+                        : ''}
                       <span class="muted" style="font-size:10px;">${(t.contacts || []).length} contact${(t.contacts || []).length === 1 ? '' : 's'}${t.notes ? ' - notes' : ''}</span>
                     </div>
                   </div>
