@@ -5,6 +5,35 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cp] - 2026-05-26 - More industries: MEGS / Consumer Goods / General Business
+
+Ben asked to add: MEGS, General Business, Consumer Goods, Media,
+Entertainment, Gaming, Sports, Travel & Hospitality. The last
+five already shipped in v1.0.0ac. Added the three new ones.
+
+Final INDUSTRIES (16 values):
+
+```
+QSR, C-Store / Gas, Retail, Consumer Goods, Financial Services,
+Travel & Hospitality, Healthcare, MEGS, Media, Entertainment,
+Gaming, Sports, Telecom, SaaS, General Business, Other
+```
+
+Order is intentional:
+- Retail-adjacent verticals cluster at the top (QSR through Retail
+  and Consumer Goods)
+- Financial Services + Travel & Hospitality + Healthcare follow as
+  major standalone verticals
+- MEGS sits before the four industries it parents (Media,
+  Entertainment, Gaming, Sports) so it reads as a grouping rather
+  than a sibling
+- General Business + Other land at the tail as catch-alls
+
+Same caveat as DACH: production's saved enum_config.json from
+earlier customisation overrides defaults, so admins still need to
+add MEGS, Consumer Goods, and General Business via Settings →
+Dropdowns → Industries.
+
 ## [1.0.0co] - 2026-05-26 - DACH region + Dropdowns tab in Settings
 
 Ben asked for two related things:

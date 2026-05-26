@@ -62,10 +62,15 @@ TERRITORIES = ["Strategic Enterprise", "Enterprise", "Emerging Enterprise",
 REGIONS = ["UK", "DACH", "West Coast", "East Coast", "Central",
            "EMEA", "APAC", "LATAM", "ANZ", "Global"]
 # v1.0.0ac: Entertainment / Gaming / Sports added per Ben's roster.
-INDUSTRIES = ["QSR", "C-Store / Gas", "Retail", "Financial Services",
-              "Travel & Hospitality", "Healthcare", "Media",
-              "Entertainment", "Gaming", "Sports",
-              "Telecom", "SaaS", "Other"]
+# v1.0.0cp: MEGS (Media + Entertainment + Gaming + Sports parent
+# grouping commonly used by partners like Braze), Consumer Goods,
+# and General Business added so the default list covers MR's
+# actual prospect mix.
+INDUSTRIES = ["QSR", "C-Store / Gas", "Retail", "Consumer Goods",
+              "Financial Services", "Travel & Hospitality",
+              "Healthcare", "MEGS", "Media", "Entertainment",
+              "Gaming", "Sports", "Telecom", "SaaS",
+              "General Business", "Other"]
 STATUSES = ["active", "dormant", "left"]
 # v1.0.0ac: three new partnership-CRM dimensions on every partner contact.
 # - Sentiment: how this contact feels about MR right now. Drives the
