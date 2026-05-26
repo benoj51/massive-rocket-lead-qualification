@@ -67,7 +67,7 @@
     --radius-lg: 16px;
     --radius-xl: 20px;
     --radius-pill: 999px;
-    --pad: 22px;       /* v1.0.0ch: 20 → 22, gives cards more breathing room */
+    --pad: 28px;       /* v1.0.0ci: 22 → 28 — Linear / Stripe-grade breathing room */
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
     /* Theme-derived effects (separated so light can override) */
@@ -139,9 +139,21 @@
   }
 
   * { box-sizing: border-box; }
-  html, body { background: var(--bg); color: var(--text); margin: 0; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  html, body {
+    background: var(--bg); color: var(--text); margin: 0;
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* v1.0.0ci: enable modern font features by default — fractions
+       only where they're applied via class. Single-storey 'a' + tighter
+       defaults if the font supports them. */
+    font-feature-settings: "ss01", "cv11";
+  }
   body {
-    min-height: 100vh; line-height: 1.45;
+    /* v1.0.0ci: 14px base (was 13/14 mixed across components). Modern
+       dashboards land here — 13 reads cramped, 16 too marketing-y. */
+    font-size: 14px;
+    min-height: 100vh; line-height: 1.5;
     /* v0.10.0p polish: subtle radial gradient at the top, with a fine grid
        texture overlay. Adds depth without distraction; fades to flat by
        ~600px so most of the scroll area stays calm. */
@@ -160,11 +172,14 @@
 
   header.top {
     position: sticky; top: 0; z-index: 30;
-    display: flex; align-items: center; gap: 24px;
-    padding: 14px 24px;
+    display: flex; align-items: center; gap: 32px;
+    /* v1.0.0ci: taller header (14 → 18) so brand + nav sit in their
+       own bar with comfortable air. Modern dashboards run header
+       heights around 56-64px — was ~46px. */
+    padding: 18px 32px;
     background: var(--bg-glass);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
     border-bottom: 1px solid var(--border);
   }
   /* v1.0.0bq: utility strip above the main header. Always visible,
@@ -204,27 +219,35 @@
      stops sticking from 0 — it now sticks from below the strip. */
   body.has-util-strip header.top { top: 28px; }
   header.top .brand {
-    font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 13px;
-    color: var(--text); display: flex; align-items: center; gap: 10px;
+    /* v1.0.0ci: bigger brand mark — modern dashboards use 15-16px
+       brand wordmarks. Tighter letter-spacing, lowercase weight
+       contrast (we keep the uppercase here, it's the MR house style). */
+    font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: 14px;
+    color: var(--text); display: flex; align-items: center; gap: 12px;
   }
-  header.top .brand .dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 16px var(--accent); }
-  header.top nav { display: flex; gap: 2px; margin-left: auto; align-items: center; }
-  /* v1.0.0ch: gentler nav buttons. Tighter spacing between items
-     (4 → 2px gap) for a denser horizontal row; subtler hover state
-     uses a background tint instead of just colour. */
+  header.top .brand .dot {
+    width: 10px; height: 10px; background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 16px var(--accent), 0 0 0 4px rgba(232,43,35,.08);
+  }
+  header.top nav { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+  /* v1.0.0ci: nav buttons feel like a proper navbar now. Bigger
+     tap-target (was 7/13 → 9/16), 14px font (was 13), distinct
+     pill shape for the active state. Modern CRMs (Linear, Pipedrive,
+     LoopAI) all land here. */
   header.top nav button {
     background: transparent; color: var(--text-dim); border: 1px solid transparent;
-    padding: 7px 13px; border-radius: var(--radius-sm); font-size: 13px;
-    cursor: pointer; font-weight: 600;
+    padding: 9px 16px; border-radius: var(--radius); font-size: 14px;
+    cursor: pointer; font-weight: 500;
     transition: background-color .12s ease-out, color .12s ease-out,
                 border-color .12s ease-out;
   }
   header.top nav button:hover { color: var(--text); background: var(--surface-2); }
   header.top nav button.active {
-    background: var(--surface);
+    background: var(--surface-2);
     color: var(--text);
     border-color: var(--border);
     box-shadow: var(--shadow-xs);
+    font-weight: 600;
   }
   /* v1.0.0bm: nav dropdown. Click the parent button → child panel
      appears below. Close on outside click. Active state propagates
@@ -257,21 +280,24 @@
      the nav. */
   header.top nav .nav-cta {
     background: var(--mr-red, #e82b23); color: #fff;
-    padding: 8px 14px; border-radius: var(--radius-sm); font-size: 13px;
-    cursor: pointer; font-weight: 600; border: 0; margin-left: 8px;
-    display: inline-flex; align-items: center; gap: 4px;
-    /* v1.0.0ch: refined CTA — subtle shadow for elevation, smoother
-       hover. Drops the brightness-only hover for something more tactile. */
-    box-shadow: 0 1px 2px rgba(232,43,35,.20), 0 4px 12px rgba(232,43,35,.18);
-    transition: box-shadow .15s ease-out, filter .15s ease-out;
+    /* v1.0.0ci: taller CTA matching new nav (10/18 from 8/14), and
+       a sharper red→darker gradient for depth instead of flat fill. */
+    padding: 10px 18px; border-radius: var(--radius); font-size: 14px;
+    cursor: pointer; font-weight: 600; border: 0; margin-left: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background-image: linear-gradient(180deg, #ed3d35 0%, #d8211a 100%);
+    box-shadow: 0 1px 2px rgba(232,43,35,.20), 0 4px 14px rgba(232,43,35,.22);
+    transition: box-shadow .15s ease-out, filter .15s ease-out, transform .1s ease-out;
   }
   header.top nav .nav-cta:hover {
     filter: brightness(1.06);
-    box-shadow: 0 2px 4px rgba(232,43,35,.24), 0 6px 16px rgba(232,43,35,.26);
+    box-shadow: 0 2px 6px rgba(232,43,35,.28), 0 8px 22px rgba(232,43,35,.30);
+    transform: translateY(-1px);
   }
   header.top nav .nav-cta:active {
     filter: brightness(.96);
     box-shadow: 0 1px 2px rgba(232,43,35,.18);
+    transform: translateY(0);
   }
   /* v1.0.0bm: tab strip for Home (and any other tabbed surface).
      Sits above tab content; one chip per tab; active chip gets
@@ -545,7 +571,8 @@
     border-radius: 8px; margin: 14px;
   }
 
-  main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  /* v1.0.0ci: wider main + more top padding so content breathes. */
+  main { max-width: 1280px; margin: 0 auto; padding: 36px 28px 96px; }
   .view { display: none; }
   .view.active { display: block; }
 
@@ -566,8 +593,26 @@
     border-color: var(--border-strong);
     box-shadow: var(--shadow-md);         /* v1.0.0ch: gentle lift on hover */
   }
-  .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
-  .card h3 { margin: 18px 0 10px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+  /* v1.0.0ci: card headings feel like headings now — bigger, no
+     all-caps. The uppercase letterspaced label look reads as
+     "field label" not "section heading"; modern dashboards reserve
+     uppercase for tiny eyebrows / overlines. */
+  .card h2 {
+    margin: 0 0 18px; font-size: 18px;
+    letter-spacing: -.01em; text-transform: none;
+    color: var(--text); font-weight: 600; line-height: 1.3;
+  }
+  .card h3 {
+    margin: 22px 0 12px; font-size: 14px;
+    letter-spacing: 0; text-transform: none;
+    color: var(--text); font-weight: 600;
+  }
+  /* Overline / eyebrow — for when you DO want the uppercase look
+     (above big stat numbers, etc.). */
+  .overline {
+    font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+  }
   .row { display: grid; gap: 14px; }
   .row-2 { grid-template-columns: 1fr 1fr; }
   .row-3 { grid-template-columns: 1fr 1fr 1fr; }
@@ -575,12 +620,24 @@
     .row-2, .row-3 { grid-template-columns: 1fr; }
   }
 
-  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+  /* v1.0.0ci: labels lose the SHOUTY UPPERCASE — modern dashboards
+     use sentence-case form labels at 12-13px. Cleaner, calmer, and
+     much easier to scan a long form. The `.overline` class is still
+     available for the few places where uppercase actually fits
+     (eyebrow above big numbers, table column groups). */
+  label {
+    display: block; font-size: 13px; text-transform: none;
+    letter-spacing: 0; color: var(--text-dim);
+    margin-bottom: 8px; font-weight: 500;
+  }
 
   input[type="text"], input[type="url"], textarea, select {
     width: 100%; background: var(--input-bg); color: var(--text);
-    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-    padding: 10px 12px; font-size: 14px; font-family: var(--sans);
+    /* v1.0.0ci: softer field border (border-strong → border) + larger
+       radius for a friendlier feel; slightly taller padding so fields
+       don't read as cramped beside the new 14px labels above them. */
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 11px 14px; font-size: 14px; font-family: var(--sans);
     transition: border-color .15s ease-out, box-shadow .15s ease-out,
                 background-color .15s ease-out;
   }
@@ -598,30 +655,50 @@
 
   button.btn {
     display: inline-flex; align-items: center; gap: 8px;
-    background: var(--accent); color: #fff; border: 0;
-    padding: 10px 18px; border-radius: var(--radius-sm); font-weight: 600;
-    cursor: pointer; font-size: 14px;
-    /* v1.0.0ch: cleaner button — drop the lift+glow on hover (felt
-       heavy), use a brightness shift + subtle shadow instead. */
+    /* v1.0.0ci: gradient red instead of flat — matches the nav CTA so
+       primary actions share a visual language across the app. Slightly
+       taller (10/18 → 11/20) and 10px radius so the button doesn't
+       feel like a plain rounded rect anymore. */
+    background: var(--accent);
+    background-image: linear-gradient(180deg, #ed3d35 0%, #d8211a 100%);
+    color: #fff; border: 0;
+    padding: 11px 20px; border-radius: var(--radius); font-weight: 600;
+    cursor: pointer; font-size: 14px; letter-spacing: -.005em;
     transition: filter .15s ease-out, box-shadow .15s ease-out,
-                background-color .15s ease-out;
-    box-shadow: var(--shadow-xs);
+                transform .1s ease-out;
+    box-shadow: 0 1px 2px rgba(232,43,35,.18), 0 3px 8px rgba(232,43,35,.14);
   }
   button.btn:hover {
     filter: brightness(1.06);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 2px 4px rgba(232,43,35,.22), 0 6px 14px rgba(232,43,35,.20);
+    transform: translateY(-1px);
   }
-  button.btn:active { filter: brightness(.96); box-shadow: var(--shadow-xs); }
-  button.btn[disabled] { background: var(--surface-2); color: var(--text-muted); cursor: not-allowed; filter: none; box-shadow: none; }
+  button.btn:active { filter: brightness(.96); box-shadow: var(--shadow-xs); transform: translateY(0); }
+  button.btn[disabled] {
+    background: var(--surface-2); background-image: none;
+    color: var(--text-muted); cursor: not-allowed; filter: none; box-shadow: none;
+    transform: none;
+  }
   button.btn.ghost {
-    background: transparent; color: var(--text-dim); border: 1px solid var(--border);
-    box-shadow: none;
+    /* v1.0.0ci: ghost buttons drop the gradient + brand-shadow entirely
+       so they read as secondary. Cleaner than fighting the primary
+       look with !important overrides. */
+    background: var(--surface); background-image: none;
+    color: var(--text); border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-xs);
   }
   button.btn.ghost:hover {
-    color: var(--text); border-color: var(--border-strong); background: var(--surface-2);
-    filter: none;
+    color: var(--text); border-color: var(--text-muted); background: var(--surface-2);
+    filter: none; box-shadow: var(--shadow-sm);
   }
-  button.btn.success { background: var(--green); color: #07120a; }
+  button.btn.success {
+    background: var(--green); background-image: linear-gradient(180deg, #5ee695 0%, #3bbf72 100%);
+    color: #07120a;
+    box-shadow: 0 1px 2px rgba(74,222,128,.20), 0 3px 8px rgba(74,222,128,.16);
+  }
+  /* v1.0.0ci: btn.sm — for table-row + drawer-header inline actions
+     where the new full-size buttons would crowd the row. */
+  button.btn.sm { padding: 6px 12px; font-size: 13px; gap: 6px; border-radius: var(--radius-sm); }
   .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
 
   /* Discovered field tiles ------------------------------------- */
@@ -629,14 +706,45 @@
   .tile {
     background: var(--surface-2);
     background-image: linear-gradient(180deg, var(--tile-tint) 0%, transparent 30%);
-    border: 1px solid var(--border); border-radius: var(--radius);  /* v1.0.0ch: 10 → 12 */
-    padding: 14px 16px; position: relative;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; position: relative;       /* v1.0.0ci: 14/16 → 18/20 */
     transition: border-color .15s ease-out, box-shadow .15s ease-out, transform .12s ease-out;
   }
   .tile:hover {
     border-color: var(--border-strong);
     transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
+  }
+
+  /* v1.0.0ci: stat tile — the big-number KPI surface modern
+     dashboards put on Home / Dashboard. Number dominates, label
+     above as an eyebrow, optional delta/trend below. */
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 24px;
+    box-shadow: var(--shadow-xs);
+    transition: border-color .15s ease-out, box-shadow .15s ease-out;
+  }
+  .stat:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+  .stat-label {
+    font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600; margin: 0 0 10px;
+  }
+  .stat-value {
+    font-size: 32px; font-weight: 600; line-height: 1.1;
+    color: var(--text); letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-delta { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .stat-delta.up   { color: var(--green); }
+  .stat-delta.down { color: var(--red); }
+  /* Grid for stat tiles — `.stat-grid` parent gets responsive cols. */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
   }
   .tile.manual { border-color: rgba(232,43,35,.4); background-color: rgba(232,43,35,.04); }
   .tile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
@@ -809,19 +917,51 @@
   .tag.dq { background: rgba(239,68,68,.10); color: var(--red); border-color: rgba(239,68,68,.28); }
 
   /* Stakeholder table ----------------------------------------- */
+  /* v1.0.0ci: tables get the modern-CRM treatment — generous row
+     height, lighter header (no uppercase shouting), softer hover.
+     Was 10/12 padding → 14/16; was uppercase headers → small-caps
+     feel via slight letter-spacing + muted colour. */
   table.stakeholders, table.pipeline {
-    width: 100%; border-collapse: collapse; font-size: 13px;
+    width: 100%; border-collapse: collapse; font-size: 14px;
   }
   table.stakeholders th, table.stakeholders td,
   table.pipeline th, table.pipeline td {
-    text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border);
+    text-align: left; padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
   }
   table.stakeholders th, table.pipeline th {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600;
+    /* Replace SHOUTY UPPERCASE with quieter sentence-case label
+       at a slightly muted colour. Reads more like Linear / Stripe. */
+    font-size: 12px; text-transform: none; letter-spacing: 0;
+    color: var(--text-muted); font-weight: 600;
     cursor: pointer; user-select: none;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-strong);
+    padding-top: 11px; padding-bottom: 11px;
   }
   table.pipeline th:hover { color: var(--text); }
-  table.stakeholders tr:hover, table.pipeline tr:hover { background: var(--surface-2); }
+  /* Subtle row hover — clean, not the heavy fill the old style had. */
+  table.stakeholders tbody tr, table.pipeline tbody tr {
+    transition: background-color .1s ease-out;
+  }
+  table.stakeholders tbody tr:hover, table.pipeline tbody tr:hover {
+    background: var(--surface-2);
+  }
+  /* Zebra-stripe lite — every other row gets a fractional tint so
+     dense tables stay scannable without obvious banding. */
+  table.stakeholders tbody tr:nth-child(even),
+  table.pipeline tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--surface-2) 35%, transparent);
+  }
+  table.stakeholders tbody tr:nth-child(even):hover,
+  table.pipeline tbody tr:nth-child(even):hover {
+    background: var(--surface-2);
+  }
+  /* Last row keeps the border line — looks more deliberate than the
+     ragged "border missing on bottom" the old design had. */
+  table.stakeholders tbody tr:last-child td,
+  table.pipeline tbody tr:last-child td { border-bottom: 0; }
   /* v1.0.0r: inline-editable MR owner select inside table cells.
      Looks like plain text until hovered/focused, so the table reads
      cleanly but every row is one click away from re-assigning. */
@@ -863,22 +1003,25 @@
   ol.next-steps li { margin: 6px 0; }
 
   /* Filters ---------------------------------------------------- */
-  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-  /* v1.0.0ch: cleaner chip pills — softer at-rest, smoother hover. */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  /* v1.0.0ci: chips read as segmented controls now — bigger tap-target,
+     13px font (was 12), 8/16 padding (was 6/14), and the active state
+     drops the brand red for the subtler "surface + strong border" look
+     modern dashboards use for filter pills (LoopAI, Linear, Pipedrive). */
   .chip {
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 6px 14px; border-radius: var(--radius-pill); font-size: 12px;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 8px 16px; border-radius: var(--radius-pill); font-size: 13px;
     cursor: pointer; font-weight: 500;
     transition: background-color .12s ease-out, color .12s ease-out,
-                border-color .12s ease-out;
+                border-color .12s ease-out, box-shadow .12s ease-out;
   }
   .chip.active {
-    background: var(--accent); color: #fff; border-color: transparent;
-    box-shadow: var(--shadow-xs);
+    background: var(--surface-2); color: var(--text); border-color: var(--text);
+    box-shadow: var(--shadow-xs); font-weight: 600;
   }
   .chip:hover:not(.active) {
-    color: var(--text); border-color: var(--border-strong);
-    background: var(--surface-3, var(--surface-2));
+    color: var(--text); border-color: var(--text-muted);
+    background: var(--surface-2);
   }
 
   /* Toasts ---------------------------------------------------- */
@@ -1439,7 +1582,10 @@
       </div>
       <div id="home-brief-body" style="margin-top:10px;"></div>
     </div>
-    <div id="home-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;"></div>
+    <!-- v1.0.0ci: home KPI strip uses the new .stat-grid + .stat
+         classes so the numbers actually pop. Grid auto-fills now;
+         drops the hard 5-column lock so it reflows on tablet. -->
+    <div id="home-kpis" class="stat-grid" style="margin-bottom:22px;"></div>
     <!-- v1.0.0bm: consolidated from 10 stacked cards to 3 tabbed
          cards. Same information, less scrolling, clearer mental
          model: "your accounts", "your work", "your team". -->
@@ -1951,39 +2097,42 @@
           <button id="db-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
         </div>
       </div>
-      <!-- Window + owner filter -->
-      <div style="margin:14px 0 6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Window:</span>
-        <button class="chip" data-db-window="7"  type="button" style="font-size:11px;padding:4px 10px;">7 days</button>
-        <button class="chip active" data-db-window="30" type="button" style="font-size:11px;padding:4px 10px;">30 days</button>
-        <button class="chip" data-db-window="90" type="button" style="font-size:11px;padding:4px 10px;">90 days</button>
+      <!-- Window + owner filter. v1.0.0ci: drop the SHOUTY UPPERCASE
+           inline labels in favour of sentence-case; chips inherit the
+           new bigger pill style from .chip. -->
+      <div style="margin:18px 0 6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span class="muted" style="font-size:13px;">Window</span>
+        <button class="chip" data-db-window="7"  type="button">7 days</button>
+        <button class="chip active" data-db-window="30" type="button">30 days</button>
+        <button class="chip" data-db-window="90" type="button">90 days</button>
         <span style="flex:1;"></span>
-        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Owner:</span>
-        <select id="db-owner-filter" data-mr-owner-select style="padding:5px 10px;font-size:12px;">
+        <span class="muted" style="font-size:13px;">Owner</span>
+        <select id="db-owner-filter" data-mr-owner-select style="width:auto;min-width:160px;padding:7px 10px;font-size:13px;">
           <option value="">All owners</option>
         </select>
       </div>
-      <!-- KPI cards -->
-      <div id="db-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0 8px;"></div>
+      <!-- v1.0.0ci: dashboard KPI strip — same .stat-grid look as Home.
+           Auto-fills now, big number first, eyebrow above. -->
+      <div id="db-kpis" class="stat-grid" style="margin:22px 0 14px;"></div>
       <!-- Touch type breakdown -->
       <div id="db-types" style="margin:14px 0;"></div>
-      <!-- By owner table -->
-      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">By MR owner</div>
+      <!-- v1.0.0ci: section headings stop shouting. <h3> now renders
+           as a 14px non-uppercase heading per the card-h3 rule. -->
+      <h3>By MR owner</h3>
       <div id="db-by-owner"></div>
-      <!-- By partner table -->
-      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">By partner</div>
+      <h3>By partner</h3>
       <div id="db-by-partner"></div>
       <!-- v1.0.0aw: per-MR-owner engagement leaderboard. Ranks AEs by
            average engagement score across their active book. Loaded
            lazily after the main dashboard renders so the engagement
            fan-out doesn't block the touch-counts paint. -->
-      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Engagement leaderboard</div>
-      <div id="db-engagement-leaderboard" class="muted" style="font-size:12px;">Loading…</div>
+      <h3>Engagement leaderboard</h3>
+      <div id="db-engagement-leaderboard" class="muted" style="font-size:13px;">Loading…</div>
       <!-- v1.0.0cc: loss-reason aggregation. After v1.0.0ca's Closed
            Lost flow captures `close_reason` per lead, the team can
            finally see "we keep losing for the same reason" patterns. -->
-      <div style="margin:18px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600;">Top loss reasons</div>
-      <div id="db-loss-reasons" class="muted" style="font-size:12px;">Loading…</div>
+      <h3>Top loss reasons</h3>
+      <div id="db-loss-reasons" class="muted" style="font-size:13px;">Loading…</div>
       <!-- Coverage health -->
       <div id="db-coverage" style="margin-top:18px;"></div>
       <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
@@ -12529,11 +12678,16 @@
 
   function _renderHome(data) {
     const k = data.kpis || {};
+    // v1.0.0ci: KPI cards now render via the .stat / .stat-label /
+    // .stat-value classes — big 32px numbers, uppercase eyebrow
+    // labels, optional subtext. Look matches LoopAI-style B2B SaaS
+    // dashboards instead of the previous tiny cramped "8px label
+    // over 22px number" tiles.
     const card = (label, value, sub, valueColor) => `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(label)}</div>
-        <div style="font-size:22px;font-weight:600;color:${valueColor || 'var(--text)'};line-height:1.1;">${escapeHtml(String(value))}</div>
-        ${sub ? `<div class="muted" style="font-size:10px;margin-top:4px;">${escapeHtml(sub)}</div>` : ''}
+      <div class="stat">
+        <div class="stat-label">${escapeHtml(label)}</div>
+        <div class="stat-value"${valueColor ? ` style="color:${valueColor};"` : ''}>${escapeHtml(String(value))}</div>
+        ${sub ? `<div class="stat-delta">${escapeHtml(sub)}</div>` : ''}
       </div>
     `;
     const overdueColor = (k.partner_contacts_overdue || 0) > 0 ? 'var(--red)' : 'var(--text)';
@@ -13184,11 +13338,13 @@
     const d = dashboardState.data;
     if (!d) return;
     const t = d.totals || {};
+    // v1.0.0ci: same .stat / .stat-value rendering as Home — big
+    // 32px numbers, the dashboard now matches Home visually.
     const card = (label, value, sub) => `
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:4px;">${escapeHtml(label)}</div>
-        <div style="font-size:22px;font-weight:600;color:var(--text);line-height:1.1;">${escapeHtml(String(value))}</div>
-        ${sub ? `<div class="muted" style="font-size:10px;margin-top:4px;">${sub}</div>` : ''}
+      <div class="stat">
+        <div class="stat-label">${escapeHtml(label)}</div>
+        <div class="stat-value">${escapeHtml(String(value))}</div>
+        ${sub ? `<div class="stat-delta">${sub}</div>` : ''}
       </div>
     `;
     $('#db-kpis').innerHTML = [

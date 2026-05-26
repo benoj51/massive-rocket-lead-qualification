@@ -5,6 +5,114 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ci] — 2026-05-26 — Bolder design pass (LoopAI-inspired)
+
+`v1.0.0ch` shipped real refinements but at a scale Ben called out as
+invisible ("I don't see any changes"). This pass cranks the dial:
+the same conservative-by-default discipline, but every change is
+deliberately big enough to register on first glance. Inspiration
+from the Dribbble LoopAI CRM B2B SaaS dashboard — generous
+whitespace, big numbers, sentence-case everything.
+
+### Surface scale
+
+- `--pad` 22 → 28px (Linear / Stripe breathing room)
+- `<main>` 1180 → 1280px wide; vertical padding 28 → 36px
+- 14px base font + 1.5 line-height (was a 13/14 mix that read
+  cramped)
+- Header taller (14 → 18px padding) with thicker blur + saturate
+  for a proper sticky-glass feel
+
+### Typography — drop the SHOUTY UPPERCASE
+
+The platform used uppercase + letter-spacing for almost every
+section heading, label, and table column. Modern dashboards
+reserve uppercase for tiny eyebrows and overlines — everywhere
+else reads as sentence-case at proper weight.
+
+- `card h2` 15px uppercase → 18px sentence-case, weight 600
+- `card h3` 13px uppercase → 14px sentence-case, weight 600
+- Form `<label>` 11px uppercase → 13px sentence-case, weight 500
+- Table headers 11px uppercase → 12px sentence-case + subtle
+  surface-2 fill + bottom-border
+- New `.overline` utility for the few places uppercase is still
+  the right call (above big stat numbers)
+
+### Big-number KPIs — `.stat` / `.stat-grid`
+
+The single most "I see it now" change. Home + Dashboard KPI
+strips were tiny 22px numbers stuffed into cramped 12px-padding
+tiles. Now they render as proper stat cards:
+
+- 32px number, weight 600, tabular-nums
+- 11px uppercase eyebrow label above
+- Optional `.stat-delta` line below for sub-text / trend
+- 22/24 padding, 16px radius, soft shadow
+- Auto-fill grid (was a rigid 5-col lock)
+
+Applied to:
+- `#home-kpis` — Home KPI strip
+- `#db-kpis` — Dashboard KPI strip
+
+### Buttons — gradient + lift
+
+Primary `.btn` now uses a red→darker gradient + brand-tinted
+shadow + 1px lift on hover. Reads as an action surface, not a
+plain coloured rectangle. Taller too (10/18 → 11/20). Matches the
+nav CTA so the visual language is consistent.
+
+- New `.btn.sm` variant for table-row + drawer-header inline
+  actions where the larger primary feels heavy
+- `.btn.ghost` cleans up — drops the gradient + brand shadow,
+  reads clearly as secondary
+- `.btn.success` gets the same gradient treatment in green
+
+### Tables — modern CRM look
+
+- Row padding 10/12 → 14/16 (was cramped)
+- Header row: muted surface-2 fill, thicker bottom border
+- Subtle zebra striping (every other row gets a fractional tint)
+  for scannability without obvious banding
+- Cleaner hover, last-row border drops naturally
+- 13px → 14px row font
+
+### Filters / chips — segmented control feel
+
+`.chip` reads as a proper segmented control now: 8/16 padding (was
+6/14), 13px font (was 12), active state drops the brand red for a
+subtler "surface + strong border + weight 600" treatment that
+matches the LoopAI / Linear filter look.
+
+### Nav buttons
+
+- Bigger tap target (7/13 → 9/16)
+- 14px font, weight 500 at rest / 600 active
+- Active state: surface-2 fill + border + subtle shadow (was a
+  whisper-quiet underline)
+- Dropped the SHOUTY UPPERCASE inline filter labels on Dashboard
+
+### Inputs
+
+- Border softened (border-strong → border) + 12px radius
+- Padding 10/12 → 11/14 to match label rhythm
+
+### Why this works
+
+The pattern across LoopAI / Linear / Stripe Dashboard / Pipedrive
+is the same: bigger surfaces, calmer typography, big numbers when
+the data is the point, sentence-case everywhere except true
+eyebrows. This pass aligns the platform with that pattern without
+changing a single line of JS or a single ID/class wired from the
+backend — same render pipeline, modern look.
+
+### Verified
+
+- 1157 tests pass, `import server` clean
+- Node `--check` on both inline scripts: clean
+- Zero JS / HTML structure change; pure CSS + the KPI card render
+  function (which still hands the same data to the same DOM
+  parent, just with different classes / fewer inline styles)
+
 ## [1.0.0ch] — 2026-05-26 — Design modernization (tokens + key components)
 
 Pure CSS refresh — zero structure change, zero JS touched, every
