@@ -5,6 +5,43 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0co] - 2026-05-26 - DACH region + Dropdowns tab in Settings
+
+Ben asked for two related things:
+1. Add DACH (Germany/Austria/Switzerland) to the regions list.
+2. Make regions editable.
+
+Regions were already editable via `enum_config_store` but the
+editor was buried behind the Settings button inside the Partners
+view, which is not where you'd look. Fix in two parts:
+
+### DACH added to default REGIONS
+
+`partner_contacts_store.REGIONS` now ships with DACH at index 1
+(right after UK). Cleanly picks up in every dropdown that reads
+from the enum config when no user override exists.
+
+Note: production has an existing `enum_config.json` saved with
+the previous region list, so DACH won't appear automatically
+there. Use the new Dropdowns tab (below) to add it.
+
+### Dropdowns tab on the global Settings page
+
+The chip-list enum editor (previously rendered only into
+`#ptn-settings-panel` on the Partners view) is now also rendered
+into the global Settings → Dropdowns tab.
+
+Implementation reuses `_renderEnumSettings` cleanly: when the
+Dropdowns tab activates, the host element is temporarily
+re-id'd to `ptn-settings-panel` so the existing render function
+writes into it, then renamed back. Same component, two surfaces.
+Both panels are never visible simultaneously so the id swap is
+safe.
+
+Covers every editable enum: Industries, Territories, Regions,
+Contact statuses, Partner sentiments, Tiers, Seniorities, Sales
+stages, Lead statuses.
+
 ## [1.0.0cn] - 2026-05-26 - Collapse partner filter row
 
 Ben caught: the Hightouch (and every other) partner detail view

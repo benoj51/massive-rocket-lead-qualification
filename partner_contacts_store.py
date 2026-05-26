@@ -57,7 +57,9 @@ _LOCK = threading.Lock()
 # without distortion.
 TERRITORIES = ["Strategic Enterprise", "Enterprise", "Emerging Enterprise",
                 "Mid-Market", "Scale", "SMB"]
-REGIONS = ["UK", "West Coast", "East Coast", "Central",
+# v1.0.0co: DACH added (Germany / Austria / Switzerland), a region
+# Massive Rocket actually targets but wasn't in the default list.
+REGIONS = ["UK", "DACH", "West Coast", "East Coast", "Central",
            "EMEA", "APAC", "LATAM", "ANZ", "Global"]
 # v1.0.0ac: Entertainment / Gaming / Sports added per Ben's roster.
 INDUSTRIES = ["QSR", "C-Store / Gas", "Retail", "Financial Services",

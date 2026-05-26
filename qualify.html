@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cn</title>
+<title>Massive Rocket Lead Qualification · v1.0.0co</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2558,6 +2558,12 @@
         <button class="tab-btn" type="button" data-settings-tab="jeff-kb">
           Jeff KB
         </button>
+        <!-- v1.0.0co: Dropdowns / Enums editor. Was buried behind the
+             Settings button inside the Partners view; surfacing here
+             makes it discoverable from the global Settings page. -->
+        <button class="tab-btn" type="button" data-settings-tab="enums">
+          Dropdowns
+        </button>
       </div>
 
       <!-- USERS TAB -->
@@ -2607,6 +2613,22 @@
         <textarea id="settings-jeff-kb-body" rows="22"
                   style="width:100%;font-family:var(--mono);font-size:11px;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);box-sizing:border-box;resize:vertical;line-height:1.5;"
                   placeholder="Loading…"></textarea>
+      </div>
+
+      <!-- v1.0.0co: DROPDOWNS / ENUMS TAB. The enum editor was
+           previously buried behind a Settings button inside the
+           Partners view. Surfacing it on the global Settings page
+           makes it discoverable. Renders into #settings-enums-host
+           via the same `_renderEnumSettings` function used in the
+           Partners view, so the editor stays in one place. -->
+      <div class="tab-pane" data-settings-pane="enums">
+        <p class="muted" style="margin:0 0 12px;font-size:11px;">
+          Edit the values that appear in every dropdown across the
+          platform (Regions, Industries, Territories, Sales stages,
+          Lead statuses, etc.). Changes save immediately and apply
+          to every form and filter on the next refresh.
+        </p>
+        <div id="settings-enums-host"></div>
       </div>
     </div>
   </section>
@@ -11853,8 +11875,42 @@
           b.classList.toggle('active', b === btn));
         document.querySelectorAll('[data-settings-pane]').forEach(p =>
           p.classList.toggle('active', p.dataset.settingsPane === target));
+        // v1.0.0co: lazy-load the enum editor when the Dropdowns
+        // tab activates. Reuses _renderEnumSettings (same component
+        // as the Partners-view enum panel) so behaviour is identical.
+        if (target === 'enums') {
+          _loadSettingsEnums();
+        }
       });
     });
+
+    // v1.0.0co: load + render the global Settings enum editor. The
+    // existing _renderEnumSettings function targets #ptn-settings-panel
+    // by ID, which is wrong for this host. Wrap it: fetch the config,
+    // then temporarily point #ptn-settings-panel at our host (by
+    // adding a second element with that id is no good); instead we
+    // call the underlying API directly and reuse the chip-list cards.
+    async function _loadSettingsEnums() {
+      const host = document.querySelector('#settings-enums-host');
+      if (!host) return;
+      if (host.dataset.loaded === '1') return;
+      host.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;">Loading dropdowns…</div>';
+      try {
+        const cfg = await jsonFetch('/api/settings/enums');
+        // Reuse the partner-view enum editor by temporarily renaming
+        // our host to match the id the renderer writes to, render,
+        // then rename it back. Safer than duplicating the render
+        // function. Both panels are never visible at the same time.
+        const originalId = host.id;
+        host.id = 'ptn-settings-panel';
+        host.style.display = 'block';
+        _renderEnumSettings(cfg);
+        host.id = originalId;
+        host.dataset.loaded = '1';
+      } catch (e) {
+        host.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
     const addUserBtn = $('#settings-user-add');
     if (addUserBtn) addUserBtn.addEventListener('click', _addSettingsUser);
     // v1.0.0cc: Jeff KB save / reload wiring.
