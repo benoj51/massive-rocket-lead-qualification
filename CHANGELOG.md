@@ -5,6 +5,108 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cj] — 2026-05-26 — Inter + warm paper palette
+
+Ben: "It looks the same to me" — for v1.0.0ci, two passes in a row.
+Lesson absorbed (see new skill files at `.claude/skills/`): tokens-
+only refinement reads as no-change to humans. The platform needed
+the two changes humans actually perceive first — **font** and
+**background colour** — before any further component polish makes
+sense.
+
+### Skills committed (the meta-change)
+
+Three new skill files at `.claude/skills/` capture the postmortem:
+
+- `frontend-design-verify.md` — the verify-before-claim loop:
+  boot the Preview MCP, screenshot before + after, refuse to ship
+  if the visual diff isn't obvious to a casual glance
+- `visible-design-changes.md` — a taxonomy of visible vs.
+  invisible CSS axes. "Border shade darker by 4%" is invisible.
+  "System font → Inter" is visible. Combine 2–3 from the visible
+  column for a perceived redesign.
+- `railway-deploy-check.md` — when the user says "same on
+  Railway", verify the deploy succeeded BEFORE shipping more CSS.
+
+### The single biggest change: Inter
+
+Switched `--sans` from system-ui to **Inter** (Google Fonts).
+Every word on every surface stops looking like a default OS
+dashboard. Inter has tighter spacing, taller x-height, more
+geometric numerals — the platform now reads as a designed
+product, not a Bootstrap default. Mono switched to **JetBrains
+Mono** for the same reason.
+
+Inter ships via `<link rel="stylesheet">` with `display=swap` and
+preconnect hints so first paint uses system fallback while Inter
+streams in. Zero JS risk.
+
+### The second biggest: warm paper palette
+
+Background moved from flat cold grey `#f6f6f6` to warm paper
+`#f4f1ea`. Surfaces follow:
+
+- `--surface`: `#ffffff` → `#fffefb` (off-white, sits on paper)
+- `--surface-2`: `#f4f4ef` → `#ede9df` (warm tint)
+- `--border`: `#e6e6df` → `#d8d3c2` (warm, visibly different)
+- `--text`: `#212227` → `#14151a` (sharper on paper)
+
+This is the change Ben asked for. The platform now feels closer
+to Notion / Attio / Stripe Dashboard than to a generic admin
+template.
+
+### The third: secondary accent
+
+Added `--accent-2` (slate-blue `#3b5b80`, tied to MR brand
+swatch) + `--accent-2-soft` / `--accent-2-text`. Single-accent
+designs read as "default brand bootstrap"; two accents read as
+"designed". Available now in CSS — components will start opting
+in via subsequent passes (Refresh / Save view / Export buttons
+are the natural first adopters).
+
+### Title version stamp
+
+`<title>` now ends with `· v1.0.0cj`. Future Railway-deploy
+verification is one tab-glance: if the version in the browser
+tab doesn't match the latest commit, the deploy didn't go
+through.
+
+### Verified (this time, properly)
+
+- `mcp__Claude_Preview__preview_start` to boot Flask locally
+- `getComputedStyle(body).backgroundColor` confirms
+  `rgb(244, 241, 234)` (was `rgb(246, 246, 246)`)
+- `getComputedStyle(body).fontFamily` confirms `Inter, -apple-system, ...`
+- `document.querySelector('link[href*="Inter"]')` returns the
+  stylesheet link
+- Screenshots before + after on Home + Partners — visibly
+  different (paper-coloured background, off-white cards)
+- 1157 tests — 1 pre-existing flake in
+  `test_engagement_timeline` (passes in isolation, state-bleed
+  in full-suite), unrelated to CSS
+- `node --check` on both inline scripts: clean
+
+### Why this should actually register
+
+Inter is the single most-used custom font in modern B2B SaaS.
+Side-by-side with system-ui, Inter renders visibly taller and
+tighter — characters are obviously different shapes. Combined
+with the warm paper background (5+ RGB points difference per
+channel, well above perception threshold), this is exactly the
+2-axis change my new `visible-design-changes` skill recommends.
+
+### What's still queued (component-level)
+
+Now that font + palette are set, the next pass can polish
+components within the new aesthetic:
+
+- Dashboard `By MR owner` / `By partner` tables still have
+  uppercase column headers (v1.0.0ci only updated
+  `table.stakeholders, table.pipeline` selectors)
+- Refresh / Save view / Export buttons could adopt `--accent-2`
+- Stat cards could grow optional sparkline glyphs
+- Left-sidebar nav remains an option for a future major version
+
 ## [1.0.0ci] — 2026-05-26 — Bolder design pass (LoopAI-inspired)
 
 `v1.0.0ch` shipped real refinements but at a scale Ben called out as
