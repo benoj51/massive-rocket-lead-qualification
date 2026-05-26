@@ -496,8 +496,27 @@ TECH_STACK_MENTIONED rubric:
   but "Braze platform" → "Braze").
 - One entry per tool. Dedup case-insensitively.
 - Return [] (not null) when nothing tech-stack-y is mentioned.
-- Don't capture generic categories ("a CDP", "their analytics tool") —
+- Don't capture generic categories ("a CDP", "their analytics tool") -
   only named tools.
+
+CRITICAL exclusion for tech_stack_mentioned (v1.0.0cq):
+A vendor that is mentioned ONLY as a SOURCING / REFERRAL / PARTNERSHIP
+context is NOT part of the prospect's tech stack. Examples to EXCLUDE:
+- "Sourced via Marina at Braze" -> do NOT add Braze to tech_stack
+- "Hightouch is pitching them, asked us to support" -> NOT in stack
+- "Co-sell with mParticle into this account" -> NOT in stack
+- "Braze partner team flagged this opportunity" -> NOT in stack
+- "We are bringing this in for Snowflake" -> NOT in stack
+
+Only include a vendor when the PROSPECT themselves says they are
+using, evaluating, or moving off it. Sourcing partners, referral
+partners, and co-sell partners are RELATIONSHIPS, not stack. They
+belong in agencies/partner_source context, not here.
+
+If the same vendor is BOTH a sourcing partner AND clearly in the
+prospect's stack ("Marina at Braze referred this - they're on Braze
+today"), include it. The signal is the prospect's USAGE, not the
+partner reference.
 
 SCOPE_CRITERIA rubric:
 - Only fill values that are EXPLICITLY supported by the notes. Numbers and counts
@@ -566,10 +585,18 @@ Rules:
 
 
 def extract_from_notes(notes: str, *, company_name: str | None = None,
-                       current_meddpicc: dict | None = None) -> dict | None:
+                       current_meddpicc: dict | None = None,
+                       sourcing_partners: list[str] | None = None) -> dict | None:
     """Return {meddpicc: {...}, project_scope: str} extracted from the notes.
 
     Returns None if Anthropic isn't configured or the call fails.
+
+    v1.0.0cq: `sourcing_partners` is a list of partner names the AE has
+    marked as sourcing / referring this lead (e.g. ["Braze"] when the
+    note is "Marina at Braze flagged this account"). Names in this list
+    are excluded from the returned tech_stack_mentioned even if the
+    model picks them up, because a referral partner is a relationship,
+    not part of the prospect's stack.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -597,6 +624,20 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
             context_prefix += "Already confirmed (do not overwrite):\n"
             for k, v in confirmed.items():
                 context_prefix += f"  {k}: {v.get('value')}\n"
+
+    # v1.0.0cq: surface sourcing partners to the model so it knows
+    # not to add them to tech_stack_mentioned.
+    sourcing_set: set[str] = set()
+    if sourcing_partners:
+        clean = [str(p).strip() for p in sourcing_partners if p and str(p).strip()]
+        if clean:
+            sourcing_set = {p.lower() for p in clean}
+            context_prefix += (
+                "Sourcing/referral partners for this lead (do NOT include "
+                "in tech_stack_mentioned unless the prospect's own usage "
+                "is independently mentioned): "
+                + ", ".join(clean) + "\n"
+            )
 
     user_msg = f"{context_prefix}\nNotes:\n{notes}"
 
@@ -740,8 +781,13 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
             context = None
         agencies_out.append({"name": name, "context": context})
 
-    # v1.0.0bb: tech stack mentions — named tools/platforms only,
+    # v1.0.0bb: tech stack mentions - named tools/platforms only,
     # case-insensitively deduped.
+    # v1.0.0cq: post-hoc filter for sourcing partners. Belt and braces
+    # alongside the prompt instruction - the model occasionally still
+    # adds the referrer to the stack, especially with short notes like
+    # "Marina at Braze flagged this". Stripping the sourcing partner
+    # here guarantees no false positives reach the lead.
     tech_stack_out: list[str] = []
     seen_tools: set[str] = set()
     for entry in data.get("tech_stack_mentioned") or []:
@@ -750,11 +796,14 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
         name = str(entry).strip()
         if not name or name.lower() == "null":
             continue
-        # Reject overly-generic entries that often slip through —
-        # the rubric warns against them but belt-and-braces here too.
+        # Reject overly-generic entries that often slip through.
         if name.lower() in {"a cdp", "their cdp", "their crm",
                               "their warehouse", "their analytics",
                               "a platform", "a tool"}:
+            continue
+        # Sourcing-partner exclusion (v1.0.0cq).
+        if name.lower() in sourcing_set:
+            log.info("Skipping %s from tech_stack: listed as sourcing partner", name)
             continue
         key = name.lower()
         if key in seen_tools:

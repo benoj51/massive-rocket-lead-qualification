@@ -130,6 +130,67 @@ class ExtractFromNotesTests(unittest.TestCase):
         })
         self.assertEqual(out["tech_stack_mentioned"], ["Braze"])
 
+    # v1.0.0cq: sourcing-partner exclusion ---------------------------
+    # When the AE marks a lead as "sourced via Braze", the AI extractor
+    # used to drop Braze into the lead's tech_stack even though the
+    # partner is the REFERRER, not necessarily in the prospect's stack.
+    # The fix excludes any sourcing_partners name from the returned
+    # tech_stack post-hoc.
+
+    def _run_with_sourcing(self, payload, sourcing_partners):
+        class _Block:
+            def __init__(self, text): self.text = text
+        class _Msg:
+            def __init__(self, text): self.content = [_Block(text)]
+        class _Messages:
+            def create(self, **kwargs): return _Msg(json.dumps(payload))
+        class _FakeAnthropic:
+            def __init__(self, **kwargs): self.messages = _Messages()
+        import anthropic
+        with patch.object(anthropic, "Anthropic", _FakeAnthropic):
+            return self.ai.extract_from_notes(
+                "Sourced via Marina at Braze. They use Snowflake.",
+                company_name="X",
+                sourcing_partners=sourcing_partners,
+            )
+
+    def test_sourcing_partner_excluded_from_tech_stack(self):
+        """Braze listed as sourcing partner -> stripped from tech_stack
+        even if the model returned it."""
+        out = self._run_with_sourcing({
+            "tech_stack_mentioned": ["Braze", "Snowflake"],
+            "meddpicc": {}, "contacts_mentioned": [],
+            "competitive_agencies": [],
+        }, sourcing_partners=["Braze"])
+        self.assertEqual(out["tech_stack_mentioned"], ["Snowflake"])
+
+    def test_sourcing_partner_case_insensitive_match(self):
+        """Match is case-insensitive: 'Braze' filter strips 'braze'."""
+        out = self._run_with_sourcing({
+            "tech_stack_mentioned": ["braze", "Snowflake"],
+            "meddpicc": {}, "contacts_mentioned": [],
+            "competitive_agencies": [],
+        }, sourcing_partners=["Braze"])
+        self.assertEqual(out["tech_stack_mentioned"], ["Snowflake"])
+
+    def test_no_sourcing_partner_no_filter(self):
+        """Without sourcing_partners, behaviour is unchanged."""
+        out = self._run_with_sourcing({
+            "tech_stack_mentioned": ["Braze", "Snowflake"],
+            "meddpicc": {}, "contacts_mentioned": [],
+            "competitive_agencies": [],
+        }, sourcing_partners=None)
+        self.assertEqual(sorted(out["tech_stack_mentioned"]),
+                          ["Braze", "Snowflake"])
+
+    def test_multiple_sourcing_partners_all_excluded(self):
+        out = self._run_with_sourcing({
+            "tech_stack_mentioned": ["Braze", "mParticle", "Snowflake"],
+            "meddpicc": {}, "contacts_mentioned": [],
+            "competitive_agencies": [],
+        }, sourcing_partners=["Braze", "mParticle"])
+        self.assertEqual(out["tech_stack_mentioned"], ["Snowflake"])
+
     # v1.0.0bg: contacts_mentioned single-word filter -----------------
 
     def test_drops_single_word_contacts_without_email(self):

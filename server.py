@@ -285,8 +285,24 @@ def api_lead_extract():
         return jsonify({"error": "AI extraction unavailable (ANTHROPIC_API_KEY not set)"}), 503
     company_name = (body.get("company_name") or "").strip() or None
     current = body.get("current_meddpicc") or {}
+    # v1.0.0cq: sourcing_partners lets the AE flag which partner
+    # referred the lead. Names land in the prompt so the model knows
+    # not to call them "tech stack", and any survivors get filtered
+    # post-extraction. Accept both list and single-string forms for
+    # convenience.
+    raw_sp = body.get("sourcing_partners") or body.get("partner_source") or []
+    if isinstance(raw_sp, str):
+        sourcing_partners = [raw_sp]
+    elif isinstance(raw_sp, dict):
+        # Shape used elsewhere: {partner_id, partner_name, ...}
+        sourcing_partners = [raw_sp.get("partner_name") or raw_sp.get("partner_id") or ""]
+    elif isinstance(raw_sp, list):
+        sourcing_partners = [str(p) for p in raw_sp if p]
+    else:
+        sourcing_partners = []
     result = ai_summary.extract_from_notes(notes, company_name=company_name,
-                                           current_meddpicc=current)
+                                           current_meddpicc=current,
+                                           sourcing_partners=sourcing_partners)
     if result is None:
         return jsonify({"error": "extraction failed; check server logs"}), 502
     audit.log_event("lead_notes_extracted", actor=_actor(),

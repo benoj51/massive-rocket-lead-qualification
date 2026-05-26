@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cp</title>
+<title>Massive Rocket Lead Qualification · v1.0.0cq</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -3975,6 +3975,10 @@
     $('#extract-status').textContent = '';
     try {
       const company = state.currentResult.company || {};
+      // v1.0.0cq: pass sourced_for_partners so the AI extractor knows
+      // not to add the referring partner to tech_stack. The list lives
+      // on currentResult, populated by the sourced-for chips.
+      const sourcing = collectSourcedFor();
       const data = await jsonFetch('/api/lead/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3983,6 +3987,7 @@
           company_name: company.name,
           url: company.url,
           current_meddpicc: state.currentResult.meddicc || {},
+          sourcing_partners: sourcing,
         }),
       });
       // Merge extracted MEDDPICC into state, keeping any AE-confirmed entries
@@ -4507,6 +4512,36 @@
                  saved === total ? 'success' : 'error');
           qfState.pendingNotes = [];
           _renderQfBufferedNotes();
+        }
+        // v1.0.0cq: also persist the raw #notes-text (the big textarea
+        // the AE typed context into) as a single call on the lead. The
+        // structured MEDDPICC + scope + tech_stack fields already
+        // round-tripped through /api/lead/extract, but the *raw* context
+        // never persisted - it just disappeared when the AE navigated
+        // away. Now it lands as a "Qualification context" note that
+        // shows up in the account view + feeds the AI synthesis.
+        const rawNotes = ($('#notes-text').value || '').trim();
+        if (rawNotes) {
+          try {
+            const sourcing = (collectSourcedFor() || [])[0] || null;
+            const partnerSource = sourcing ? { partner_name: sourcing } : null;
+            await jsonFetch(`/api/calls/${encodeURIComponent(res.page_id)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                // calls_store only accepts call|note|email|transcript;
+                // qualification context is a written note.
+                type: 'note',
+                title: 'Qualification context',
+                content: rawNotes,
+                company_name: state.currentResult?.company?.name || '',
+                partner_source: partnerSource,
+              }),
+            });
+          } catch (e) {
+            console.error('[qf-notes] qualify-context flush failed', e);
+            toast('Lead saved but qualification notes failed to attach.', 'error');
+          }
         }
         // v1.0.0p: if the AE typed an incumbent agency on the qualify
         // form, persist it as an incumbent entry now that the lead has

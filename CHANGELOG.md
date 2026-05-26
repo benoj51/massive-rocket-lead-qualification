@@ -5,6 +5,59 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cq] - 2026-05-26 - Note synthesis fixes (qualify-context + sourcing partner)
+
+Two real bugs Ben caught on live:
+
+### 1. Qualify-form notes never persisted to the lead
+
+The `#notes-text` textarea on the qualify view was used only for AI
+extraction (MEDDPICC, scope, tech_stack), then thrown away. When
+the AE saved the lead and opened the account view, their typed
+context was gone. Only the structured extractions made it through.
+
+Fix: after `pushToNotion` succeeds and the lead has a page_id, POST
+the raw `#notes-text` content to `/api/calls/<page_id>` as a `note`
+typed "Qualification context". This lands in calls_store, shows up
+in the Account view's timeline, and feeds the synthesis prompt on
+subsequent lead-summary refreshes. partner_source is attached if
+the AE marked a sourcing partner via the sourced-for chips.
+
+### 2. Tech-stack extractor mislabelled sourcing partners
+
+When the AE typed "Sourced via Marina at Braze" or "Hightouch is
+pitching this for us", the AI extractor would add Braze /
+Hightouch to the prospect's `tech_stack` field. Wrong: a referral
+partner is a RELATIONSHIP, not part of the prospect's stack. The
+prospect might be on a totally different platform.
+
+Fix in three layers:
+
+1. **Prompt update** (`ai_summary.py` TECH_STACK_MENTIONED rubric):
+   added a CRITICAL EXCLUSION section with 5 concrete examples
+   showing partner-referral patterns and explicitly saying the
+   model should NOT include them in tech_stack.
+
+2. **Server-side context injection** (`server.py` `/api/lead/extract`):
+   accepts `sourcing_partners` (list, single string, or partner_source
+   dict shape). Names get prepended to the user message so the model
+   knows what to exclude.
+
+3. **Post-extraction filter** (`ai_summary.extract_from_notes`):
+   case-insensitive strip of any sourcing-partner name from the
+   returned `tech_stack_mentioned`. Belt-and-braces for when the
+   model still slips up. Logged at INFO level.
+
+4 new tests in `test_call_extraction_agencies_tech.py` covering the
+filter: explicit exclusion, case-insensitive match, no-op when no
+sourcing partner provided, multiple sourcing partners.
+
+### Verified
+
+- 1161 tests pass (4 new, 1157 unchanged)
+- node --check on both inline scripts clean
+- Server imports clean
+
 ## [1.0.0cp] - 2026-05-26 - More industries: MEGS / Consumer Goods / General Business
 
 Ben asked to add: MEGS, General Business, Consumer Goods, Media,
