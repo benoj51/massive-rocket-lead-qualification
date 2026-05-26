@@ -5,6 +5,42 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ck] — 2026-05-26 — KPI alignment fix
+
+Ben caught a real bug on the live v1.0.0cj build: when one stat
+label wraps to 2 lines (e.g. "PARTNER CONTACTS OWNED"), its big
+number sits lower than the other cards, breaking the row baseline.
+
+Three complementary fixes:
+
+1. **`.stat-label` reserves 2 lines of vertical space**
+   (`min-height: 2.7em`, `line-height: 1.35`, `display: flex;
+   align-items: flex-end`). A 1-line and 2-line label now occupy
+   the same height; the value below sits at the same Y position
+   regardless.
+
+2. **`.stat` is `display: flex; flex-direction: column`** so the
+   vertical rhythm is predictable rather than dependent on
+   sibling content.
+
+3. **`.stat-delta` also gets a 2-line `min-height`** so cards
+   without a subtext line don't collapse shorter than cards with
+   one. Whole row stays the same height.
+
+4. **`.stat-grid` bumped from `minmax(180px, 1fr)` to
+   `minmax(200px, 1fr)`** so labels have more horizontal room
+   and wrap less often. At 1280px main width, 5 columns still
+   fit comfortably (5 × 200 = 1000px + gaps).
+
+### Verified
+
+- `getBoundingClientRect().top` on all 5 Home KPI `.stat-value`
+  elements → all return `329` at 1440px (perfectly row-aligned)
+- All 5 `.stat-label` heights → `30px` (uniform)
+- At 1100px the grid wraps to 4+1; within each row, values stay
+  aligned at the same Y
+- Screenshot before vs after — row baseline restored
+
 ## [1.0.0cj] — 2026-05-26 — Inter + warm paper palette
 
 Ben: "It looks the same to me" — for v1.0.0ci, two passes in a row.

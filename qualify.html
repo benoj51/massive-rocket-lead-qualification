@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket — Lead Qualification · v1.0.0cj</title>
+<title>Massive Rocket — Lead Qualification · v1.0.0ck</title>
 <!-- v1.0.0cj: Inter (Google Fonts) — the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -750,24 +750,47 @@
     padding: 22px 24px;
     box-shadow: var(--shadow-xs);
     transition: border-color .15s ease-out, box-shadow .15s ease-out;
+    /* v1.0.0ck: flex column so label/value/delta sit at predictable
+       Y positions across the row. Previously when one label wrapped
+       (e.g. "PARTNER CONTACTS OWNED") its big number dropped lower
+       than peers, breaking row alignment. */
+    display: flex;
+    flex-direction: column;
   }
   .stat:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
   .stat-label {
     font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
     color: var(--text-muted); font-weight: 600; margin: 0 0 10px;
+    /* v1.0.0ck: reserve 2 lines' worth of vertical space so a wrapping
+       label (2 lines) and a non-wrapping label (1 line) both occupy
+       the SAME height. Numbers below stay row-aligned regardless. */
+    line-height: 1.35;
+    min-height: 2.7em;     /* ≈ 2 lines at 1.35 line-height */
+    display: flex;
+    align-items: flex-end;  /* push 1-line labels to baseline of 2-line slot */
   }
   .stat-value {
     font-size: 32px; font-weight: 600; line-height: 1.1;
     color: var(--text); letter-spacing: -.02em;
     font-variant-numeric: tabular-nums;
   }
-  .stat-delta { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .stat-delta {
+    font-size: 12px; color: var(--text-muted); margin-top: 6px;
+    /* v1.0.0ck: reserve room for the subtext too so cards without a
+       delta don't collapse shorter than cards with one. 2-line slot
+       at 1.4 line-height ≈ 2.8em. */
+    line-height: 1.4;
+    min-height: 2.8em;
+  }
   .stat-delta.up   { color: var(--green); }
   .stat-delta.down { color: var(--red); }
-  /* Grid for stat tiles — `.stat-grid` parent gets responsive cols. */
+  /* Grid for stat tiles — `.stat-grid` parent gets responsive cols.
+     v1.0.0ck: 180 → 200 minmax so labels have more horizontal room
+     and wrap less often. At 1280px main width this still fits 5
+     columns comfortably; narrows to 4/3/2 cleanly below. */
   .stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 14px;
   }
   .tile.manual { border-color: rgba(232,43,35,.4); background-color: rgba(232,43,35,.04); }
