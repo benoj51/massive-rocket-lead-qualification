@@ -5,6 +5,73 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cw] - 2026-05-26 - Note-loss audit + Expansion polish + AI associates
+
+Three things landed together since they're all Expansion / data-
+durability work.
+
+### v1.0.0cu - Note-loss audit + atomic writes
+
+Ben asked: "double check if notes are still susceptible to being
+lost". Audit found 2 critical + 3 medium risks. The most impactful
+ones are now fixed:
+
+1. **Atomic JSON writes** in `json_file_store.write_json` -
+   tempfile + os.replace. calls_store + partner_notes_store both
+   route through this now. A crash mid-write can no longer corrupt
+   a notes file. Both stores load via try-except so a corrupt JSON
+   would silently return [] - that's the failure mode this prevents.
+2. **localStorage draft** for the qualify view's #notes-text. Was
+   in-memory only; browser refresh wiped it. Now: every keystroke
+   writes a draft keyed in localStorage, restored on next visit,
+   cleared only after a successful lead save.
+3. **pendingNotes flush** keeps failed notes in the buffer instead
+   of nuking it unconditionally. Toast tells the user how many
+   stayed so they can retry.
+
+Two remaining audit items (lead-drawer textarea clear timing, raw
+qualify-context retry queue) are MEDIUM-risk edge cases worth a
+follow-up but not blockers - the jsonFetch path already throws on
+non-2xx so the most common failure mode preserves the textarea.
+
+### v1.0.0cv - Expansion design polish + open-account button
+
+Ben: "Account Expansion page looks a bit bland."
+
+- Totals strip uses .stat / .stat-grid (32px tabular numbers,
+  eyebrow labels) - matches Home + Dashboard
+- New "Converted" stat added (was implied via filter only)
+- Anchor card header bigger (16px company name, gradient surface),
+  cleaner project-status pill
+- New "Open account" button on each anchor - opens the landed
+  lead in the drawer so users see contacts + notes + activity
+  without leaving Expansion
+- New "AI suggest" button on each anchor (powers v1.0.0cw below)
+- Filter chips use the proper .filters / .chip styles (was inline
+  smaller pills)
+
+### v1.0.0cw - AI-suggested associated accounts
+
+Ben: "When dealing with groups e.g. parent child accounts, AI
+should help on the Expansion page by indicating if it's found
+associated accounts to create and add to the directory."
+
+Endpoint `/api/expansion/<lead_id>/suggest-associates`:
+- Resolves the anchor's company name + Apollo description +
+  parent_group hint
+- Asks Claude to enumerate sister brands, subsidiaries, regional
+  units, joint ventures - max 8, one-phrase rationale per pick
+- Server-side dedup against existing pipeline rows + existing
+  expansion targets so the modal only shows NEW candidates
+- Logs `expansion_associates_suggested` audit event
+
+UI: clicking "AI suggest" on an anchor opens a modal listing
+candidates with checkboxes (all checked by default), name, kind
+(sister_brand / subsidiary / regional_unit), and a short
+rationale. "Add as expansion targets" creates them in bulk with
+"[AI suggested - <kind>] <rationale>" stored in the target notes
+so the source is auditable.
+
 ## [1.0.0ct] - 2026-05-26 - Weekly manager report + Apollo diagnostics + expansion linking
 
 Three things landed together since they're all Dashboard-area work.

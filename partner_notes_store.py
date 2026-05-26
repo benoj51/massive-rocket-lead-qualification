@@ -72,8 +72,11 @@ def _load_raw(partner_id: str, contact_id: str) -> list[dict[str, Any]]:
 
 
 def _write_raw(partner_id: str, contact_id: str, notes: list[dict[str, Any]]) -> None:
-    with _LOCK:
-        _path(partner_id, contact_id).write_text(json.dumps(notes, indent=2))
+    # v1.0.0cu: atomic write via json_file_store. Same audit fix as
+    # calls_store - prevents partial JSON writes from corrupting the
+    # note history on a crash.
+    import json_file_store
+    json_file_store.write_json(_path(partner_id, contact_id), notes)
 
 
 def list_notes(partner_id: str, contact_id: str) -> list[dict[str, Any]]:

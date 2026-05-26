@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0ct</title>
+<title>Massive Rocket Lead Qualification · v1.0.0cw</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2484,13 +2484,16 @@
           <button id="exp-refresh" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Refresh</button>
         </div>
       </div>
-      <div id="exp-totals" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0;"></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
-        <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;">Show:</span>
-        <button class="chip active" data-exp-filter="" type="button" style="font-size:11px;padding:4px 10px;">All</button>
-        <button class="chip" data-exp-filter="greenfield" type="button" style="font-size:11px;padding:4px 10px;">Greenfield</button>
-        <button class="chip" data-exp-filter="researching" type="button" style="font-size:11px;padding:4px 10px;">Researching</button>
-        <button class="chip" data-exp-filter="qualifying" type="button" style="font-size:11px;padding:4px 10px;">Qualifying</button>
+      <!-- v1.0.0cv: totals strip uses .stat-grid for consistency with
+           Home + Dashboard. Big tabular numbers, eyebrow labels. Was
+           a 4-column grid of cramped tiles. -->
+      <div id="exp-totals" class="stat-grid" style="margin:18px 0;"></div>
+      <div class="filters" style="margin-bottom:18px;">
+        <span class="muted" style="font-size:13px;align-self:center;">Show</span>
+        <button class="chip active" data-exp-filter="" type="button">All</button>
+        <button class="chip" data-exp-filter="greenfield" type="button">Greenfield</button>
+        <button class="chip" data-exp-filter="researching" type="button">Researching</button>
+        <button class="chip" data-exp-filter="qualifying" type="button">Qualifying</button>
       </div>
       <div id="exp-list" class="muted" style="font-size:12px;padding:14px;text-align:center;">Loading…</div>
     </div>
@@ -3974,12 +3977,51 @@
   }
 
   function bindNotesAndScopeSync() {
+    // v1.0.0cu: localStorage draft for #notes-text. Audit found that
+    // refreshing the page or navigating away mid-typing wiped the
+    // textarea (state was in memory only). Now: every keystroke writes
+    // a draft keyed on the current company name. On load, restore the
+    // draft so the user picks up where they left off. Cleared after
+    // a successful lead save (see pushToNotion flush block).
+    const DRAFT_KEY = 'mr.qualify.notes-draft';
+    const _saveDraft = () => {
+      try {
+        const v = $('#notes-text').value || '';
+        const company = (state.currentResult?.company?.name || '').trim();
+        if (v.trim().length > 0) {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify({
+            company, text: v, saved_at: new Date().toISOString(),
+          }));
+        } else {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      } catch (_) { /* localStorage quota / private-mode - ignore */ }
+    };
+    const _restoreDraft = () => {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        const el = $('#notes-text');
+        if (!el || el.value.trim()) return;  // don't clobber actual content
+        if (d && d.text) {
+          el.value = d.text;
+          if (state.currentResult) state.currentResult.notes = d.text;
+          const ts = d.saved_at ? new Date(d.saved_at).toLocaleString() : '';
+          toast(`Restored unsaved notes draft (last edit ${ts}).`, 'info');
+        }
+      } catch (_) { /* corrupt or missing - skip */ }
+    };
     $('#notes-text').addEventListener('input', (e) => {
       if (state.currentResult) state.currentResult.notes = e.target.value;
+      _saveDraft();
     });
     $('#project-scope-text').addEventListener('input', (e) => {
       if (state.currentResult) state.currentResult.project_scope = e.target.value;
     });
+    // Restore on init; expose globally so pushToNotion can clear it.
+    _restoreDraft();
+    window.__mrClearNotesDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch (_) {} };
   }
 
   async function extractFromNotes() {
@@ -4508,6 +4550,12 @@
         // succeeded, so a failure here is reported but non-fatal.
         if (qfState.pendingNotes.length) {
           const total = qfState.pendingNotes.length;
+          // v1.0.0cu: keep FAILED notes in the buffer so the user can
+          // retry instead of losing them. Audit caught the old code
+          // cleared the buffer unconditionally after the loop, dropping
+          // any note that failed mid-flush. Now: build a "failed" list
+          // and replace the buffer with just those after the pass.
+          const failed = [];
           let saved = 0;
           for (const n of qfState.pendingNotes) {
             try {
@@ -4523,11 +4571,15 @@
               saved++;
             } catch (e) {
               console.error('[qf-notes] flush failed', e);
+              failed.push(n);
             }
           }
-          toast(`Committed ${saved}/${total} initial note${total === 1 ? '' : 's'}`,
-                 saved === total ? 'success' : 'error');
-          qfState.pendingNotes = [];
+          const tone = failed.length === 0 ? 'success' : 'error';
+          const msg = failed.length === 0
+            ? `Committed ${saved}/${total} initial note${total === 1 ? '' : 's'}`
+            : `Committed ${saved}/${total} - ${failed.length} kept in buffer to retry. Re-click Save to re-attempt.`;
+          toast(msg, tone);
+          qfState.pendingNotes = failed;
           _renderQfBufferedNotes();
         }
         // v1.0.0cq: also persist the raw #notes-text (the big textarea
@@ -4555,9 +4607,22 @@
                 partner_source: partnerSource,
               }),
             });
+            // v1.0.0cu: clear localStorage draft only after a successful
+            // attach. If it failed, leave the draft so a refresh + retry
+            // recovers it.
+            if (typeof window.__mrClearNotesDraft === 'function') {
+              window.__mrClearNotesDraft();
+            }
           } catch (e) {
             console.error('[qf-notes] qualify-context flush failed', e);
-            toast('Lead saved but qualification notes failed to attach.', 'error');
+            toast('Lead saved but qualification notes failed to attach. Draft preserved in browser - refresh to recover.', 'error');
+          }
+        } else {
+          // No raw notes to attach - safe to clear the draft (the user
+          // either typed nothing here, or already extracted + persisted
+          // structured fields).
+          if (typeof window.__mrClearNotesDraft === 'function') {
+            window.__mrClearNotesDraft();
           }
         }
         // v1.0.0p: if the AE typed an incumbent agency on the qualify
@@ -5231,19 +5296,22 @@
   function _renderExpansionTotals(totals) {
     const el = $('#exp-totals');
     if (!el) return;
+    // v1.0.0cv: switched to .stat / .stat-grid so the totals strip
+    // matches Home + Dashboard. Big tabular numbers, eyebrow labels.
     const card = (label, value, sub, color) => `
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;">
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:3px;">${escapeHtml(label)}</div>
-        <div style="font-size:20px;font-weight:600;color:${color || 'var(--text)'};line-height:1.1;">${value}</div>
-        ${sub ? `<div class="muted" style="font-size:10px;margin-top:3px;">${escapeHtml(sub)}</div>` : ''}
+      <div class="stat">
+        <div class="stat-label">${escapeHtml(label)}</div>
+        <div class="stat-value"${color ? ` style="color:${color};"` : ''}>${escapeHtml(String(value))}</div>
+        ${sub ? `<div class="stat-delta">${escapeHtml(sub)}</div>` : ''}
       </div>
     `;
     el.innerHTML = [
       card('Landed accounts',  totals.anchors || 0,    'with live projects or targets'),
       card('Total targets',    totals.targets || 0,    'expansion opportunities'),
       card('Greenfield',       totals.greenfield || 0, 'not yet worked',
-            totals.greenfield > 0 ? 'var(--mr-red,#e82b23)' : 'var(--text)'),
+            totals.greenfield > 0 ? 'var(--mr-red,#e82b23)' : ''),
       card('In progress',      totals.in_progress || 0, 'researching + qualifying'),
+      card('Converted',        totals.converted || 0,  'promoted to lead'),
     ].join('');
   }
 
@@ -5290,16 +5358,28 @@
     };
 
     el.innerHTML = filtered.map(a => `
-      <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;background:var(--surface);">
-        <div style="padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <div style="border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:14px;background:var(--surface);box-shadow:var(--shadow-xs);overflow:hidden;transition:box-shadow .15s, border-color .15s;">
+        <!-- v1.0.0cv: anchor header refreshed. Bigger company name,
+             clearer project-status pill, plus an "Open account" button
+             that drops into the lead drawer so users can act on the
+             parent account without leaving the expansion view. -->
+        <div style="padding:16px 18px;border-bottom:1px solid var(--border);background:linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <div style="min-width:0;flex:1;">
-            <div style="font-size:13px;font-weight:600;">${escapeHtml(a.company || a.lead_id || '-')}</div>
-            <div style="font-size:11px;margin-top:2px;">
-              <strong>Landed:</strong> ${escapeHtml(a.project_name || a.company || '-')}
-              <span style="margin-left:6px;">${projectStatusChip(a.project_status)}</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="font-size:16px;font-weight:600;color:var(--text);letter-spacing:-.01em;">${escapeHtml(a.company || a.lead_id || '-')}</div>
+              ${a.project_status ? projectStatusChip(a.project_status) : ''}
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">
+              ${escapeHtml(a.project_name || a.company || 'No live project')}
+              <span style="margin:0 6px;">·</span>
+              ${(a.target_counts?.total || 0)} target${(a.target_counts?.total || 0) === 1 ? '' : 's'}
             </div>
           </div>
-          <button class="btn ghost" type="button" data-exp-add="${escapeAttr(a.lead_id)}" style="padding:5px 10px;font-size:11px;flex-shrink:0;">+ Add target</button>
+          <div class="btn-row" style="flex-shrink:0;">
+            <button class="btn ghost sm" type="button" data-exp-open-anchor="${escapeAttr(a.lead_id)}">Open account</button>
+            <button class="btn sm" type="button" data-exp-add="${escapeAttr(a.lead_id)}">+ Add target</button>
+            <button class="btn ghost sm" type="button" data-exp-suggest-associates="${escapeAttr(a.lead_id)}" title="Ask AI to suggest sister brands / subsidiaries to add as targets">AI suggest</button>
+          </div>
         </div>
         <div style="padding:8px 12px;">
           ${a._filtered_targets.length
@@ -5361,6 +5441,105 @@
         setTimeout(() => openLeadDrawer(leadId), 80);
       });
     });
+    // v1.0.0cv: "Open account" button on the anchor header. Opens the
+    // landed lead in the drawer so the user can see contacts, notes,
+    // recent activity for the parent account they're expanding from.
+    el.querySelectorAll('[data-exp-open-anchor]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const leadId = b.dataset.expOpenAnchor;
+        if (!leadId) return;
+        switchView('pipeline');
+        setTimeout(() => openLeadDrawer(leadId), 80);
+      });
+    });
+    // v1.0.0cw: "AI suggest" on the anchor header. Asks the server
+    // to suggest associated accounts (sister brands, subsidiaries,
+    // regional units) for one-click add-as-target.
+    el.querySelectorAll('[data-exp-suggest-associates]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _suggestExpansionAssociates(b.dataset.expSuggestAssociates, b);
+      });
+    });
+  }
+
+  // v1.0.0cw: AI-suggested associated accounts. Shows a modal with
+  // candidates Claude identified (sister brands, subsidiaries,
+  // regional units) for one-click add-as-target.
+  async function _suggestExpansionAssociates(leadId, btn) {
+    if (!leadId) return;
+    const origBtn = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Asking AI…'; }
+    try {
+      const data = await jsonFetch(`/api/expansion/${encodeURIComponent(leadId)}/suggest-associates`);
+      const candidates = data.candidates || [];
+      if (!candidates.length) {
+        toast(`No new associated accounts found for ${data.company || leadId}.`, 'info');
+        return;
+      }
+      // Open a modal with checkboxes per candidate; selected ones
+      // create as expansion targets in bulk.
+      const checked = new Set(candidates.map(c => c.name));
+      const optionsHtml = candidates.map((c, i) => `
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" data-assoc-idx="${i}" checked style="margin-top:2px;" />
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);">${escapeHtml(c.name)}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">
+              ${escapeHtml((c.kind || 'associate').replace('_', ' '))} - ${escapeHtml(c.rationale || '')}
+            </div>
+          </div>
+        </label>`).join('');
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;';
+      overlay.innerHTML = `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:520px;width:100%;box-shadow:var(--shadow-xl);overflow:hidden;">
+          <header style="padding:18px 20px;border-bottom:1px solid var(--border);">
+            <h3 style="margin:0;font-size:16px;font-weight:600;">AI-suggested expansion accounts</h3>
+            <p class="muted" style="margin:4px 0 0;font-size:12px;">Found ${candidates.length} potential associated account${candidates.length === 1 ? '' : 's'} for <strong>${escapeHtml(data.company || '')}</strong>. Untick any you don't want; we'll create the rest as expansion targets.</p>
+          </header>
+          <div style="padding:16px 20px;max-height:50vh;overflow-y:auto;">${optionsHtml}</div>
+          <footer style="padding:14px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);background:var(--surface-2);">
+            <button class="btn ghost" data-assoc-cancel type="button">Cancel</button>
+            <button class="btn" data-assoc-confirm type="button">Add as expansion targets</button>
+          </footer>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.querySelector('[data-assoc-cancel]').addEventListener('click', close);
+      overlay.querySelector('[data-assoc-confirm]').addEventListener('click', async () => {
+        const picks = Array.from(overlay.querySelectorAll('input[data-assoc-idx]'))
+          .filter(b => b.checked)
+          .map(b => candidates[parseInt(b.dataset.assocIdx, 10)]);
+        if (!picks.length) { close(); return; }
+        let created = 0;
+        for (const c of picks) {
+          try {
+            await jsonFetch('/api/expansion-targets', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                anchor_lead_id: leadId,
+                name: c.name,
+                notes: `[AI suggested - ${c.kind || 'associate'}] ${c.rationale || ''}`.trim(),
+              }),
+            });
+            created++;
+          } catch (e) {
+            console.error('[exp-associate] add failed', c.name, e);
+          }
+        }
+        close();
+        toast(`Created ${created}/${picks.length} expansion target${picks.length === 1 ? '' : 's'}`,
+                created === picks.length ? 'success' : 'error');
+        loadExpansion();
+      });
+    } catch (e) {
+      toast(`AI suggestion failed: ${e.body?.error || e.message}`, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = origBtn; }
+    }
   }
 
   async function _addExpansionTarget(anchorLeadId) {

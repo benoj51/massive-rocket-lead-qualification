@@ -5640,6 +5640,133 @@ def api_expansion_overview():
     })
 
 
+@app.route("/api/expansion/<lead_id>/suggest-associates", methods=["GET"])
+def api_expansion_suggest_associates(lead_id: str):
+    """v1.0.0cw: AI-suggested associated accounts.
+
+    For a landed lead (the anchor), use Claude + Apollo description
+    to enumerate likely associated accounts (sister brands, subsidiaries,
+    regional units of the same parent group). Returns candidates the
+    UI can render with one-click "Add as target" buttons.
+
+    Excludes anything already in the pipeline or already an expansion
+    target under this anchor (server-side dedup).
+    """
+    if not ai_summary.is_configured():
+        return jsonify({"error": "AI not configured (ANTHROPIC_API_KEY)"}), 503
+
+    # Resolve the anchor's company name + Apollo description.
+    try:
+        lead = NotionSync().get_page(lead_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not load lead: {e}"}), 502
+
+    company = (lead or {}).get("company") or {}
+    company_name = (company.get("name") or "").strip()
+    if not company_name:
+        return jsonify({"error": "Lead has no company name"}), 400
+    description = (company.get("apollo", {}) or {}).get("description") or ""
+    parent_group = (company.get("parent_group") or "").strip()
+
+    # Build the dedup set: existing pipeline rows + existing targets.
+    existing_names: set[str] = {company_name.lower()}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            n = (r.get("company") or "").strip().lower()
+            if n:
+                existing_names.add(n)
+    except Exception:
+        pass
+    for t in expansion_targets_store.list_all():
+        if t.get("anchor_lead_id") == lead_id:
+            n = (t.get("name") or "").strip().lower()
+            if n:
+                existing_names.add(n)
+
+    # Ask Claude. Tight prompt so the response is JSON we can render
+    # without further parsing risk.
+    import os
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return jsonify({"error": "anthropic SDK not installed"}), 503
+
+    parent_hint = f"\nKnown parent group: {parent_group}" if parent_group else ""
+    desc_hint = f"\nCompany description (from Apollo):\n{description[:1500]}" if description else ""
+
+    system = (
+        "You are helping a sales team find expansion opportunities. "
+        "Given a parent account, list the OBVIOUS associated accounts: "
+        "sister brands, subsidiaries, separate regional / business "
+        "units that would each be a distinct sales opportunity. "
+        "Return ONLY valid JSON in this exact shape: "
+        '{"candidates": [{"name": "...", "rationale": "...", "kind": "sister_brand|subsidiary|regional_unit|joint_venture"}]} '
+        "If the company is clearly NOT part of a group (e.g. a single-brand startup), return {\"candidates\": []}. "
+        "Maximum 8 candidates. Each rationale is one short phrase (under 14 words). "
+        "Do NOT invent companies you can't verify. "
+        "Do NOT include the parent itself."
+    )
+    user = (
+        f"Parent company: {company_name}"
+        f"{parent_hint}{desc_hint}\n\n"
+        "List the associated accounts as JSON."
+    )
+
+    try:
+        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        msg = client.messages.create(
+            model=ai_summary._DEFAULT_MODEL,
+            max_tokens=900,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = ""
+        for block in msg.content:
+            text = (getattr(block, "text", None) or "")
+            if text:
+                break
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").strip()
+            if text.lower().startswith("json"):
+                text = text[4:].lstrip()
+        import json as _json
+        data = _json.loads(text)
+    except Exception as e:
+        log.warning("Associates suggestion failed for %s: %s", lead_id, e)
+        return jsonify({"error": str(e), "candidates": []}), 502
+
+    raw_candidates = data.get("candidates") or []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for c in raw_candidates:
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in existing_names or key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "name":      name,
+            "rationale": (c.get("rationale") or "")[:120],
+            "kind":      c.get("kind") or "associate",
+        })
+        if len(out) >= 8:
+            break
+
+    audit.log_event("expansion_associates_suggested", actor=_actor(),
+                    lead_id=lead_id, count=len(out))
+    return jsonify({
+        "lead_id":    lead_id,
+        "company":    company_name,
+        "candidates": out,
+        "count":      len(out),
+    })
+
+
 @app.route("/api/expansion-targets", methods=["POST"])
 def api_expansion_targets_create():
     body = request.get_json(silent=True) or {}

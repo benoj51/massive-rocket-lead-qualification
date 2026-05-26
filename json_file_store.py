@@ -144,7 +144,45 @@ def load_dict(path: Path) -> dict[str, Any] | None:
 def write_json(path: Path, data: Any) -> None:
     """Write JSON to `path` with the shared lock held. Ensures the
     parent directory exists. Indented + ensure_ascii=False for
-    human-readable output (matches every store's existing format)."""
+    human-readable output (matches every store's existing format).
+
+    v1.0.0cu: ATOMIC write via tempfile + os.replace. Audit caught that
+    a crash mid-write_text() could leave a partially-written JSON file,
+    silently truncating data because the load path catches JSONDecodeError
+    and returns []. Writing to a sibling tempfile then atomically
+    renaming guarantees readers see either the old file or the new one,
+    never a half-written one.
+    """
+    import os
+    import tempfile
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
     with _LOCK:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        # NamedTemporaryFile in the SAME directory as the target so the
+        # os.replace is on the same filesystem (atomicity requirement
+        # on Linux). delete=False so we can rename it ourselves.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=path.name + ".",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    # fsync can fail on some pseudo-filesystems
+                    # (tmpfs in containers); a best-effort flush is
+                    # still better than no flush.
+                    pass
+            os.replace(tmp_name, path)
+        except Exception:
+            # If anything goes wrong, clean up the tempfile so we don't
+            # leave litter behind.
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise

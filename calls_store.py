@@ -77,9 +77,12 @@ def _load_raw(lead_id: str) -> list[dict[str, Any]]:
 
 
 def _write_raw(lead_id: str, rows: list[dict[str, Any]]) -> None:
-    p = _path(lead_id)
-    with _LOCK:
-        p.write_text(json.dumps(rows, indent=2))
+    # v1.0.0cu: atomic write via json_file_store. Audit caught that
+    # a crash during write_text() could corrupt the calls file and the
+    # load path swallows the JSONDecodeError silently, losing every
+    # note for that lead. tempfile + os.replace prevents partial writes.
+    import json_file_store
+    json_file_store.write_json(_path(lead_id), rows)
 
 
 def list_calls(lead_id: str) -> list[dict[str, Any]]:
