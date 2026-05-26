@@ -421,7 +421,14 @@ def api_contacts_apollo_search(lead_id: str):
         out.append({**p, "already_saved": already})
     audit.log_event("contacts_searched", actor=_actor(), lead_id=lead_id,
                     domain=domain_or_url, count=len(out))
-    return jsonify({"candidates": out, "count": len(out)})
+    # v1.0.0cr: include Apollo mode (live / fixtures) so the UI can show
+    # users when they're in fixtures mode (Railway without APOLLO_API_KEY)
+    # and why their search might return nothing for arbitrary domains.
+    try:
+        mode_label = "fixtures" if apollo.ApolloConfig.from_env().use_fixtures else "live"
+    except Exception:
+        mode_label = "unknown"
+    return jsonify({"candidates": out, "count": len(out), "mode": mode_label})
 
 
 @app.route("/api/contacts/<lead_id>", methods=["POST"])
@@ -5532,10 +5539,26 @@ def api_expansion_overview():
     projects = live_projects_store.list_all()
     targets = expansion_targets_store.list_all()
     name_by_lead: dict[str, str] = {}
+    # v1.0.0cs: also build an inverse index (company-name -> lead row)
+    # so we can flag expansion targets that already exist as a Notion
+    # lead. Ben caught that targets pointing at companies already in
+    # Pipeline had no visible link back; users couldn't tell whether
+    # they were duplicating an existing account.
+    lead_by_name: dict[str, dict] = {}
     try:
-        for r in NotionSync().list_pipeline(limit=500):
+        pipeline_rows = NotionSync().list_pipeline(limit=500)
+        for r in pipeline_rows:
             if r.get("id") and r.get("company"):
                 name_by_lead[r["id"]] = r["company"]
+                key = (r.get("company") or "").strip().lower()
+                if key:
+                    lead_by_name[key] = {
+                        "lead_id":     r["id"],
+                        "company":     r.get("company"),
+                        "status":      r.get("status"),
+                        "sales_stage": r.get("sales_stage"),
+                        "owner":       r.get("owner"),
+                    }
     except Exception as e:
         log.warning("Expansion overview: pipeline name lookup failed: %s", e)
 
@@ -5571,6 +5594,18 @@ def api_expansion_overview():
             }
         if lid in anchors_by_lead:
             anchors_by_lead[lid]["targets"].append(t)
+
+    # v1.0.0cs: tag each target with pipeline-match metadata so the UI
+    # can render an "IN PIPELINE" badge + open-lead button when the
+    # target's company matches an existing lead. Case-insensitive
+    # comparison on the target name.
+    for t in targets:
+        key = (t.get("name") or "").strip().lower()
+        if not key:
+            continue
+        match = lead_by_name.get(key)
+        if match:
+            t["pipeline_match"] = match
 
     # Aggregate counts per anchor.
     for anchor in anchors_by_lead.values():
@@ -6039,6 +6074,98 @@ def _iso_to_sortable(iso_str: str | None) -> float:
         return _dt.fromisoformat(str(iso_str).replace("Z", "+00:00")).timestamp()
     except (ValueError, TypeError):
         return 0.0
+
+
+@app.route("/api/dashboard/weekly-report", methods=["GET"])
+def api_weekly_report():
+    """v1.0.0ct: Sunday-night-rolling 7-day manager summary.
+
+    Query params:
+      owner  - filter to a single mr_owner name (optional)
+      window - days (default 7)
+
+    Returns a manager-oriented summary intended to be shown as a card
+    on Dashboard. Reuses dashboard.build_dashboard for the touch
+    counts; adds audit-derived signals (new leads, stage flips,
+    closed won / lost) so a manager sees movement, not just activity.
+    """
+    import dashboard
+    try:
+        window = max(1, min(31, int(request.args.get("window", "7"))))
+    except ValueError:
+        window = 7
+    owner_filter = (request.args.get("owner") or "").strip() or None
+
+    # Pull pipeline rows once - used for both opportunities-generated
+    # (counted by `created` audit events) and the cross-reference.
+    pipeline_rows: list[dict] = []
+    try:
+        pipeline_rows = NotionSync().list_pipeline(limit=500)
+    except (NotionSyncError, ValueError) as e:
+        log.warning("Weekly report: pipeline fetch failed: %s", e)
+
+    # Touch counts + by-type breakdown via existing aggregator.
+    try:
+        db_payload = dashboard.build_dashboard(
+            window_days=window,
+            owner_filter=owner_filter,
+            pipeline_rows=pipeline_rows,
+        )
+    except Exception as e:
+        log.exception("Weekly report: dashboard aggregation failed")
+        return jsonify({"error": str(e)}), 500
+
+    # Audit-derived signals: stage flips, closed-won/lost counts,
+    # opportunities (new leads).
+    from datetime import datetime, timezone, timedelta
+    since_dt = datetime.now(timezone.utc) - timedelta(days=window)
+    since_iso = since_dt.isoformat(timespec="seconds").replace("+00:00", "Z")
+    events = audit.read_events(limit=5000, since=since_iso)
+
+    stage_flips = 0
+    closed_won = 0
+    closed_lost = 0
+    opps_generated = 0
+    loss_reasons: dict[str, int] = {}
+
+    for ev in events:
+        # Owner scope: events stamped with actor or owner field
+        if owner_filter:
+            ev_owner = (ev.get("owner") or ev.get("actor") or "").strip()
+            if ev_owner.lower() != owner_filter.lower():
+                continue
+        et = ev.get("event_type") or ev.get("type") or ""
+        if et in ("lead_created", "lead_promoted", "qualify_save_created"):
+            opps_generated += 1
+        if et in ("lead_stage_changed", "stage_flipped"):
+            stage_flips += 1
+        if et == "lead_closed_won":
+            closed_won += 1
+        if et == "lead_closed_lost":
+            closed_lost += 1
+            r = (ev.get("close_reason") or "").strip()
+            if r:
+                loss_reasons[r] = loss_reasons.get(r, 0) + 1
+
+    top_loss_reasons = sorted(loss_reasons.items(),
+                                key=lambda x: -x[1])[:3]
+
+    return jsonify({
+        "window_days":      window,
+        "owner_filter":     owner_filter,
+        "summary": {
+            "opportunities_generated": opps_generated,
+            "touches":                 (db_payload.get("totals") or {}).get("touches", 0),
+            "partner_notes":           (db_payload.get("totals") or {}).get("partner_notes", 0),
+            "lead_calls":              (db_payload.get("totals") or {}).get("lead_calls", 0),
+            "stage_flips":             stage_flips,
+            "closed_won":              closed_won,
+            "closed_lost":             closed_lost,
+        },
+        "top_loss_reasons": [{"reason": r, "count": c} for r, c in top_loss_reasons],
+        "by_owner":         db_payload.get("by_owner") or [],
+        "generated_at":     datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    })
 
 
 @app.route("/api/dashboard", methods=["GET"])

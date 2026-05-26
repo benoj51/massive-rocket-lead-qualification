@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0cq</title>
+<title>Massive Rocket Lead Qualification · v1.0.0ct</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2203,6 +2203,23 @@
           <option value="">All owners</option>
         </select>
       </div>
+      <!-- v1.0.0ct: weekly manager report card. Sunday-night rolling
+           7 days by default. Manager picks an owner (or All) and sees
+           opportunities generated, touches, stage flips, won/lost
+           counts in one bordered card. Reuses the same owner filter
+           above but pinned to window=7. -->
+      <div id="db-weekly-report" style="margin:18px 0 14px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;background:var(--surface);box-shadow:var(--shadow-xs);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+          <div>
+            <div class="overline" style="margin-bottom:4px;">Weekly Report</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);">Last 7 days</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">For managers - what happened across the team this week.</div>
+          </div>
+          <button id="db-weekly-refresh" class="btn ghost sm" type="button">Refresh</button>
+        </div>
+        <div id="db-weekly-body" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
       <!-- v1.0.0ci: dashboard KPI strip - same .stat-grid look as Home.
            Auto-fills now, big number first, eyebrow above. -->
       <div id="db-kpis" class="stat-grid" style="margin:22px 0 14px;"></div>
@@ -5286,21 +5303,38 @@
         </div>
         <div style="padding:8px 12px;">
           ${a._filtered_targets.length
-            ? a._filtered_targets.map(t => `
-                <div data-exp-target="${escapeAttr(t.id)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;cursor:pointer;background:var(--surface);">
+            ? a._filtered_targets.map(t => {
+                // v1.0.0cs: when a target's company is already in the
+                // pipeline, surface an "IN PIPELINE" badge with the
+                // lead's status/stage + a button that opens that lead
+                // drawer instead of creating a duplicate.
+                const pm = t.pipeline_match || null;
+                const inPipelineBadge = pm
+                  ? `<span style="background:rgba(96,165,250,.12);color:var(--blue);font-size:9px;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;border:1px solid rgba(96,165,250,.30);" title="${escapeAttr((pm.status || '') + (pm.sales_stage ? ' - ' + pm.sales_stage : ''))}">In pipeline${pm.sales_stage ? ' - ' + escapeHtml(pm.sales_stage) : ''}</span>`
+                  : '';
+                const openLeadBtn = pm
+                  ? `<button class="btn ghost sm" type="button" data-exp-open-lead="${escapeAttr(pm.lead_id)}" title="Open ${escapeAttr(pm.company || '')} in Pipeline" style="flex-shrink:0;">View lead -></button>`
+                  : '';
+                return `
+                <div data-exp-target="${escapeAttr(t.id)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;cursor:pointer;background:var(--surface);${pm ? 'border-left:3px solid var(--blue);' : ''}">
                   <div style="min-width:0;flex:1;">
                     <div style="font-size:12px;font-weight:500;">
                       ${escapeHtml(t.name || '-')}
                       ${t.region ? `<span class="muted" style="font-size:10px;margin-left:6px;">${escapeHtml(t.region)}</span>` : ''}
                     </div>
-                    <div style="margin-top:3px;display:flex;gap:8px;align-items:center;">
+                    <div style="margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                       ${statusChip(t.status || 'greenfield')}
-                      <span class="muted" style="font-size:10px;">${(t.contacts || []).length} contact${(t.contacts || []).length === 1 ? '' : 's'}${t.notes ? ' · notes' : ''}</span>
+                      ${inPipelineBadge}
+                      <span class="muted" style="font-size:10px;">${(t.contacts || []).length} contact${(t.contacts || []).length === 1 ? '' : 's'}${t.notes ? ' - notes' : ''}</span>
                     </div>
                   </div>
-                  <button class="btn ghost" type="button" style="padding:3px 10px;font-size:10px;flex-shrink:0;">Open →</button>
+                  <div style="display:flex;gap:6px;flex-shrink:0;align-items:center;">
+                    ${openLeadBtn}
+                    <button class="btn ghost" type="button" style="padding:3px 10px;font-size:10px;">Open -></button>
+                  </div>
                 </div>
-              `).join('')
+              `;
+              }).join('')
             : `<div class="muted" style="font-size:11px;padding:10px;text-align:center;font-style:italic;">No expansion targets yet for this account. Click <strong>+ Add target</strong> to capture one.</div>`}
         </div>
       </div>
@@ -5313,6 +5347,18 @@
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         _addExpansionTarget(b.dataset.expAdd);
+      });
+    });
+    // v1.0.0cs: "View lead" button on targets that match an existing
+    // pipeline lead. Switches to Pipeline view + opens the drawer for
+    // that lead so the user can act on it directly.
+    el.querySelectorAll('[data-exp-open-lead]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const leadId = b.dataset.expOpenLead;
+        if (!leadId) return;
+        switchView('pipeline');
+        setTimeout(() => openLeadDrawer(leadId), 80);
       });
     });
   }
@@ -7858,9 +7904,29 @@
         body: JSON.stringify(reqBody),
       });
       const candidates = data.candidates || [];
+      // v1.0.0cr: better empty-state UX. Was "No Apollo candidates" with
+      // no clue why - users couldn't tell if the lead URL was wrong,
+      // the country filter was too narrow, or Apollo just had nothing.
+      // Now we show the actual domain, the country filter, and the
+      // server-reported mode (live vs fixtures) so Ben can debug.
       if (!candidates.length) {
         resultsEl.style.display = 'block';
-        resultsEl.innerHTML = `<div class="muted" style="font-size:12px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;">No Apollo candidates returned for ${escapeHtml(domain)}. Try the manual add below.</div>`;
+        const filterHint = country
+          ? `<strong>${escapeHtml(country)}</strong> contacts at <strong>${escapeHtml(domain)}</strong>`
+          : `<strong>${escapeHtml(domain)}</strong>`;
+        resultsEl.innerHTML = `
+          <div style="font-size:12px;padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">
+            <div style="color:var(--text);font-weight:600;margin-bottom:6px;">No Apollo candidates returned</div>
+            <div class="muted" style="margin-bottom:8px;">Searched for ${filterHint}. ${data.mode ? `Apollo is in <strong>${escapeHtml(data.mode)}</strong> mode.` : ''}</div>
+            <div class="muted" style="font-size:11px;line-height:1.5;">
+              Common causes:
+              <ul style="margin:4px 0 0 16px;padding:0;">
+                <li>The lead URL doesn't match an org Apollo has indexed (small companies, unusual TLDs)</li>
+                ${country ? `<li>The <strong>${escapeHtml(country)}</strong> filter is too narrow - try Any country</li>` : ''}
+                <li>Apollo's data on this org is thin - try widening titles or use the manual add below</li>
+              </ul>
+            </div>
+          </div>`;
         status.textContent = 'No matches';
         return;
       }
@@ -7869,6 +7935,15 @@
     } catch (e) {
       console.error('[searchApolloContacts]', e);
       toast(`Apollo search failed: ${e.body?.error || e.message}`, 'error');
+      // v1.0.0cr: also surface the error inline, not just as a toast,
+      // so it's visible after the toast auto-dismisses.
+      resultsEl.style.display = 'block';
+      resultsEl.innerHTML = `
+        <div style="font-size:12px;padding:14px;background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.25);border-radius:8px;color:var(--red);">
+          <div style="font-weight:600;margin-bottom:4px;">Apollo search error</div>
+          <div style="color:var(--text);font-size:11px;">${escapeHtml(e.body?.error || e.message || 'Unknown error')}</div>
+          <div class="muted" style="font-size:11px;margin-top:6px;">Domain attempted: <strong>${escapeHtml(domain)}</strong></div>
+        </div>`;
       status.textContent = 'Failed';
     } finally {
       btn.disabled = false;
@@ -11967,6 +12042,9 @@
     // v1.0.0t: Dashboard view wiring.
     $('#nav-dashboard').addEventListener('click', () => { switchView('dashboard'); loadDashboard(); });
     $('#db-refresh').addEventListener('click', loadDashboard);
+    // v1.0.0ct: weekly report refresh button
+    const wrBtn = $('#db-weekly-refresh');
+    if (wrBtn) wrBtn.addEventListener('click', _loadWeeklyReport);
     document.querySelectorAll('[data-db-window]').forEach(b => {
       b.addEventListener('click', () => {
         dashboardState.window = parseInt(b.dataset.dbWindow, 10) || 7;
@@ -13389,10 +13467,64 @@
       // v1.0.0cc: loss-reasons aggregation. Cheap - same pipeline
       // payload the dashboard already pulled.
       _loadLossReasons();
+      // v1.0.0ct: weekly manager report card. Sunday-night rolling
+      // 7-day summary, independent of the dashboard window picker.
+      _loadWeeklyReport();
     } catch (e) {
       $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {
       btn.disabled = false; btn.innerHTML = '↻ Refresh';
+    }
+  }
+
+  // v1.0.0ct: weekly report. Honours the dashboard owner filter
+  // (so manager can scope to one AE). Renders a stat-grid of the
+  // 7-day key numbers + top loss reasons inline.
+  async function _loadWeeklyReport() {
+    const body = $('#db-weekly-body');
+    if (!body) return;
+    body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Computing last 7 days…</div>';
+    try {
+      const qs = new URLSearchParams({ window: '7' });
+      if (dashboardState.owner) qs.set('owner', dashboardState.owner);
+      const data = await jsonFetch(`/api/dashboard/weekly-report?${qs.toString()}`);
+      const s = data.summary || {};
+      const stat = (label, val, hint) => `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;">
+          <div class="overline">${escapeHtml(label)}</div>
+          <div style="font-size:24px;font-weight:600;color:var(--text);line-height:1.2;margin-top:6px;font-variant-numeric:tabular-nums;">${escapeHtml(String(val))}</div>
+          ${hint ? `<div class="muted" style="font-size:11px;margin-top:4px;">${escapeHtml(hint)}</div>` : ''}
+        </div>`;
+      const ownerLabel = data.owner_filter
+        ? `<span class="muted" style="font-size:11px;">Scoped to <strong>${escapeHtml(data.owner_filter)}</strong></span>`
+        : `<span class="muted" style="font-size:11px;">All owners</span>`;
+      const lossRows = (data.top_loss_reasons || []).map(r => `
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);">
+          <span>${escapeHtml(r.reason)}</span>
+          <strong style="font-variant-numeric:tabular-nums;color:var(--red);">${r.count}</strong>
+        </div>`).join('');
+      body.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          ${ownerLabel}
+          <span class="muted" style="font-size:10px;">Generated ${new Date(data.generated_at).toLocaleString()}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;">
+          ${stat('Opportunities', s.opportunities_generated || 0, 'new leads')}
+          ${stat('Touches', s.touches || 0, 'partner + lead activity')}
+          ${stat('Partner notes', s.partner_notes || 0, '')}
+          ${stat('Lead calls', s.lead_calls || 0, '')}
+          ${stat('Stage flips', s.stage_flips || 0, 'movement')}
+          ${stat('Closed won', s.closed_won || 0, '')}
+          ${stat('Closed lost', s.closed_lost || 0, '')}
+        </div>
+        ${lossRows ? `
+          <div style="margin-top:14px;">
+            <div class="overline" style="margin-bottom:6px;">Top loss reasons this week</div>
+            ${lossRows}
+          </div>` : ''}
+      `;
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px;background:rgba(239,68,68,.06);border-radius:6px;">Weekly report failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 

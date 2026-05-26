@@ -5,6 +5,55 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ct] - 2026-05-26 - Weekly manager report + Apollo diagnostics + expansion linking
+
+Three things landed together since they're all Dashboard-area work.
+
+### v1.0.0cr - Apollo search diagnostic UX
+
+Ben hit "Search Apollo for contacts" and got no results; couldn't
+tell whether the lead URL was wrong, the country filter was too
+narrow, or Apollo just had nothing on the domain. The empty-state
+"No matches" message was unhelpful.
+
+Now: empty state shows the actual domain searched, the country
+filter applied (if any), the Apollo mode (live vs fixtures), and
+three concrete causes the user can act on. Errors land inline too
+(not just as a toast that auto-dismisses). Server adds `mode` to
+the response so the UI surfaces it.
+
+### v1.0.0cs - Expansion target links to pipeline lead
+
+When an expansion target's company name matches an existing
+pipeline lead (case-insensitive), the card now shows an "IN
+PIPELINE - <stage>" badge plus a "View lead ->" button that opens
+the lead drawer. Left-edge accent in MR blue. No more duplicate
+expansion work on accounts that are already active leads.
+
+Server: `/api/expansion/overview` builds an inverse name->lead
+index from the pipeline rows it already pulls; attaches a
+`pipeline_match` field per target with lead_id, status, stage,
+owner. Client renders the badge + button conditionally.
+
+### v1.0.0ct - Weekly manager report card
+
+New card on the Dashboard view above the KPI strip. Sunday-night
+rolling 7-day summary, in-app only (no email yet), per-owner
+filter via the existing Dashboard owner picker.
+
+Surfaces:
+- Opportunities (new leads created in window)
+- Touches (partner notes + lead calls)
+- Partner notes, Lead calls (split)
+- Stage flips (audit-derived)
+- Closed Won / Closed Lost counts
+- Top loss reasons in the window
+
+Endpoint `/api/dashboard/weekly-report` reuses
+`dashboard.build_dashboard` for touch counts, then layers
+`audit.read_events(since=...)` for movement signals. Owner filter
+scopes both layers.
+
 ## [1.0.0cq] - 2026-05-26 - Note synthesis fixes (qualify-context + sourcing partner)
 
 Two real bugs Ben caught on live:
