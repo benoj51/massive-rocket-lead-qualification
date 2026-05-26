@@ -5,6 +5,26 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0cy] - 2026-05-26 - Fix AI suggest 500 (NotionSync.get_page shape)
+
+Ben caught: "AI suggestions isn't working."
+
+Root cause: v1.0.0cw's suggest-associates endpoint assumed
+`NotionSync.get_page(lead_id)["company"]` returned a dict like
+`{name, apollo, parent_group}`. It actually returns just the
+company name as a plain string. Calling `.get("name")` on a string
+raised AttributeError and 500'd the endpoint with no user-friendly
+error.
+
+Fix: handle both shapes defensively. Use the company name (which
+is what Claude needs for sister-brand enumeration anyway). Apollo
+description + parent_group remain optional - they're only set
+when the qualify-result dict shape is passed, which doesn't
+happen for stored Notion leads.
+
+Also: log warning on get_page failure so future occurrences land
+in Railway logs.
+
 ## [1.0.0cx] - 2026-05-26 - Add account from Directory
 
 Ben: "Should be able to add an account to the directory as well."

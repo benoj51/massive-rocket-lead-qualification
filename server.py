@@ -5655,18 +5655,33 @@ def api_expansion_suggest_associates(lead_id: str):
     if not ai_summary.is_configured():
         return jsonify({"error": "AI not configured (ANTHROPIC_API_KEY)"}), 503
 
-    # Resolve the anchor's company name + Apollo description.
+    # v1.0.0cw bug fix (v1.0.0cy): NotionSync.get_page() returns
+    # `lead["company"]` as a plain string (the company name), not a
+    # dict. The previous code called `.get("name")` on it which raised
+    # AttributeError and 500'd the endpoint.
+    #
+    # Apollo description + parent_group don't round-trip through Notion
+    # either - they live in qualify-result state, not on the lead row.
+    # So we work with just the company name, which Claude already knows
+    # enough about for sister-brand / subsidiary enumeration.
     try:
         lead = NotionSync().get_page(lead_id)
     except Exception as e:
+        log.warning("Suggest associates: get_page failed for %s: %s", lead_id, e)
         return jsonify({"error": f"Could not load lead: {e}"}), 502
 
-    company = (lead or {}).get("company") or {}
-    company_name = (company.get("name") or "").strip()
+    raw_company = (lead or {}).get("company")
+    if isinstance(raw_company, dict):
+        # Defensive - some code paths may pass the qualify-result shape
+        company_name = (raw_company.get("name") or "").strip()
+        description = (raw_company.get("apollo", {}) or {}).get("description") or ""
+        parent_group = (raw_company.get("parent_group") or "").strip()
+    else:
+        company_name = (raw_company or "").strip()
+        description = ""
+        parent_group = ""
     if not company_name:
         return jsonify({"error": "Lead has no company name"}), 400
-    description = (company.get("apollo", {}) or {}).get("description") or ""
-    parent_group = (company.get("parent_group") or "").strip()
 
     # Build the dedup set: existing pipeline rows + existing targets.
     existing_names: set[str] = {company_name.lower()}
