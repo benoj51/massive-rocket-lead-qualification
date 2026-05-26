@@ -5,7 +5,25 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0cl] — 2026-05-26 — Dialog z-index above drawer
+## [1.0.0cm] - 2026-05-26 - Drop em-dashes (no AI tone)
+
+Per Ben's writing-style memory ("drop em-dashes and the polished
+AI cadence for anything externally-shared"). The platform UI
+counts. Replaced every em-dash (U+2014) with a regular hyphen
+(U+002D) across qualify.html.
+
+533 substitutions. Verified:
+- `grep -c "—" qualify.html` returns 0
+- DOM `innerText.match(/—/g)` returns null on load
+- node --check on both inline scripts: clean
+- Visual surfaces (Home KPIs, drawer header, profile picker)
+  read natural with hyphens
+
+Note: only qualify.html touched. CHANGELOG entries above this one
+still contain em-dashes since that's historical record. Future
+entries (this one onward) avoid them too.
+
+## [1.0.0cl] - 2026-05-26 - Dialog z-index above drawer
 
 Ben caught: when flipping a lead to Closed Lost, the "Closing this
 lead as lost" reason prompt was being clipped on the right side
