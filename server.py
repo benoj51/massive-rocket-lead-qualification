@@ -63,6 +63,7 @@ import live_projects_store
 import lead_summary_store
 import notifications_store
 import packages
+import quarterly_targets_store
 import todos_store
 import pricing
 import pricing_store
@@ -6225,6 +6226,65 @@ def _iso_to_sortable(iso_str: str | None) -> float:
         return _dt.fromisoformat(str(iso_str).replace("Z", "+00:00")).timestamp()
     except (ValueError, TypeError):
         return 0.0
+
+
+# v1.0.0db: Quarterly targets - leadership-visibility numbers.
+# Editable per metric, per quarter, with team total + per-owner split.
+# Defaults to two metrics (opportunities, re_engagements) but the
+# editor lets admins add more (revenue, MEDDPICC-qualified, etc).
+
+@app.route("/api/quarterly-targets", methods=["GET"])
+def api_quarterly_targets_list():
+    """Return every quarter + the default metric specs the UI seeds
+    with on first render."""
+    return jsonify({
+        "quarters":         quarterly_targets_store.list_quarters(),
+        "default_metrics":  quarterly_targets_store.default_metrics(),
+    })
+
+
+@app.route("/api/quarterly-targets", methods=["POST"])
+def api_quarterly_targets_upsert():
+    """Create or update an entire quarter via bulk payload. Used by
+    the Settings editor when persisting a row's worth of edits."""
+    body = request.get_json(silent=True) or {}
+    try:
+        q = quarterly_targets_store.upsert_quarter(body)
+    except quarterly_targets_store.QuarterlyTargetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log_event("quarterly_target_upsert", actor=_actor(),
+                    quarter=q.get("id"))
+    return jsonify({"quarter": q})
+
+
+@app.route("/api/quarterly-targets/<quarter_id>", methods=["PATCH"])
+def api_quarterly_targets_set_cell(quarter_id: str):
+    """Single-cell update. Body: {metric, kind:"plan"|"actual",
+    owner: <name|null>, value: <int>}. Used by inline editors so
+    each input change writes one tiny PATCH instead of a full upsert.
+    """
+    body = request.get_json(silent=True) or {}
+    try:
+        q = quarterly_targets_store.set_cell(
+            quarter_id,
+            body.get("metric") or "",
+            body.get("kind") or "",
+            body.get("owner") or None,
+            body.get("value"),
+        )
+    except quarterly_targets_store.QuarterlyTargetsStoreError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"quarter": q})
+
+
+@app.route("/api/quarterly-targets/<quarter_id>", methods=["DELETE"])
+def api_quarterly_targets_delete(quarter_id: str):
+    ok = quarterly_targets_store.delete_quarter(quarter_id)
+    if not ok:
+        return jsonify({"error": "quarter not found"}), 404
+    audit.log_event("quarterly_target_delete", actor=_actor(),
+                    quarter=quarter_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/dashboard/weekly-report", methods=["GET"])

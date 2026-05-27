@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0da</title>
+<title>Massive Rocket Lead Qualification · v1.0.0db</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2203,6 +2203,27 @@
           <option value="">All owners</option>
         </select>
       </div>
+      <!-- v1.0.0db: quarterly targets vs actuals card. Leadership-
+           visibility numbers - plan vs actual for the two default
+           metrics (opportunities + re-engagements), team + per-owner.
+           Inline-editable from Settings - Targets. -->
+      <div id="db-quarterly-targets" style="margin:18px 0 14px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;background:var(--surface);box-shadow:var(--shadow-xs);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+          <div>
+            <div class="overline" style="margin-bottom:4px;">Quarterly Targets</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);" id="db-qt-title">Loading…</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">Plan vs actual for the team this quarter. Edit in Settings → Targets.</div>
+          </div>
+          <div class="btn-row" style="flex-shrink:0;">
+            <select id="db-qt-quarter" style="width:auto;min-width:140px;padding:6px 10px;font-size:13px;">
+              <option value="">- pick quarter -</option>
+            </select>
+            <button id="db-qt-refresh" class="btn ghost sm" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="db-qt-body" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
       <!-- v1.0.0ct: weekly manager report card. Sunday-night rolling
            7 days by default. Manager picks an owner (or All) and sees
            opportunities generated, touches, stage flips, won/lost
@@ -2589,6 +2610,10 @@
         <button class="tab-btn" type="button" data-settings-tab="enums">
           Dropdowns
         </button>
+        <!-- v1.0.0db: Quarterly targets editor. -->
+        <button class="tab-btn" type="button" data-settings-tab="targets">
+          Targets
+        </button>
       </div>
 
       <!-- USERS TAB -->
@@ -2654,6 +2679,20 @@
           to every form and filter on the next refresh.
         </p>
         <div id="settings-enums-host"></div>
+      </div>
+
+      <!-- v1.0.0db: QUARTERLY TARGETS TAB. Editor for plan + actual
+           numbers per metric per quarter, with team total + per-owner
+           split. Reflects on the Dashboard card. -->
+      <div class="tab-pane" data-settings-pane="targets">
+        <p class="muted" style="margin:0 0 12px;font-size:11px;">
+          Quarterly targets for leadership visibility. Set plan + actual numbers per metric, with team totals and per-owner splits. Numbers save the moment you leave each field.
+        </p>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button id="settings-qt-add" class="btn sm" type="button">+ Add quarter</button>
+          <button id="settings-qt-reload" class="btn ghost sm" type="button">Reload</button>
+        </div>
+        <div id="settings-qt-host" class="muted" style="font-size:12px;">Loading…</div>
       </div>
     </div>
   </section>
@@ -12320,7 +12359,20 @@
         if (target === 'enums') {
           _loadSettingsEnums();
         }
+        // v1.0.0db: Targets tab loads the quarterly targets editor.
+        if (target === 'targets') {
+          _loadSettingsTargets();
+        }
       });
+    });
+    // v1.0.0db: editor button wiring (outside the tab loop so they
+    // bind once on init).
+    const qtAdd = $('#settings-qt-add');
+    if (qtAdd) qtAdd.addEventListener('click', _addQuarterlyTargetRow);
+    const qtReload = $('#settings-qt-reload');
+    if (qtReload) qtReload.addEventListener('click', () => {
+      $('#settings-qt-host').dataset.loaded = '';
+      _loadSettingsTargets();
     });
 
     // v1.0.0co: load + render the global Settings enum editor. The
@@ -12350,6 +12402,195 @@
         host.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
       }
     }
+
+    // v1.0.0db: quarterly targets editor. Renders a card per quarter
+    // with team + per-owner inputs for plan and actual on every metric.
+    // Each <input> writes its own PATCH on blur (debounced via blur
+    // event) so the user just types and tabs through.
+    async function _loadSettingsTargets() {
+      const host = document.querySelector('#settings-qt-host');
+      if (!host) return;
+      if (host.dataset.loaded === '1') return;
+      host.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;">Loading targets…</div>';
+      try {
+        const data = await jsonFetch('/api/quarterly-targets');
+        _renderSettingsTargets(data);
+        host.dataset.loaded = '1';
+      } catch (e) {
+        host.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+
+    function _renderSettingsTargets(data) {
+      const host = document.querySelector('#settings-qt-host');
+      if (!host) return;
+      const quarters = data.quarters || [];
+      const metrics = data.default_metrics || [];
+      // Pull owner list from mr_owners if available; fall back to
+      // whatever owners are already on saved targets.
+      const ownerSet = new Set();
+      quarters.forEach(q => {
+        Object.values(q.metrics || {}).forEach(m => {
+          Object.keys(m.by_owner || {}).forEach(n => ownerSet.add(n));
+        });
+      });
+      // Pull from the live owners dropdown elsewhere in the DOM if
+      // present (e.g. dashboard owner picker).
+      document.querySelectorAll('[data-mr-owner-select] option').forEach(opt => {
+        if (opt.value) ownerSet.add(opt.value);
+      });
+      const owners = Array.from(ownerSet).sort();
+
+      if (!quarters.length) {
+        host.innerHTML = `
+          <div style="padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">
+            <div style="font-size:13px;margin-bottom:4px;color:var(--text);">No quarters yet.</div>
+            <div class="muted" style="font-size:11px;">Click <strong>+ Add quarter</strong> to start tracking plan + actual targets.</div>
+          </div>`;
+        return;
+      }
+
+      // Augment any quarter that's missing a default metric so the
+      // editor always shows both metrics with empty cells.
+      quarters.forEach(q => {
+        q.metrics = q.metrics || {};
+        metrics.forEach(spec => {
+          if (!q.metrics[spec.key]) {
+            q.metrics[spec.key] = { team: {plan:0, actual:0}, by_owner: {} };
+          }
+        });
+      });
+
+      const cellInput = (qid, metricKey, kind, owner, value) => `
+        <input type="number" min="0" step="1"
+               data-qt-cell
+               data-qt-quarter="${escapeAttr(qid)}"
+               data-qt-metric="${escapeAttr(metricKey)}"
+               data-qt-kind="${escapeAttr(kind)}"
+               ${owner ? `data-qt-owner="${escapeAttr(owner)}"` : ''}
+               value="${value || 0}"
+               style="width:72px;padding:5px 8px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;" />
+      `;
+
+      host.innerHTML = quarters.map(q => `
+        <div style="border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:14px;background:var(--surface);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;font-size:16px;">${escapeHtml(q.id)}</h3>
+            <button class="btn ghost sm" type="button"
+                    data-qt-delete="${escapeAttr(q.id)}"
+                    style="color:var(--red);border-color:rgba(239,68,68,.3);">Delete</button>
+          </div>
+          ${metrics.map(spec => {
+            const m = q.metrics[spec.key];
+            return `
+              <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${escapeHtml(spec.label)}
+                  ${spec.hint ? `<span class="muted" style="font-weight:400;margin-left:6px;font-size:11px;">${escapeHtml(spec.hint)}</span>` : ''}
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                  <thead>
+                    <tr style="color:var(--text-muted);">
+                      <th style="text-align:left;padding:4px 6px;font-weight:500;">Owner</th>
+                      <th style="text-align:right;padding:4px 6px;font-weight:500;width:90px;">Plan</th>
+                      <th style="text-align:right;padding:4px 6px;font-weight:500;width:90px;">Actual</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style="border-top:1px solid var(--border);">
+                      <td style="padding:5px 6px;font-weight:600;">Team total</td>
+                      <td style="text-align:right;padding:5px 6px;">${cellInput(q.id, spec.key, 'plan',   null, m.team.plan)}</td>
+                      <td style="text-align:right;padding:5px 6px;">${cellInput(q.id, spec.key, 'actual', null, m.team.actual)}</td>
+                    </tr>
+                    ${owners.map(o => {
+                      const cell = (m.by_owner || {})[o] || {plan:0, actual:0};
+                      return `
+                        <tr style="border-top:1px solid var(--border);">
+                          <td style="padding:5px 6px;color:var(--text-dim);">${escapeHtml(o)}</td>
+                          <td style="text-align:right;padding:5px 6px;">${cellInput(q.id, spec.key, 'plan',   o, cell.plan)}</td>
+                          <td style="text-align:right;padding:5px 6px;">${cellInput(q.id, spec.key, 'actual', o, cell.actual)}</td>
+                        </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>`;
+          }).join('')}
+        </div>
+      `).join('');
+
+      // Wire cell change -> PATCH
+      host.querySelectorAll('[data-qt-cell]').forEach(input => {
+        input.addEventListener('change', async () => {
+          const qid = input.dataset.qtQuarter;
+          const metric = input.dataset.qtMetric;
+          const kind = input.dataset.qtKind;
+          const owner = input.dataset.qtOwner || null;
+          const value = parseInt(input.value, 10) || 0;
+          input.disabled = true;
+          try {
+            await jsonFetch(`/api/quarterly-targets/${encodeURIComponent(qid)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ metric, kind, owner, value }),
+            });
+          } catch (e) {
+            toast(`Save failed: ${e.body?.error || e.message}`, 'error');
+          } finally {
+            input.disabled = false;
+          }
+        });
+      });
+      // Wire delete buttons
+      host.querySelectorAll('[data-qt-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const qid = btn.dataset.qtDelete;
+          if (!await confirmDialog(`Delete the ${qid} quarter? Plan + actual numbers will be permanently removed.`)) return;
+          try {
+            await jsonFetch(`/api/quarterly-targets/${encodeURIComponent(qid)}`, {method: 'DELETE'});
+            toast(`Deleted ${qid}`, 'success');
+            $('#settings-qt-host').dataset.loaded = '';
+            _loadSettingsTargets();
+          } catch (e) { toast(`Delete failed: ${e.body?.error || e.message}`, 'error'); }
+        });
+      });
+    }
+
+    async function _addQuarterlyTargetRow() {
+      const values = await multiFieldDialog({
+        title: 'Add quarter',
+        message: 'Calendar quarters (Q1 = Jan-Mar, etc).',
+        fields: [
+          { key: 'year', label: 'Year', required: true,
+            placeholder: String(new Date().getFullYear()),
+            default: String(new Date().getFullYear()) },
+          { key: 'quarter', label: 'Quarter', type: 'select', required: true,
+            options: [
+              { value: '1', label: 'Q1 (Jan-Mar)' },
+              { value: '2', label: 'Q2 (Apr-Jun)' },
+              { value: '3', label: 'Q3 (Jul-Sep)' },
+              { value: '4', label: 'Q4 (Oct-Dec)' },
+            ],
+            default: String(Math.floor(new Date().getMonth() / 3) + 1) },
+        ],
+        confirmLabel: 'Add quarter',
+      });
+      if (!values) return;
+      try {
+        await jsonFetch('/api/quarterly-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            year: parseInt(values.year, 10),
+            quarter: parseInt(values.quarter, 10),
+          }),
+        });
+        toast(`Added ${values.year}-Q${values.quarter}`, 'success');
+        $('#settings-qt-host').dataset.loaded = '';
+        _loadSettingsTargets();
+      } catch (e) {
+        toast(`Failed: ${e.body?.error || e.message}`, 'error');
+      }
+    }
+
     const addUserBtn = $('#settings-user-add');
     if (addUserBtn) addUserBtn.addEventListener('click', _addSettingsUser);
     // v1.0.0cc: Jeff KB save / reload wiring.
@@ -12374,6 +12615,14 @@
     // v1.0.0ct: weekly report refresh button
     const wrBtn = $('#db-weekly-refresh');
     if (wrBtn) wrBtn.addEventListener('click', _loadWeeklyReport);
+    // v1.0.0db: quarterly targets card wiring
+    const qtRefresh = $('#db-qt-refresh');
+    if (qtRefresh) qtRefresh.addEventListener('click', _loadQuarterlyTargets);
+    const qtPicker = $('#db-qt-quarter');
+    if (qtPicker) qtPicker.addEventListener('change', (e) => {
+      _qtState.selectedId = e.target.value;
+      _renderQuarterlyTargets();
+    });
     document.querySelectorAll('[data-db-window]').forEach(b => {
       b.addEventListener('click', () => {
         dashboardState.window = parseInt(b.dataset.dbWindow, 10) || 7;
@@ -13799,6 +14048,9 @@
       // v1.0.0ct: weekly manager report card. Sunday-night rolling
       // 7-day summary, independent of the dashboard window picker.
       _loadWeeklyReport();
+      // v1.0.0db: quarterly targets card. Loads alongside the weekly
+      // report - both cheap (single GET, no Notion fan-out).
+      _loadQuarterlyTargets();
     } catch (e) {
       $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {
@@ -13857,7 +14109,143 @@
     }
   }
 
-  // v1.0.0aw: fetch + render the per-MR-owner engagement leaderboard.
+  // v1.0.0db: quarterly targets state + loader. Caches the response
+  // so the quarter picker re-renders without a refetch. Defaults to
+  // the current calendar quarter on first paint; user can pick any
+  // saved quarter from the dropdown.
+  const _qtState = { data: null, selectedId: null };
+
+  function _currentQuarterId() {
+    const d = new Date();
+    return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
+  }
+
+  async function _loadQuarterlyTargets() {
+    const body = $('#db-qt-body');
+    if (!body) return;
+    body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Loading targets…</div>';
+    try {
+      const data = await jsonFetch('/api/quarterly-targets');
+      _qtState.data = data;
+      const quarters = data.quarters || [];
+      // Populate the picker
+      const picker = $('#db-qt-quarter');
+      if (picker) {
+        const existing = new Set(quarters.map(q => q.id));
+        const cq = _currentQuarterId();
+        // Include the current quarter even if it has no saved targets
+        // so the user can see "no targets set yet" and prompt the edit.
+        const options = quarters.map(q =>
+          `<option value="${escapeAttr(q.id)}">${escapeHtml(q.id)}</option>`).join('');
+        const currentOpt = !existing.has(cq)
+          ? `<option value="${escapeAttr(cq)}">${escapeHtml(cq)} (no targets yet)</option>`
+          : '';
+        picker.innerHTML = options + currentOpt;
+        // Default selection: previously picked, else current quarter,
+        // else the newest saved.
+        const want = _qtState.selectedId
+          || (existing.has(cq) ? cq : quarters[0]?.id)
+          || cq;
+        picker.value = want;
+        _qtState.selectedId = picker.value;
+      }
+      _renderQuarterlyTargets();
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px;background:rgba(239,68,68,.06);border-radius:6px;">Quarterly targets failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderQuarterlyTargets() {
+    const body = $('#db-qt-body');
+    const title = $('#db-qt-title');
+    if (!body || !_qtState.data) return;
+    const qid = _qtState.selectedId || _currentQuarterId();
+    if (title) title.textContent = qid;
+    const quarter = (_qtState.data.quarters || []).find(q => q.id === qid);
+    const metricSpecs = _qtState.data.default_metrics || [];
+    // Merge in any custom metric keys present on the quarter but not
+    // in the default list (forward-compatible).
+    const seen = new Set(metricSpecs.map(m => m.key));
+    const allSpecs = [...metricSpecs];
+    if (quarter) {
+      Object.keys(quarter.metrics || {}).forEach(k => {
+        if (!seen.has(k)) {
+          allSpecs.push({ key: k, label: k, hint: '' });
+          seen.add(k);
+        }
+      });
+    }
+    if (!quarter) {
+      body.innerHTML = `
+        <div style="padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">
+          <div style="font-size:13px;color:var(--text);margin-bottom:4px;">No targets set for ${escapeHtml(qid)} yet.</div>
+          <div class="muted" style="font-size:11px;margin-bottom:10px;">Set plan + actual numbers in Settings → Targets so leadership can track progress.</div>
+          <button class="btn sm" type="button" data-qt-open-editor>Open Targets editor</button>
+        </div>`;
+    } else {
+      const rows = allSpecs.map(spec => {
+        const m = (quarter.metrics || {})[spec.key] || {
+          team: {plan:0, actual:0}, by_owner: {},
+        };
+        const team = m.team || {plan:0, actual:0};
+        const plan = team.plan || 0;
+        const actual = team.actual || 0;
+        const pct = plan > 0 ? Math.min(Math.round((actual / plan) * 100), 200) : 0;
+        const pctLabel = plan > 0 ? `${pct}%` : '-';
+        const barColour = pct >= 100 ? 'var(--green)' : (pct >= 75 ? 'var(--accent)' : 'var(--yellow)');
+        const ownerEntries = Object.entries(m.by_owner || {});
+        const ownerRows = ownerEntries.map(([name, vals]) => {
+          const op = vals.plan || 0, oa = vals.actual || 0;
+          const opct = op > 0 ? Math.min(Math.round((oa/op)*100), 200) : 0;
+          return `
+            <div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 8px;border-radius:4px;">
+              <span style="color:var(--text-dim);">${escapeHtml(name)}</span>
+              <span style="font-variant-numeric:tabular-nums;color:var(--text);">
+                <strong>${oa}</strong> / ${op}
+                ${op > 0 ? `<span class="muted" style="margin-left:6px;font-size:10px;">${opct}%</span>` : ''}
+              </span>
+            </div>`;
+        }).join('');
+        return `
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
+              <div>
+                <div style="font-size:14px;font-weight:600;color:var(--text);">${escapeHtml(spec.label)}</div>
+                ${spec.hint ? `<div class="muted" style="font-size:11px;margin-top:2px;">${escapeHtml(spec.hint)}</div>` : ''}
+              </div>
+              <div style="font-variant-numeric:tabular-nums;font-size:18px;font-weight:600;color:var(--text);">
+                ${actual} <span class="muted" style="font-size:13px;font-weight:400;">/ ${plan}</span>
+                <span style="font-size:12px;color:${barColour};margin-left:6px;">${pctLabel}</span>
+              </div>
+            </div>
+            <div style="height:6px;background:var(--surface);border-radius:3px;overflow:hidden;margin-bottom:8px;">
+              <div style="height:100%;width:${Math.min(pct, 100)}%;background:${barColour};transition:width .25s;"></div>
+            </div>
+            ${ownerEntries.length ? `
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">Per owner (${ownerEntries.length})</summary>
+                <div style="margin-top:6px;">${ownerRows}</div>
+              </details>` : ''}
+          </div>`;
+      }).join('');
+      body.innerHTML = `
+        ${rows || '<div class="muted" style="font-size:12px;">No metrics yet for this quarter.</div>'}
+        <div style="text-align:right;margin-top:6px;">
+          <button class="btn ghost sm" type="button" data-qt-open-editor>Edit in Settings →</button>
+        </div>`;
+    }
+    body.querySelectorAll('[data-qt-open-editor]').forEach(b => {
+      b.addEventListener('click', () => {
+        switchView('settings');
+        loadSettings();
+        // Activate the Targets tab
+        setTimeout(() => {
+          const tab = document.querySelector('[data-settings-tab="targets"]');
+          if (tab) tab.click();
+        }, 120);
+      });
+    });
+  }
   // Lives below the existing dashboard tables. Click any owner row to
   // narrow the Dashboard's owner filter so the rest of the page focuses
   // on that AE's book.

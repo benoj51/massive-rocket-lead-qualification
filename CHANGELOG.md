@@ -5,6 +5,60 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0db] - 2026-05-26 - Quarterly targets (plan vs actual, team + per-owner)
+
+Ben: "Here are our quarterly targets (actuals and plan) as a team
+for engagements and opportunities. Bake this in to the dashboard
+for leadership visibility to see and work around. Need a way to
+edit this as we go along as well."
+
+Clarified: 'engagement' = re-engagement (winning back lost / nurture
+accounts via outreach), NOT live project or signed deal. So the
+two default metrics are:
+
+- **opportunities** - new qualified leads in the quarter
+- **re_engagements** - accounts won back from Closed Lost / Nurture
+
+Both editable per quarter, with team total + per-owner split. The
+editor also accepts arbitrary metric keys (revenue, etc) so admins
+can extend without code changes.
+
+### New module: quarterly_targets_store.py
+
+- Calendar-quarter id convention: `YYYY-Qn` (e.g. `2026-Q2`)
+- Shape: `{quarters: [{id, year, quarter, metrics: {<key>: {team:
+  {plan, actual}, by_owner: {<name>: {plan, actual}}}}}]}`
+- Atomic writes via json_file_store
+- Single-cell PATCH path for inline editor responsiveness
+- 14 store tests + 5 endpoint tests = 19 new tests
+
+### Endpoints
+
+- `GET  /api/quarterly-targets` - list quarters + default metric specs
+- `POST /api/quarterly-targets` - upsert a whole quarter
+- `PATCH /api/quarterly-targets/<qid>` - one-cell update
+  `{metric, kind, owner|null, value}`
+- `DELETE /api/quarterly-targets/<qid>` - remove
+
+### UI
+
+**Dashboard:** new "Quarterly Targets" card above the weekly
+report. Defaults to current calendar quarter with a picker for
+other quarters. Each metric shows team plan/actual + a percent-of-
+plan progress bar (green ≥100, accent ≥75, yellow below), with a
+collapsible per-owner breakdown. "No targets yet" empty state
+links straight to the Settings editor.
+
+**Settings → Targets tab:** one card per quarter, table rows for
+Team total + every known owner (pulled from mr_owners + any saved
+target owners). Each cell is a number input that PATCHes on blur -
+type, tab, done. "+ Add quarter" modal uses year + quarter picker.
+Delete confirms.
+
+### Verified
+
+- 1180 tests pass (+19 new), server clean, node --check clean
+
 ## [1.0.0da] - 2026-05-26 - Show owner on Expansion page
 
 Ben: "Need to make sure who the accounts are assigned to on the
