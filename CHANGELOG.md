@@ -5,6 +5,50 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dc] - 2026-05-26 - Q2 2026 seed + extended target metrics
+
+Ben dropped the full Q2 2026 leadership-doc data: 28 metrics across
+5 functions (Marketing / Partnerships / Business Development /
+Account Management / Big Bets), per-function plan + actual, plus
+named QL accounts (GoPuff Bevmo, KFC US, Sainsburys, KFC UK, etc.).
+
+### Changes
+
+1. **`_DEFAULT_METRICS` extended** to 33 entries covering the
+   leadership framework: Pipeline (QLs + Warm Intros + Positive
+   Actions), Engagement signals, Conversations, Content, Vendor
+   meetings, Sequences, Expansion. Legacy `opportunities` and
+   `re_engagements` kept so older quarters still render with nice
+   labels.
+
+2. **`scripts/seed_q2_2026_targets.py`** - cell-by-cell PATCH script
+   that loads the data via the existing API. Dry-run + idempotent.
+   Run:
+   ```
+   APP_URL=https://web-production-b7cb5.up.railway.app \
+   APP_AUTH_TOKEN=<token> \
+   python3 scripts/seed_q2_2026_targets.py
+   ```
+
+3. **`knowledge/q2_2026_targets.md`** - human-readable snapshot
+   preserving the named QL accounts (which don't fit the counter-
+   only store) as audit trail. Includes parser caveats listing the
+   defaults I picked where the leadership doc was column-ambiguous.
+
+### Parser interpretations (verify after seed)
+
+The leadership doc's layout was function-as-column. Where columns
+were unambiguous I followed them. Where ambiguous I defaulted:
+
+- "Other" column in actuals = "Big Bets" column in plan
+- Engagement signals + Conversations + Content → Marketing
+- Vendor meetings (Braze/HT/Snowflake/Other) → Partnerships
+- Sequences + Expansion → Account Management
+- City x City Conversations → both AM (50) and Big Bets (50)
+
+Anything wrong, fix via Settings → Targets - each cell saves on
+blur.
+
 ## [1.0.0db] - 2026-05-26 - Quarterly targets (plan vs actual, team + per-owner)
 
 Ben: "Here are our quarterly targets (actuals and plan) as a team

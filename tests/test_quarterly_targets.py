@@ -35,6 +35,17 @@ class QuarterlyTargetsStoreTests(unittest.TestCase):
         self.assertIn("opportunities", keys)
         self.assertIn("re_engagements", keys)
 
+    def test_default_metrics_covers_q2_2026_framework(self):
+        """v1.0.0dc - default list extended with the leadership-doc
+        metrics so the dashboard renders nice labels out of the box."""
+        keys = {m["key"] for m in self.qt.default_metrics()}
+        # Spot-check a metric from each group
+        for k in ("qls_prioritised", "warm_intros_prioritised",
+                   "email_opens", "ae_conversations",
+                   "case_studies", "meetings_braze",
+                   "sequences_winback", "expansion_discovery_calls"):
+            self.assertIn(k, keys)
+
     def test_upsert_quarter_minimal(self):
         q = self.qt.upsert_quarter({
             "year": 2026, "quarter": 2,
@@ -137,10 +148,15 @@ class QuarterlyTargetsEndpointsTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.get_json()
         self.assertEqual(body["quarters"], [])
-        # Default metrics surfaced for the UI seed.
-        self.assertEqual(
-            [m["key"] for m in body["default_metrics"]],
-            ["opportunities", "re_engagements"])
+        # v1.0.0dc: default_metrics now ships the full Q2 2026
+        # leadership framework. Assert presence of both the legacy
+        # keys and a sample of the framework rather than pinning
+        # the exact list (which will change as the framework evolves).
+        keys = {m["key"] for m in body["default_metrics"]}
+        self.assertIn("opportunities", keys)
+        self.assertIn("re_engagements", keys)
+        self.assertIn("qls_prioritised", keys)
+        self.assertIn("meetings_braze", keys)
 
     def test_upsert_via_post(self):
         r = self.client.post("/api/quarterly-targets", json={

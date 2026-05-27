@@ -56,14 +56,79 @@ import json_file_store
 _DEFAULT_PATH = Path(__file__).parent / "cache" / "quarterly_targets.json"
 _LOCK = threading.Lock()
 
-# Two default metrics shown in the UI on first render. The editor lets
-# admins add more (revenue, MEDDPICC-qualified, etc) without changing
-# code - any key added under metrics flows through to the Dashboard.
+# v1.0.0dc: full Q2 2026 metric framework, per Ben's leadership doc.
+# Grouped logically (Pipeline / Engagement / Content / Vendor / Sequences
+# / Expansion). The UI auto-extends with any custom key not in this list
+# so admins can still add ad-hoc metrics via the editor.
 _DEFAULT_METRICS = [
-    {"key": "opportunities", "label": "Opportunities",
-     "hint":  "New qualified leads in the quarter."},
-    {"key": "re_engagements", "label": "Re-engagements",
-     "hint": "Accounts won back from Closed Lost / Nurture via outreach."},
+    # --- Pipeline (per-function: Marketing / Partnerships / BD / AM) ---
+    {"key": "qls_prioritised", "label": "QLs from Prioritised Logos",
+     "hint":  "Qualified leads inside the ICP / target list."},
+    {"key": "qls_non_prioritised", "label": "QLs from Non-Prioritised Logos",
+     "hint":  "Qualified leads outside the priority list."},
+    {"key": "positive_actions_prioritised",
+     "label": "Positive Actions - Prioritised Logos",
+     "hint":  "Meaningful engagement signals from priority logos."},
+    {"key": "positive_actions_non_prioritised",
+     "label": "Positive Actions - Non-Prioritised Logos",
+     "hint":  "Meaningful engagement signals from non-priority logos."},
+    {"key": "warm_intros_prioritised",
+     "label": "Warm Introductions to Prioritised Logos",
+     "hint":  "Referral-driven intros to priority accounts."},
+    {"key": "warm_intros_non_prioritised",
+     "label": "Warm Introductions to Non-Prioritised Logos",
+     "hint":  "Referral-driven intros to non-priority accounts."},
+    # --- Engagement (Marketing) ---
+    {"key": "email_opens", "label": "Email Opens",
+     "hint":  "Total opens across nurture + outbound."},
+    {"key": "social_engagement", "label": "Social Engagement",
+     "hint":  "Likes / comments / reshares across LinkedIn."},
+    {"key": "connection_requests_accepted",
+     "label": "Connection Requests Accepted"},
+    {"key": "content_views", "label": "Content Views",
+     "hint":  "Blog + case study + asset page views."},
+    # --- Conversations ---
+    {"key": "ae_conversations", "label": "AE Conversations"},
+    {"key": "csm_conversations", "label": "CSM Conversations"},
+    {"key": "outbound_stakeholder_conversations",
+     "label": "Outbound Stakeholder Conversations",
+     "hint":  "Conversations with target-account stakeholders."},
+    {"key": "referral_conversations",
+     "label": "Referral / Intro Conversations",
+     "hint":  "Via network or existing clients."},
+    # --- Content ---
+    {"key": "case_studies", "label": "Case Studies / Customer Stories"},
+    {"key": "linkedin_posts", "label": "LinkedIn Posts"},
+    {"key": "blog_posts", "label": "Blog Posts"},
+    {"key": "customer_newsletters", "label": "Customer Newsletters"},
+    {"key": "partner_newsletters", "label": "Partner Newsletters"},
+    {"key": "webinars", "label": "Webinars"},
+    # --- Vendor / partner meetings ---
+    {"key": "meetings_braze", "label": "Meetings with Braze"},
+    {"key": "meetings_hightouch", "label": "Meetings with Hightouch"},
+    {"key": "meetings_snowflake", "label": "Meetings with Snowflake"},
+    {"key": "meetings_other_vendors", "label": "Meetings with Other Vendors"},
+    # --- Sequences (Account Management) ---
+    {"key": "sequences_expand_new",
+     "label": "Sequences per Expanded/New Logo"},
+    {"key": "sequences_winback",
+     "label": "Sequence per Winback / Re-Engagement Logo"},
+    {"key": "proactive_engagement_winback",
+     "label": "Proactive Engagement per Winback / Re-Engagement Logo"},
+    # --- Expansion (AM + Big Bets) ---
+    {"key": "city_x_city_conversations",
+     "label": "Prospect / Client Conversations at City x City"},
+    {"key": "expansion_strategy_sessions",
+     "label": "Expansion Strategy Sessions"},
+    {"key": "multithreading_meetings",
+     "label": "New Stakeholder / Multithreading Meetings"},
+    {"key": "expansion_discovery_calls",
+     "label": "Expansion Discovery Calls"},
+    # --- Legacy v1.0.0db defaults, kept for back-compat ---
+    {"key": "opportunities", "label": "Opportunities (legacy)",
+     "hint":  "Pre-v1.0.0dc default - kept so older quarters still render."},
+    {"key": "re_engagements", "label": "Re-engagements (legacy)",
+     "hint":  "Pre-v1.0.0dc default - kept so older quarters still render."},
 ]
 
 
