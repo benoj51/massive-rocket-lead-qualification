@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dc</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dd</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2203,6 +2203,29 @@
           <option value="">All owners</option>
         </select>
       </div>
+      <!-- v1.0.0dd: key stakeholder coverage. Manually-flagged
+           partner contacts touched within the engagement window.
+           Sits above the quarterly targets so leadership sees the
+           hygiene number first. -->
+      <div id="db-stakeholder-coverage" style="margin:18px 0 14px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;background:var(--surface);box-shadow:var(--shadow-xs);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+          <div>
+            <div class="overline" style="margin-bottom:4px;">Key Stakeholder Coverage</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);">Partner contacts touched in the last <span id="db-sc-window">30</span> days</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">Flag contacts as "Key" in the Partners view. Window adjusts the cadence below.</div>
+          </div>
+          <div class="btn-row" style="flex-shrink:0;align-items:center;">
+            <select id="db-sc-window-select" style="width:auto;min-width:120px;padding:6px 10px;font-size:13px;">
+              <option value="30">30 days</option>
+              <option value="60">60 days</option>
+              <option value="90">90 days</option>
+            </select>
+            <button id="db-sc-refresh" class="btn ghost sm" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="db-sc-body" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
       <!-- v1.0.0db: quarterly targets vs actuals card. Leadership-
            visibility numbers - plan vs actual for the two default
            metrics (opportunities + re-engagements), team + per-owner.
@@ -12623,6 +12646,11 @@
       _qtState.selectedId = e.target.value;
       _renderQuarterlyTargets();
     });
+    // v1.0.0dd: stakeholder coverage card wiring
+    const scRefresh = $('#db-sc-refresh');
+    if (scRefresh) scRefresh.addEventListener('click', _loadStakeholderCoverage);
+    const scWin = $('#db-sc-window-select');
+    if (scWin) scWin.addEventListener('change', _loadStakeholderCoverage);
     document.querySelectorAll('[data-db-window]').forEach(b => {
       b.addEventListener('click', () => {
         dashboardState.window = parseInt(b.dataset.dbWindow, 10) || 7;
@@ -14051,6 +14079,10 @@
       // v1.0.0db: quarterly targets card. Loads alongside the weekly
       // report - both cheap (single GET, no Notion fan-out).
       _loadQuarterlyTargets();
+      // v1.0.0dd: key stakeholder coverage. Cheap (one GET, no
+      // Notion fan-out), updates the actual % live as the team
+      // flags / touches contacts.
+      _loadStakeholderCoverage();
     } catch (e) {
       $('#db-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Dashboard failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {
@@ -14106,6 +14138,90 @@
       `;
     } catch (e) {
       body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px;background:rgba(239,68,68,.06);border-radius:6px;">Weekly report failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  // v1.0.0dd: key stakeholder coverage card. Cheap (one GET, no
+  // Notion). Window picker re-fetches with the new value.
+  const _scState = { window: 30 };
+  async function _loadStakeholderCoverage() {
+    const body = $('#db-sc-body');
+    const winSel = $('#db-sc-window-select');
+    if (!body) return;
+    const win = parseInt(winSel?.value, 10) || 30;
+    _scState.window = win;
+    $('#db-sc-window').textContent = String(win);
+    body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Computing coverage…</div>';
+    try {
+      const data = await jsonFetch(`/api/metrics/stakeholder-coverage?window=${win}`);
+      const t = data.totals || {};
+      const pct = t.coverage_pct || 0;
+      const barColour = pct >= 75 ? 'var(--green)' : (pct >= 50 ? 'var(--accent)' : 'var(--red)');
+      const headline = (t.key_total || 0) === 0
+        ? `<div style="padding:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;text-align:center;">
+             <div style="font-size:13px;color:var(--text);margin-bottom:4px;">No key stakeholders flagged yet.</div>
+             <div class="muted" style="font-size:11px;">Open a partner -> tick <strong>Key</strong> on contacts who matter most to the relationship.</div>
+           </div>`
+        : `
+          <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
+            <div style="font-size:36px;font-weight:600;color:${barColour};line-height:1;font-variant-numeric:tabular-nums;">${pct}%</div>
+            <div class="muted" style="font-size:13px;">
+              <strong>${t.covered || 0}</strong> covered ·
+              <strong style="color:var(--yellow);">${t.stale || 0}</strong> stale ·
+              <strong style="color:var(--text-muted);">${t.never_touched || 0}</strong> never touched
+              <span style="margin-left:6px;color:var(--text-muted);">of ${t.key_total} key contacts</span>
+            </div>
+          </div>
+          <div style="height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;margin-bottom:14px;">
+            <div style="height:100%;width:${Math.min(pct,100)}%;background:${barColour};transition:width .25s;"></div>
+          </div>`;
+
+      const partners = data.by_partner || [];
+      const partnerRows = partners.map(p => {
+        const ppct = p.coverage_pct;
+        const pBar = ppct >= 75 ? 'var(--green)' : (ppct >= 50 ? 'var(--accent)' : 'var(--red)');
+        return `
+          <div style="display:grid;grid-template-columns:1fr 80px 90px;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;">
+            <button class="btn ghost sm" type="button" data-sc-partner="${escapeAttr(p.partner_id)}" style="text-align:left;justify-self:start;">${escapeHtml(p.partner_name)}</button>
+            <span style="color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:right;">
+              ${p.covered}/${p.key_total}
+              ${p.stale ? `<span style="color:var(--yellow);" title="stale"> +${p.stale}s</span>` : ''}
+              ${p.never_touched ? `<span style="color:var(--text-muted);" title="never touched"> +${p.never_touched}n</span>` : ''}
+            </span>
+            <span style="font-variant-numeric:tabular-nums;color:${pBar};font-weight:600;text-align:right;">${ppct}%</span>
+          </div>`;
+      }).join('');
+      const partnerSection = partners.length
+        ? `<div style="margin-top:10px;">
+             <div class="overline" style="margin-bottom:6px;">By partner (worst first)</div>
+             ${partnerRows}
+           </div>`
+        : '';
+
+      const stale = (data.stale_contacts || []).slice(0, 5);
+      const staleSection = stale.length
+        ? `<details style="margin-top:14px;">
+             <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">${data.stale_contacts.length} stale contact${data.stale_contacts.length === 1 ? '' : 's'} need a touch</summary>
+             <div style="margin-top:8px;">
+               ${stale.map(c => `
+                 <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 8px;border-bottom:1px solid var(--border);">
+                   <span><strong>${escapeHtml(c.name)}</strong> <span class="muted">${escapeHtml(c.title || '')} · ${escapeHtml(c.partner_name)}</span></span>
+                   <span class="muted" style="font-size:11px;">last ${escapeHtml((c.last_touched_at || '').slice(0, 10))}</span>
+                 </div>`).join('')}
+             </div>
+           </details>`
+        : '';
+
+      body.innerHTML = headline + partnerSection + staleSection;
+      // Click a partner name -> jump to that partner detail
+      body.querySelectorAll('[data-sc-partner]').forEach(b => {
+        b.addEventListener('click', () => {
+          switchView('partners');
+          setTimeout(() => openPartnerDetail(b.dataset.scPartner), 80);
+        });
+      });
+    } catch (e) {
+      body.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px;background:rgba(239,68,68,.06);border-radius:6px;">Coverage failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
   }
 
@@ -16238,6 +16354,7 @@
             <!-- v1.0.0ax: select-all column. The header checkbox sets
                  the select state of every visible row. -->
             <th style="width:24px;"><input type="checkbox" data-bulk-select-all title="Select all visible" /></th>
+            <th style="width:32px;" title="Key stakeholder - drives the Dashboard coverage metric">Key</th>
             <th>Name</th>
             <th>Title</th>
             <th>Tier</th>
@@ -16256,6 +16373,13 @@
           ${filtered.map(c => `
             <tr data-contact-row="${escapeAttr(c.id)}" ${c.status !== 'active' ? 'style="opacity:.6;"' : (c.overdue ? 'style="background:rgba(239,68,68,.04);"' : '')}>
               <td><input type="checkbox" data-bulk-row="${escapeAttr(c.id)}" ${sel.has(c.id) ? 'checked' : ''} /></td>
+              <td style="text-align:center;">
+                <button type="button" data-contact-key="${escapeAttr(c.id)}"
+                        title="${c.is_key_stakeholder ? 'Key stakeholder - click to unmark' : 'Mark as key stakeholder'}"
+                        style="background:none;border:0;cursor:pointer;padding:2px;font-size:16px;line-height:1;color:${c.is_key_stakeholder ? 'var(--accent)' : 'var(--text-muted)'};">
+                  ${c.is_key_stakeholder ? '★' : '☆'}
+                </button>
+              </td>
               <td><strong>${escapeHtml(c.name || '-')}</strong>${c.email ? `<br><span class="muted" style="font-size:10px;">${escapeHtml(c.email)}</span>` : ''}<br><span style="font-size:10px;">${linkedinCell(c.linkedin_url, c.name, partner.name)}</span></td>
               <td>${escapeHtml(c.title || '-')}</td>
               <!-- v1.0.0bt: inline-editable dropdowns. PATCH on change,
@@ -16311,6 +16435,37 @@
           await openPartnerDetail(partner.id);
           await refreshOverdue();
         } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      });
+    });
+    // v1.0.0dd: Key stakeholder star toggle. Optimistic UI update +
+    // PATCH; revert on failure. Star color + glyph flip immediately.
+    wrap.querySelectorAll('[data-contact-key]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const id = b.dataset.contactKey;
+        const contact = (partner.contacts || []).find(x => x.id === id);
+        if (!contact) return;
+        const next = !contact.is_key_stakeholder;
+        // Optimistic UI
+        b.textContent = next ? '★' : '☆';
+        b.style.color = next ? 'var(--accent)' : 'var(--text-muted)';
+        b.title = next ? 'Key stakeholder - click to unmark' : 'Mark as key stakeholder';
+        try {
+          await jsonFetch(
+            `/api/partners/${encodeURIComponent(partner.id)}/contacts/${encodeURIComponent(id)}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_key_stakeholder: next }),
+            }
+          );
+          contact.is_key_stakeholder = next;
+          toast(next ? 'Marked as key stakeholder' : 'Unmarked key stakeholder', 'success');
+        } catch (e) {
+          // Revert
+          b.textContent = next ? '☆' : '★';
+          b.style.color = next ? 'var(--text-muted)' : 'var(--accent)';
+          toast(`Failed: ${e.body?.error || e.message}`, 'error');
+        }
       });
     });
     wrap.querySelectorAll('[data-contact-edit]').forEach(b => {

@@ -124,6 +124,13 @@ _DEFAULT_METRICS = [
      "label": "New Stakeholder / Multithreading Meetings"},
     {"key": "expansion_discovery_calls",
      "label": "Expansion Discovery Calls"},
+    # v1.0.0dd: key stakeholder coverage rolls up from
+    # /api/metrics/stakeholder-coverage. Set the plan here, the
+    # actual % displays alongside on the Dashboard.
+    {"key": "partner_stakeholder_coverage_pct",
+     "label": "Partner Stakeholder Coverage %",
+     "hint":  "Share of key partner contacts touched in the last 30 days. "
+              "Actual auto-computed by the platform; set the plan here."},
     # --- Legacy v1.0.0db defaults, kept for back-compat ---
     {"key": "opportunities", "label": "Opportunities (legacy)",
      "hint":  "Pre-v1.0.0dc default - kept so older quarters still render."},

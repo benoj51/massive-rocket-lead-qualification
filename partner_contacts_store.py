@@ -214,9 +214,26 @@ def _normalise(partner_id: str, contact: dict[str, Any]) -> dict[str, Any]:
         "tags": [str(t).strip() for t in (contact.get("tags") or []) if str(t).strip()],
         "cadence_days": cadence_days,
         "last_touched_at": contact.get("last_touched_at") or None,
+        # v1.0.0dd: is_key_stakeholder - manually-toggled flag the
+        # partnerships team uses to mark which contacts at each
+        # partner are critical relationships to keep warm. Drives the
+        # "Key stakeholder coverage" metric on the Dashboard.
+        # Accepts truthy/falsy from the API (JS bools, "true" strings,
+        # 1/0, etc); persists as a clean bool.
+        "is_key_stakeholder": _coerce_bool(contact.get("is_key_stakeholder")),
         "added_at": contact.get("added_at") or _now(),
         "updated_at": _now(),
     }
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Truthy-string + JS-bool tolerant boolean coercion."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    s = str(value).strip().lower()
+    return s in ("true", "1", "yes", "on", "y", "t")
 
 
 # v1.0.0cg: cadence logic moved to contact_cadence.py — was a

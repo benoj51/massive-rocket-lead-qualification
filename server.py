@@ -2839,6 +2839,9 @@ _PARTNER_CONTACT_PATCH_FIELDS = frozenset({
     "country", "industries", "mr_owner", "reports_to_id",
     "status", "partner_sentiment", "tier", "seniority",
     "tags", "cadence_days", "last_touched_at",
+    # v1.0.0dd: key stakeholder flag - drives the partnership-team
+    # coverage metric on the Dashboard.
+    "is_key_stakeholder",
 })
 
 
@@ -6226,6 +6229,26 @@ def _iso_to_sortable(iso_str: str | None) -> float:
         return _dt.fromisoformat(str(iso_str).replace("Z", "+00:00")).timestamp()
     except (ValueError, TypeError):
         return 0.0
+
+
+# v1.0.0dd: Key stakeholder coverage metric. Surfaces whether the
+# partnership team has identified + recently engaged the critical
+# contacts at each partner. Driven by the is_key_stakeholder flag
+# on partner contacts (manually toggled per the team's call on
+# who counts as key).
+
+@app.route("/api/metrics/stakeholder-coverage", methods=["GET"])
+def api_stakeholder_coverage():
+    import stakeholder_coverage
+    try:
+        window = max(1, min(365, int(request.args.get("window", "30"))))
+    except ValueError:
+        window = 30
+    try:
+        return jsonify(stakeholder_coverage.compute(window_days=window))
+    except Exception as e:
+        log.exception("Stakeholder coverage failed")
+        return jsonify({"error": str(e)}), 500
 
 
 # v1.0.0db: Quarterly targets - leadership-visibility numbers.

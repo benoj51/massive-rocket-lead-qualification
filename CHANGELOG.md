@@ -5,6 +5,66 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dd] - 2026-05-26 - Key stakeholder coverage metric
+
+Ben: "I'd like coverage across key stakeholders as a metric. Will
+need to identify who are the key stakeholders with the team."
+
+Crucial clarification: key stakeholders = **partnership team's
+contacts** (Marina at Braze, Jamie at Hightouch, etc.), not buyer-
+side MEDDPICC roles. And "covered" = identified AND engaged
+recently.
+
+### Lean v1
+
+- New `is_key_stakeholder: bool` field on `partner_contacts_store`.
+  Manually toggled per the team's call on who counts as key.
+- `_PARTNER_CONTACT_PATCH_FIELDS` extended so PATCH accepts the flag.
+- Truthy-tolerant `_coerce_bool` helper (accepts JS true, "true",
+  "1", "yes", 1, etc).
+
+### stakeholder_coverage.py (new module)
+
+Single `compute(window_days=30)` entry point. Iterates partners +
+their contacts, filters to `is_key_stakeholder=True` and excludes
+`status=left`. Buckets each into covered / stale / never_touched
+based on `last_touched_at`. Returns:
+
+- totals (`coverage_pct`, `key_total`, etc.)
+- by_partner array sorted worst-coverage-first (action priority)
+- stale_contacts + never_touched action lists (capped at 50 each)
+
+### Endpoint
+
+`GET /api/metrics/stakeholder-coverage?window=30` - window clamps
+to 1..365.
+
+### UI
+
+**Partner contacts table:** new `Key` column with a star icon
+(★/☆). Click toggles + PATCHes optimistically. Yellow filled star
+when key, grey outline when not.
+
+**Dashboard card:** new "Key Stakeholder Coverage" card above
+Quarterly Targets. Shows:
+- Big % with bar (green ≥75, accent ≥50, red below)
+- Covered / stale / never-touched counts
+- Per-partner breakdown sorted worst-first, click partner name to
+  jump to that partner detail
+- Collapsible "N stale contacts need a touch" action list
+
+Window picker: 30 / 60 / 90 days.
+
+### Quarterly target metric
+
+New default key `partner_stakeholder_coverage_pct` ships with the
+default metrics list. Plan-side is editable in Settings -> Targets;
+actual rolls up live from the coverage endpoint.
+
+### Verified
+
+1191 tests pass (+10 new). Server clean. JS clean.
+
 ## [1.0.0dc] - 2026-05-26 - Q2 2026 seed + extended target metrics
 
 Ben dropped the full Q2 2026 leadership-doc data: 28 metrics across
