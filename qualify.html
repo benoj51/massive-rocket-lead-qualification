@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0de</title>
+<title>Massive Rocket Lead Qualification · v1.0.0df</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -5541,6 +5541,214 @@
   // v1.0.0cw: AI-suggested associated accounts. Shows a modal with
   // candidates Claude identified (sister brands, subsidiaries,
   // regional units) for one-click add-as-target.
+  // v1.0.0df: Outreach draft modal. Opens with channel + tone
+  // pickers, optional context box, generate button. After draft
+  // returns: subject (email only), body, copy buttons, mailto /
+  // LinkedIn open buttons, save-as-note action.
+  //
+  // opts = {kind, partner_id, contact_id, display_name, partner_name,
+  //         email, linkedin_url, lead_id?, account_name?}
+  function _openOutreachModal(opts) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;';
+    // Default channel: email if we have one, else linkedin if we have a
+    // profile, else slack.
+    const initialChannel = opts.email ? 'email'
+                            : (opts.linkedin_url ? 'linkedin' : 'slack');
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:640px;width:100%;box-shadow:var(--shadow-xl);overflow:hidden;display:flex;flex-direction:column;max-height:88vh;">
+        <header style="padding:16px 20px;border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+            <div>
+              <h3 style="margin:0;font-size:16px;font-weight:600;">Draft outreach</h3>
+              <div class="muted" style="margin-top:2px;font-size:12px;">To <strong>${escapeHtml(opts.display_name || '?')}</strong>${opts.partner_name ? ` at ${escapeHtml(opts.partner_name)}` : ''}</div>
+            </div>
+            <button class="btn ghost sm" type="button" data-out-cancel>Close</button>
+          </div>
+        </header>
+        <div style="padding:14px 20px;display:grid;gap:14px;overflow-y:auto;">
+          <div>
+            <div class="overline" style="margin-bottom:6px;">Channel</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="chip ${initialChannel === 'email' ? 'active' : ''}" data-out-channel="email" type="button"${opts.email ? '' : ' disabled title="No email on this contact"'}>Email${opts.email ? '' : ' (no address)'}</button>
+              <button class="chip ${initialChannel === 'linkedin' ? 'active' : ''}" data-out-channel="linkedin" type="button">LinkedIn${opts.linkedin_url ? '' : ' (no profile)'}</button>
+              <button class="chip ${initialChannel === 'slack' ? 'active' : ''}" data-out-channel="slack" type="button">Slack</button>
+            </div>
+          </div>
+          <div>
+            <div class="overline" style="margin-bottom:6px;">Tone</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="chip active" data-out-tone="friendly" type="button">Friendly</button>
+              <button class="chip" data-out-tone="re_engagement" type="button">Re-engagement</button>
+              <button class="chip" data-out-tone="intro" type="button">Intro</button>
+              <button class="chip" data-out-tone="update" type="button">Update</button>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;margin-bottom:6px;">Context (optional)</label>
+            <textarea data-out-context rows="2" placeholder="What's the goal? e.g. 'Following up on Pizza Hut Thailand conversation' or 'Asking if she can intro me to her CSM team'" style="width:100%;font-family:inherit;font-size:13px;"></textarea>
+          </div>
+          <div class="btn-row">
+            <button class="btn" data-out-generate type="button">Generate draft</button>
+            <span data-out-status class="muted" style="font-size:11px;align-self:center;"></span>
+          </div>
+          <div data-out-result style="display:none;border-top:1px solid var(--border);padding-top:14px;">
+            <div data-out-subject-wrap style="margin-bottom:10px;display:none;">
+              <div class="overline" style="margin-bottom:4px;">Subject</div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input data-out-subject type="text" style="flex:1;font-size:13px;" readonly />
+                <button class="btn ghost sm" type="button" data-out-copy="subject">Copy</button>
+              </div>
+            </div>
+            <div>
+              <div class="overline" style="margin-bottom:4px;">Body <span data-out-charcount class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;"></span></div>
+              <textarea data-out-body rows="9" style="width:100%;font-family:inherit;font-size:13px;line-height:1.5;"></textarea>
+              <div class="btn-row" style="margin-top:8px;">
+                <button class="btn ghost sm" type="button" data-out-copy="body">Copy body</button>
+                <button class="btn ghost sm" type="button" data-out-mailto style="display:none;">Open in mail client</button>
+                <button class="btn ghost sm" type="button" data-out-linkedin style="display:none;">Open LinkedIn profile</button>
+                <button class="btn ghost sm" type="button" data-out-save-note>Save as note on contact</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const $ov = (sel) => overlay.querySelector(sel);
+
+    const state = { channel: initialChannel, tone: 'friendly' };
+    overlay.querySelectorAll('[data-out-channel]').forEach(b => {
+      b.addEventListener('click', () => {
+        if (b.disabled) return;
+        state.channel = b.dataset.outChannel;
+        overlay.querySelectorAll('[data-out-channel]').forEach(x =>
+          x.classList.toggle('active', x === b));
+      });
+    });
+    overlay.querySelectorAll('[data-out-tone]').forEach(b => {
+      b.addEventListener('click', () => {
+        state.tone = b.dataset.outTone;
+        overlay.querySelectorAll('[data-out-tone]').forEach(x =>
+          x.classList.toggle('active', x === b));
+      });
+    });
+
+    const close = () => overlay.remove();
+    $ov('[data-out-cancel]').addEventListener('click', close);
+
+    async function generate() {
+      const ctx = $ov('[data-out-context]').value.trim();
+      const status = $ov('[data-out-status]');
+      const btn = $ov('[data-out-generate]');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Drafting…';
+      status.textContent = '';
+      try {
+        const profile = (typeof homeState !== 'undefined' && homeState.profile)
+                          || (typeof _readSavedProfile === 'function' && _readSavedProfile())
+                          || null;
+        const senderName = profile?.name || 'Ben Ojuolape';
+        const data = await jsonFetch('/api/outreach/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact_kind: opts.kind,
+            partner_id:   opts.partner_id,
+            lead_id:      opts.lead_id,
+            account_name: opts.account_name,
+            contact_id:   opts.contact_id,
+            channel:      state.channel,
+            tone:         state.tone,
+            context_hint: ctx || null,
+            sender_name:  senderName,
+          }),
+        });
+        const draft = data.draft || {};
+        $ov('[data-out-result]').style.display = 'block';
+        const subjectWrap = $ov('[data-out-subject-wrap]');
+        if (state.channel === 'email' && draft.subject) {
+          subjectWrap.style.display = 'block';
+          $ov('[data-out-subject]').value = draft.subject;
+        } else {
+          subjectWrap.style.display = 'none';
+        }
+        $ov('[data-out-body]').value = draft.body || '';
+        $ov('[data-out-charcount]').textContent =
+          `${draft.char_count || 0} chars`;
+        // Channel-specific buttons
+        const mailtoBtn = $ov('[data-out-mailto]');
+        if (state.channel === 'email' && draft.mailto) {
+          mailtoBtn.style.display = '';
+          mailtoBtn.onclick = () => window.location.href = draft.mailto;
+        } else {
+          mailtoBtn.style.display = 'none';
+        }
+        const liBtn = $ov('[data-out-linkedin]');
+        if (state.channel === 'linkedin' && opts.linkedin_url) {
+          liBtn.style.display = '';
+          liBtn.onclick = () => window.open(opts.linkedin_url, '_blank', 'noopener');
+        } else {
+          liBtn.style.display = 'none';
+        }
+        status.textContent = `Draft ready (${draft.char_count || 0} chars)`;
+      } catch (e) {
+        status.textContent = `Failed: ${e.body?.error || e.message}`;
+        toast(`Draft failed: ${e.body?.error || e.message}`, 'error');
+      } finally {
+        btn.disabled = false; btn.innerHTML = 'Regenerate';
+      }
+    }
+    $ov('[data-out-generate]').addEventListener('click', generate);
+
+    // Copy buttons (subject + body)
+    overlay.querySelectorAll('[data-out-copy]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const which = b.dataset.outCopy;
+        const value = which === 'subject'
+          ? $ov('[data-out-subject]').value
+          : $ov('[data-out-body]').value;
+        try {
+          await navigator.clipboard.writeText(value);
+          const orig = b.textContent;
+          b.textContent = 'Copied ✓';
+          setTimeout(() => { b.textContent = orig; }, 1200);
+        } catch (e) {
+          toast('Clipboard blocked - select + copy manually', 'error');
+        }
+      });
+    });
+
+    // Save the draft as a note on the contact so there's a record
+    // of "I drafted this on X date" even if the message never sent.
+    $ov('[data-out-save-note]').addEventListener('click', async () => {
+      const subject = $ov('[data-out-subject]')?.value || '';
+      const body = $ov('[data-out-body]').value;
+      const channel = state.channel;
+      const tone = state.tone;
+      const noteContent =
+        `[Outreach draft - ${channel}${tone !== 'friendly' ? ' / ' + tone : ''}]`
+        + (subject ? `\nSubject: ${subject}` : '')
+        + `\n\n${body}`;
+      try {
+        if (opts.kind === 'partner_contact') {
+          await jsonFetch(
+            `/api/partners/${encodeURIComponent(opts.partner_id)}/contacts/${encodeURIComponent(opts.contact_id)}/notes`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'outreach',
+                content: noteContent,
+              }),
+            });
+          toast('Draft saved as a note on the contact', 'success');
+        } else {
+          toast('Saving notes on lead contacts via this flow lands in a follow-up', 'info');
+        }
+      } catch (e) { toast(`Save failed: ${e.body?.error || e.message}`, 'error'); }
+    });
+  }
+
+
   async function _suggestExpansionAssociates(leadId, btn) {
     if (!leadId) return;
     const origBtn = btn ? btn.innerHTML : '';
@@ -10059,6 +10267,8 @@
     info:           ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z', 'M12 16v-4', 'M12 8h.01'],
     // Content
     note:           ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
+    // v1.0.0df: envelope glyph for the outreach draft button.
+    mail:           ['M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M22 6l-10 7L2 6'],
     link:           ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72'],
     folder:         ['M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'],
     building:       ['M3 21h18', 'M5 21V7l8-4v18', 'M19 21V11l-6-4', 'M9 9v.01', 'M9 12v.01', 'M9 15v.01', 'M9 18v.01'],
@@ -16400,6 +16610,9 @@
                 <button class="btn ghost" type="button" data-contact-touch="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Mark as touched now">${icon('check', { size: 12 })}</button>
                 <!-- v1.0.0an: + todo creates a linked todo for this contact. -->
                 <button class="btn ghost" type="button" data-contact-todo="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Add as a todo">+</button>
+                <!-- v1.0.0df: outreach draft - AI-drafted email / LinkedIn /
+                     Slack message ready to copy or open. -->
+                <button class="btn ghost" type="button" data-contact-outreach="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Draft outreach message">${icon('mail', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-edit="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Edit">${icon('edit', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-notes="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;" title="Notes">${icon('note', { size: 12 })}</button>
                 <button class="btn ghost" type="button" data-contact-del="${escapeAttr(c.id)}" style="padding:3px 8px;font-size:10px;color:var(--red);border-color:rgba(239,68,68,.3);" title="Remove">${icon('trash', { size: 12 })}</button>
@@ -16435,6 +16648,25 @@
           await openPartnerDetail(partner.id);
           await refreshOverdue();
         } catch (e) { toast(`Failed: ${e.body?.error || e.message}`, 'error'); }
+      });
+    });
+    // v1.0.0df: Draft outreach button. Opens a modal with channel +
+    // tone pickers; calls /api/outreach/draft; shows the result with
+    // copy / mailto / save-as-note actions.
+    wrap.querySelectorAll('[data-contact-outreach]').forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.contactOutreach;
+        const c = (partner.contacts || []).find(x => x.id === id);
+        if (!c) return;
+        _openOutreachModal({
+          kind: 'partner_contact',
+          partner_id: partner.id,
+          contact_id: id,
+          display_name: c.name,
+          partner_name: partner.name,
+          email: c.email,
+          linkedin_url: c.linkedin_url,
+        });
       });
     });
     // v1.0.0dd: Key stakeholder star toggle. Optimistic UI update +

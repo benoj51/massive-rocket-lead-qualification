@@ -6231,6 +6231,90 @@ def _iso_to_sortable(iso_str: str | None) -> float:
         return 0.0
 
 
+# v1.0.0df: Outreach draft (email / LinkedIn / Slack). Resolves the
+# named contact, pulls recent notes, calls outreach.draft() with a
+# channel-aware prompt. Drafts only - never auto-sends.
+
+@app.route("/api/outreach/draft", methods=["POST"])
+def api_outreach_draft():
+    import outreach
+    body = request.get_json(silent=True) or {}
+
+    channel = (body.get("channel") or "").strip().lower()
+    if channel not in outreach.VALID_CHANNELS:
+        return jsonify({
+            "error": f"channel must be one of "
+                      f"{sorted(outreach.VALID_CHANNELS)}"
+        }), 400
+
+    kind = (body.get("contact_kind") or "partner_contact").strip()
+    contact_id = (body.get("contact_id") or "").strip()
+    if not contact_id:
+        return jsonify({"error": "contact_id required"}), 400
+
+    contact_dict: dict | None = None
+    recent_notes: list[dict] = []
+
+    if kind == "partner_contact":
+        partner_id = (body.get("partner_id") or "").strip()
+        if not partner_id:
+            return jsonify({"error": "partner_id required for partner_contact"}), 400
+        contact_dict = partner_contacts_store.get_contact(partner_id, contact_id)
+        if contact_dict is None:
+            return jsonify({"error": "contact not found"}), 404
+        # Decorate with partner display name so the prompt has context
+        partner = partners_store.get_partner(partner_id) or {}
+        contact_dict = dict(contact_dict)
+        contact_dict["partner_name"] = partner.get("name") or partner_id
+        try:
+            recent_notes = partner_notes_store.list_notes(
+                partner_id, contact_id) or []
+        except Exception:
+            recent_notes = []
+    elif kind == "lead_contact":
+        # contact_id is the lead contact id; partner_id field carries the
+        # lead_id for this kind.
+        lead_id = (body.get("lead_id") or body.get("partner_id") or "").strip()
+        if not lead_id:
+            return jsonify({"error": "lead_id required for lead_contact"}), 400
+        contact_dict = contacts_store.get_contact(lead_id, contact_id)
+        if contact_dict is None:
+            return jsonify({"error": "contact not found"}), 404
+        contact_dict = dict(contact_dict)
+        contact_dict["account_name"] = body.get("account_name") or lead_id
+        # Recent calls on the lead are the closest analogue to "notes
+        # on the contact" for a lead-side draft.
+        try:
+            recent_notes = calls_store.list_calls(lead_id)[:5] or []
+        except Exception:
+            recent_notes = []
+    else:
+        return jsonify({"error": f"unknown contact_kind: {kind}"}), 400
+
+    try:
+        draft = outreach.draft(
+            contact_dict,
+            channel=channel,
+            tone=(body.get("tone") or "friendly"),
+            context_hint=body.get("context_hint"),
+            recent_notes=recent_notes,
+            sender_name=(body.get("sender_name") or "").strip() or None,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        log.exception("Outreach draft crashed")
+        return jsonify({"error": str(e)}), 500
+
+    if draft.get("error"):
+        return jsonify({"draft": draft, "error": draft["error"]}), 502
+
+    audit.log_event("outreach_drafted", actor=_actor(),
+                    contact_kind=kind, contact_id=contact_id,
+                    channel=channel, char_count=draft.get("char_count", 0))
+    return jsonify({"draft": draft})
+
+
 # v1.0.0dd: Key stakeholder coverage metric. Surfaces whether the
 # partnership team has identified + recently engaged the critical
 # contacts at each partner. Driven by the is_key_stakeholder flag

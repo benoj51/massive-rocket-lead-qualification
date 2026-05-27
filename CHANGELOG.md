@@ -5,6 +5,73 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0df] - 2026-05-26 - Outreach draft button (email / LinkedIn / Slack)
+
+Ben: "Is it possible to build an easy outreach button to create an
+email, slack or linkedin message to send out?"
+
+### New module: outreach.py
+
+`draft(contact, channel, *, tone, context_hint, recent_notes,
+sender_name)` returns a channel-aware message:
+
+- **email**: `Subject: <line>` + 2-3 paragraph body, signed,
+  with a ready-to-open `mailto:` link
+- **linkedin**: single message < 280 chars, no subject, no
+  signature (LinkedIn DM cap is 300; leave headroom)
+- **slack**: single message < 200 chars, casual
+
+Channel rules + tone presets (friendly / re-engagement / intro /
+update) are baked into the system prompt so the model can't drift.
+Writing style enforced: no em-dashes, no "I hope this finds you
+well" cliches, one concrete ask per message.
+
+Drafts only - never auto-sends. The platform doesn't have IMAP /
+LinkedIn / Slack credentials by design.
+
+### Endpoint
+
+`POST /api/outreach/draft`
+- Body: `{contact_kind, partner_id|lead_id, contact_id, channel,
+  tone, context_hint, sender_name}`
+- Resolves the contact (partner_contact + lead_contact supported)
+- Pulls recent notes (partner_notes_store / calls_store) for
+  grounding context
+- Returns `{draft: {subject, body, mailto, char_count, ...}}`
+
+### UI
+
+New **envelope icon button** on each partner contact row, between
+the + todo and edit buttons. Click opens a modal:
+
+- **Channel** chips: Email / LinkedIn / Slack (disables Email if
+  the contact has no email; defaults to whichever channel has
+  contact info)
+- **Tone** chips: Friendly / Re-engagement / Intro / Update
+- **Context** textarea: optional one-line goal
+- **Generate** -> draft renders with Subject (email only) +
+  Body fields, both readonly+editable
+- Action buttons: Copy subject / Copy body / Open in mail client
+  (mailto, email only) / Open LinkedIn profile (linkedin only) /
+  Save as note on contact
+
+The "Save as note" path attaches the draft + channel + tone as a
+typed `outreach` note on the partner contact so there's a record
+even if the message never actually sends.
+
+### Verified
+
+1201 tests pass (+10 new). Server clean. JS clean. Anthropic mocked
+end-to-end for the endpoint tests.
+
+### What's not in v1 (followups)
+
+- Lead-contact + expansion-target rows: same button shape, will land
+  in v1.0.0dg when Ben asks
+- Auto-send via integration (Gmail OAuth / Slack API): not designed -
+  drafts only by intent
+- Sequence builder (multi-step nurture): scoped out
+
 ## [1.0.0de] - 2026-05-26 - Drop City x City from default metrics
 
 Ben: "For city x city let's remove that. That is more for events
