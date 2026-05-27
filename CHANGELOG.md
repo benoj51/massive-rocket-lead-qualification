@@ -5,6 +5,30 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0de] - 2026-05-26 - Drop City x City from default metrics
+
+Ben: "For city x city let's remove that. That is more for events
+when we have them."
+
+Removed `city_x_city_conversations` from:
+- `_DEFAULT_METRICS` in quarterly_targets_store.py
+- `scripts/seed_q2_2026_targets.py` (both AM and Big Bets seed rows)
+- `knowledge/q2_2026_targets.md` (replaced the row with a note about
+  per-quarter ad-hoc add when an event is running)
+
+Behaviour: new quarters no longer show the metric. The platform's
+auto-merge for custom metric keys still works, so when a future
+event quarter calls for it, the team can add `city_x_city_q3_event`
+(or similar) via the editor and it'll render alongside the standing
+metrics for that quarter only.
+
+Anyone who already ran the seed before this commit has City x City
+rows in their Q2 2026 data. Clear via Settings -> Targets - set
+both plan + actual to 0; the metric will continue to render as a
+custom key but won't pull the eye since both numbers are zero.
+(Or run the updated seed script again - it's idempotent and skips
+the now-removed City x City lines.)
+
 ## [1.0.0dd] - 2026-05-26 - Key stakeholder coverage metric
 
 Ben: "I'd like coverage across key stakeholders as a metric. Will

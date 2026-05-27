@@ -35,8 +35,9 @@ assignment was ambiguous, the rule was:
 - Vendor meetings (Braze, Hightouch, Snowflake, Other Vendors):
   assigned to PARTNERSHIPS (these are partner-relationship metrics).
 - Sequences + Expansion: assigned to ACCOUNT MANAGEMENT.
-- City x City has a 50/50 split between AM and Big Bets per the
-  plan doc - both rows are seeded.
+- City x City was dropped from the standing framework in v1.0.0de
+  (event-driven only - add back per-quarter when a roadshow / event
+  is in play).
 
 Team totals are NOT auto-summed - this script leaves the "team" row
 empty unless explicitly set, so Ben can decide whether to use the
@@ -107,8 +108,9 @@ SEED: list[tuple[str, str | None, int, int]] = [
     ("sequences_winback",            "Account Management", 1, 0),
     ("proactive_engagement_winback", "Account Management", 1, 0),
     # --- Expansion ---
-    ("city_x_city_conversations",   "Account Management", 50, 0),
-    ("city_x_city_conversations",   "Big Bets",           50, 0),
+    # City x City dropped from the standing framework in v1.0.0de -
+    # it's event-driven and gets added back ad-hoc per quarter when
+    # a roadshow / summit is in play.
     ("expansion_strategy_sessions", "Account Management", 30, 0),
     ("multithreading_meetings",     "Account Management", 60, 0),
     ("expansion_discovery_calls",   "Account Management", 120, 0),

@@ -116,8 +116,9 @@ _DEFAULT_METRICS = [
     {"key": "proactive_engagement_winback",
      "label": "Proactive Engagement per Winback / Re-Engagement Logo"},
     # --- Expansion (AM + Big Bets) ---
-    {"key": "city_x_city_conversations",
-     "label": "Prospect / Client Conversations at City x City"},
+    # NOTE: City x City was removed from the standing framework
+    # in v1.0.0de - it's an event-driven metric that we add back
+    # ad-hoc per quarter when an event (e.g. roadshow) is running.
     {"key": "expansion_strategy_sessions",
      "label": "Expansion Strategy Sessions"},
     {"key": "multithreading_meetings",

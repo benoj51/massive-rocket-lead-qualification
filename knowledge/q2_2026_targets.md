@@ -94,10 +94,14 @@ if the store is wiped.
 
 | Metric | Actual | Plan (AM) | Plan (Big Bets) |
 |---|---|---|---|
-| Prospect / Client Conversations at City x City | 0 | 50 | 50 |
 | Expansion Strategy Sessions | 0 | 30 | - |
 | New Stakeholder / Multithreading Meetings | 0 | 60 | - |
 | Expansion Discovery Calls | 0 | 120 | - |
+
+City x City conversations sit OUTSIDE the standing framework. Add
+them back per-quarter when a roadshow / event is running (use the
+Settings - Targets editor with a custom metric key like
+`city_x_city_q3_event`).
 
 ## Big Bets initiatives
 
