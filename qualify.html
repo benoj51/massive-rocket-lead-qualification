@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0df</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dg</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2933,6 +2933,10 @@
            MR relevance. Hidden until news exists or the user clicks
            Refresh. -->
       <div id="ld-news-card" style="margin-top:10px;"></div>
+      <!-- v1.0.0dg: Relevant use cases pulled from the catalog DB by
+           lead industry + tech_stack overlap. Hidden when the use-cases
+           DB isn't configured or returns no matches. -->
+      <div id="ld-usecases-card" style="margin-top:10px;display:none;"></div>
     </div>
 
     <!-- Calls & Notes - open by default, most-touched section -->
@@ -8634,6 +8638,10 @@
       // v1.0.0bj: load + render the news card (fresh news for watched
       // accounts). Fires in parallel so the calls render isn't blocked.
       _loadLeadNews(leadId);
+      // v1.0.0dg: load relevant use cases from the catalog DB matched
+      // by lead industry + tech_stack. Fires in parallel; hidden when
+      // no matches or DB unconfigured.
+      _loadLeadUseCases(leadId);
       if (!calls.length) {
         const emptyBanner = aiIsOn()
           ? ''
@@ -8717,6 +8725,90 @@
     } catch (e) {
       el.innerHTML = `<div class="muted" style="color:var(--red);">Failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     }
+  }
+
+  // v1.0.0dg: relevant use cases from Ben's separate catalog Postgres.
+  // Match by lead industry (vertical or industry) + tech_stack tags.
+  // Silent degradation if the DB isn't configured or no matches.
+  async function _loadLeadUseCases(leadId) {
+    const el = $('#ld-usecases-card');
+    if (!el) return;
+    const orig = drawerState.original || {};
+    // Lead-side fields that map to the catalog:
+    // - vertical / industry (string) -> match against catalog_industry
+    // - tech_stack (CSV or list) -> match against catalog_platform names
+    const industry = (orig.vertical || orig.industry || '').trim();
+    const rawStack = orig.tech_stack || '';
+    const stack = Array.isArray(rawStack)
+      ? rawStack
+      : String(rawStack).split(',').map(s => s.trim()).filter(Boolean);
+    if (!industry && stack.length === 0) {
+      el.style.display = 'none';
+      return;
+    }
+    const qs = new URLSearchParams();
+    if (industry) qs.set('industry', industry.toLowerCase());
+    if (stack.length) qs.set('tech_stack', stack.join(','));
+    try {
+      const data = await jsonFetch(`/api/use-cases/match?${qs.toString()}`);
+      if (!data.configured) {
+        // Catalog DB not wired - hide quietly
+        el.style.display = 'none';
+        return;
+      }
+      const matches = data.matches || [];
+      if (!matches.length) {
+        el.style.display = 'none';
+        return;
+      }
+      _renderLeadUseCases(matches);
+    } catch (e) {
+      console.warn('use-cases match failed', e);
+      el.style.display = 'none';
+    }
+  }
+
+  function _renderLeadUseCases(matches) {
+    const el = $('#ld-usecases-card');
+    if (!el) return;
+    el.style.display = 'block';
+    const renderMetric = (m) => {
+      if (!m || !m.label) return '';
+      const v = m.value != null ? m.value : '';
+      const u = m.unit || '';
+      return `<span style="background:rgba(74,222,128,.10);color:var(--green);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid rgba(74,222,128,.28);">${escapeHtml(m.label)} <strong>${escapeHtml(String(v))}${escapeHtml(u)}</strong></span>`;
+    };
+    const rows = matches.map(uc => {
+      const metrics = Array.isArray(uc.metrics) ? uc.metrics.slice(0, 3) : [];
+      const metricChips = metrics.map(renderMetric).join(' ');
+      const client = uc.is_anonymised
+        ? '<span class="muted" style="font-size:11px;">Anon</span>'
+        : `<span class="muted" style="font-size:11px;">${escapeHtml(uc.client_name || '?')}</span>`;
+      return `
+        <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--text);">${escapeHtml(uc.title || '?')}</div>
+              <div style="margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                ${client}
+                <span style="background:var(--surface-2);color:var(--text-dim);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid var(--border);">match ${uc.match_score}</span>
+                ${metricChips}
+              </div>
+              ${uc.outcome ? `<div class="muted" style="font-size:11px;margin-top:4px;line-height:1.4;">${escapeHtml(String(uc.outcome).slice(0, 220))}${String(uc.outcome).length > 220 ? '...' : ''}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);">
+            Relevant proof points
+            <span class="muted" style="text-transform:none;letter-spacing:0;margin-left:6px;">${matches.length} match${matches.length === 1 ? '' : 'es'} from the catalog</span>
+          </div>
+        </div>
+        ${rows}
+      </div>`;
   }
 
   // v1.0.0bj: load + render the "Recent news" card. Lists persisted

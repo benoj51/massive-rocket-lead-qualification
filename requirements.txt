@@ -5,3 +5,7 @@ requests>=2.32
 python-dotenv>=1.0
 notion-client>=2.2
 anthropic>=0.40
+# v1.0.0dg: read use-cases catalog (Ben's separate Django app) from
+# its Railway Postgres DB. Binary wheel so Railway doesn't need
+# libpq + build tools to deploy.
+psycopg[binary]>=3.2

@@ -6231,6 +6231,91 @@ def _iso_to_sortable(iso_str: str | None) -> float:
         return 0.0
 
 
+# v1.0.0dg: Use-cases catalog (read-only). Reads from Ben's separate
+# Django app's Postgres DB. Graceful when DATABASE_URL_USECASES isn't
+# set - returns {"configured": false, "use_cases": []} so the UI
+# degrades silently.
+
+@app.route("/api/use-cases", methods=["GET"])
+def api_use_cases_list():
+    import usecases_db
+    if not usecases_db.is_configured():
+        return jsonify({
+            "configured": False,
+            "use_cases":  [],
+            "reason":     "DATABASE_URL_USECASES not set",
+        })
+    industry_slug = (request.args.get("industry") or "").strip() or None
+    platform_slug = (request.args.get("platform") or "").strip() or None
+    status = (request.args.get("status") or "published").strip()
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", "100"))))
+    except ValueError:
+        limit = 100
+    rows = usecases_db.list_use_cases(
+        industry_slug=industry_slug,
+        platform_slug=platform_slug,
+        status=status,
+        limit=limit,
+    )
+    return jsonify({
+        "configured": True,
+        "use_cases":  rows,
+        "count":      len(rows),
+    })
+
+
+@app.route("/api/use-cases/match", methods=["GET"])
+def api_use_cases_match():
+    """Best-effort relevance match for a lead. Query params:
+      industry   - lead industry (slug or name)
+      tech_stack - CSV of tools (e.g. "Braze,Snowflake")
+    Returns up to ?limit (default 6) ranked candidates with match_score.
+    """
+    import usecases_db
+    if not usecases_db.is_configured():
+        return jsonify({"configured": False, "matches": []})
+    industry = (request.args.get("industry") or "").strip() or None
+    raw_stack = (request.args.get("tech_stack") or "").strip()
+    tech_stack = [t.strip() for t in raw_stack.split(",") if t.strip()]
+    try:
+        limit = max(1, min(20, int(request.args.get("limit", "6"))))
+    except ValueError:
+        limit = 6
+    matches = usecases_db.match_for_lead(industry=industry,
+                                           tech_stack=tech_stack,
+                                           limit=limit)
+    return jsonify({"configured": True, "matches": matches, "count": len(matches)})
+
+
+@app.route("/api/use-cases/<int:use_case_id>", methods=["GET"])
+def api_use_cases_get(use_case_id: int):
+    import usecases_db
+    if not usecases_db.is_configured():
+        return jsonify({"configured": False, "use_case": None}), 503
+    uc = usecases_db.get_use_case(use_case_id)
+    if uc is None:
+        return jsonify({"error": "use case not found"}), 404
+    return jsonify({"use_case": uc})
+
+
+@app.route("/api/use-cases/lookups", methods=["GET"])
+def api_use_cases_lookups():
+    """Industries + platforms for filter UIs."""
+    import usecases_db
+    if not usecases_db.is_configured():
+        return jsonify({
+            "configured": False,
+            "industries": [],
+            "platforms":  [],
+        })
+    return jsonify({
+        "configured": True,
+        "industries": usecases_db.list_industries(),
+        "platforms":  usecases_db.list_platforms(),
+    })
+
+
 # v1.0.0df: Outreach draft (email / LinkedIn / Slack). Resolves the
 # named contact, pulls recent notes, calls outreach.draft() with a
 # channel-aware prompt. Drafts only - never auto-sends.

@@ -5,6 +5,90 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dg] - 2026-05-26 - Use-cases catalog read layer + lead drawer card
+
+Step 1 of 3 in integrating Ben's separate Django use-cases platform.
+Schema-aligned to the catalog_* tables he pasted (industry / platform
+/ featurearea / usecase + M2Ms + agent + generatedasset).
+
+### New: usecases_db.py
+
+psycopg-3 read layer with connection pool. Lazy init - if
+`DATABASE_URL_USECASES` isn't set, every call returns empty
+lists / None and the UI degrades silently (no 500s).
+
+Public functions:
+- `is_configured()` - env-var presence check
+- `healthcheck()` - diagnostic ({configured, reachable, reason})
+- `list_industries()` / `list_platforms()`
+- `list_use_cases(industry_slug, platform_slug, status, limit)`
+- `get_use_case(id)` - includes M2M slugs (platforms, feature areas,
+  agents)
+- `match_for_lead(industry, tech_stack, limit)` - cumulative scoring:
+  +3 industry match (slug or name), +2 per platform overlap. Returns
+  ranked candidates with match_score.
+
+### Endpoints
+
+- `GET /api/use-cases?industry=&platform=&status=&limit=` - filtered list
+- `GET /api/use-cases/<id>` - single use case detail
+- `GET /api/use-cases/lookups` - industries + platforms for filter UIs
+- `GET /api/use-cases/match?industry=&tech_stack=Braze,Snowflake` -
+  ranked matches for a lead
+
+All endpoints return `{configured: false, use_cases: []}` shape when
+the DB is unwired, so callers can render gracefully.
+
+### UI: Lead drawer "Relevant proof points" card
+
+Lives between News and Calls. Hidden when no industry + no
+tech_stack on the lead, or when DB returns no matches. Each card
+row shows:
+
+- Title
+- Client name (or "Anon" if `is_anonymised`)
+- Match score chip
+- Up to 3 metric chips from the `metrics` JSONB field
+- First 220 chars of `outcome` (truncated)
+
+### Dependencies
+
+Added `psycopg[binary]>=3.2` to requirements.txt. Binary wheel so
+Railway doesn't need libpq + build tools.
+
+### Deploy notes
+
+To activate on Railway:
+1. The use-cases Django app is running on Railway with a Postgres
+   add-on. Find its internal DB URL (Railway Variables → Postgres
+   add-on → DATABASE_URL).
+2. Create a read-only DB role for this platform:
+   ```sql
+   CREATE ROLE qualification_reader LOGIN PASSWORD '<pick>';
+   GRANT CONNECT ON DATABASE <dbname> TO qualification_reader;
+   GRANT USAGE ON SCHEMA public TO qualification_reader;
+   GRANT SELECT ON catalog_industry, catalog_platform,
+                    catalog_featurearea, catalog_usecase,
+                    catalog_usecase_platforms,
+                    catalog_usecase_feature_areas,
+                    catalog_agent, catalog_usecase_agents_used,
+                    catalog_generatedasset,
+                    catalog_generatedasset_selected_use_cases
+   TO qualification_reader;
+   ```
+   (v1.0.0dh will need INSERT / UPDATE on `catalog_usecase` +
+   the M2M tables for the write path. Add when shipping that.)
+3. Set `DATABASE_URL_USECASES` env var on the lead-qualification
+   Railway service to:
+   `postgresql://qualification_reader:<pwd>@<host>:5432/<dbname>`
+4. Redeploy. The card auto-appears on leads with matching
+   industry / tech_stack.
+
+### Verified
+
+1212 tests pass (+11 new). Server clean. JS clean. End-to-end via
+mocked psycopg cursor.
+
 ## [1.0.0df] - 2026-05-26 - Outreach draft button (email / LinkedIn / Slack)
 
 Ben: "Is it possible to build an easy outreach button to create an
