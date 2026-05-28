@@ -91,6 +91,86 @@ class OutreachModuleTests(unittest.TestCase):
         finally:
             os.environ.pop("ANTHROPIC_API_KEY", None)
 
+    # v1.0.0di: em-dash sanitiser tests ----------------------------
+
+    def test_strip_dashes_replaces_em_and_en(self):
+        s = "Quick check—today? Range 8–12%."
+        self.assertEqual(
+            self.outreach._strip_dashes(s),
+            "Quick check-today? Range 8-12%.",
+        )
+
+    def test_strip_dashes_passes_through_when_clean(self):
+        s = "Plain English, no dashes here."
+        self.assertEqual(self.outreach._strip_dashes(s), s)
+
+    def test_strip_dashes_handles_none_and_empty(self):
+        self.assertIsNone(self.outreach._strip_dashes(None))
+        self.assertEqual(self.outreach._strip_dashes(""), "")
+
+    def test_draft_strips_em_dashes_from_email(self):
+        """Even if the model emits em-dashes, they must NEVER reach
+        the user. The sanitiser runs unconditionally after parse."""
+        os.environ["ANTHROPIC_API_KEY"] = "test"
+        try:
+            class _Block:
+                def __init__(self, text): self.text = text
+            class _Msg:
+                def __init__(self, text): self.content = [_Block(text)]
+            class _Messages:
+                def create(self, **kwargs):
+                    # Deliberately violates the prompt - em-dashes in
+                    # both subject and body
+                    return _Msg(
+                        "Subject: Quick check— in on Pizza Hut\n\n"
+                        "Hi Marina,\n\n"
+                        "Worth a 20–30 minute call this week—"
+                        "say Tuesday at 3?\n\nBen"
+                    )
+            class _Fake:
+                def __init__(self, **kw): self.messages = _Messages()
+            import anthropic
+            with patch.object(anthropic, "Anthropic", _Fake):
+                out = self.outreach.draft(
+                    {"name": "Marina", "email": "m@braze.com"},
+                    "email", sender_name="Ben",
+                )
+            # No em-dashes or en-dashes anywhere in the output
+            self.assertNotIn("—", out["subject"])
+            self.assertNotIn("—", out["body"])
+            self.assertNotIn("–", out["subject"])
+            self.assertNotIn("–", out["body"])
+            # mailto URL must also be clean (it's url-encoded so the
+            # raw chars become percent-encoded; the underlying body
+            # is what we test by inspecting after-the-fact)
+            self.assertIn("Marina", out["body"])
+            # char_count is on the clean body
+            self.assertEqual(out["char_count"], len(out["body"]))
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    def test_draft_strips_em_dashes_from_linkedin(self):
+        os.environ["ANTHROPIC_API_KEY"] = "test"
+        try:
+            class _Block:
+                def __init__(self, text): self.text = text
+            class _Msg:
+                def __init__(self, text): self.content = [_Block(text)]
+            class _Messages:
+                def create(self, **kwargs):
+                    return _Msg("Hi Marina, would love to catch up—next week?")
+            class _Fake:
+                def __init__(self, **kw): self.messages = _Messages()
+            import anthropic
+            with patch.object(anthropic, "Anthropic", _Fake):
+                out = self.outreach.draft(
+                    {"name": "Marina"}, "linkedin",
+                )
+            self.assertNotIn("—", out["body"])
+            self.assertIn("catch up-next week", out["body"])
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
     def test_draft_linkedin_has_no_subject_or_mailto(self):
         os.environ["ANTHROPIC_API_KEY"] = "test"
         try:

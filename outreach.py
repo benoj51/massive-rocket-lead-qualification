@@ -82,13 +82,28 @@ recent notes if any) and a channel + tone. Produce a draft the AE
 will review before sending.
 
 WRITING STYLE
-- Plain English. No marketing tone. No em-dashes. No "I hope this
-  finds you well" or other AI cliches.
+- Plain English. No marketing tone. No "I hope this finds you well"
+  or other AI cliches.
 - Specific over generic: reference the partner / account / role
   rather than abstract language.
 - One concrete ask per message. No multi-question paragraphs.
 - Never invent facts. If you don't have detail to ground a claim,
   leave it out.
+
+BANNED CHARACTERS (hard rule, no exceptions)
+- NEVER use em-dashes (the "-" character that is U+2014).
+- NEVER use en-dashes (U+2013).
+- Use a comma, a period, or a regular hyphen-minus ("-") instead.
+- Examples of how to rewrite:
+    BAD:  "Quick call this week - say Tuesday at 3?"  (em-dash)
+    GOOD: "Quick call this week, say Tuesday at 3?"
+    BAD:  "Three things - reach, retention, and revenue."
+    GOOD: "Three things: reach, retention, and revenue."
+    BAD:  "Margins are tight - 8 to 12 percent."
+    GOOD: "Margins are tight, 8 to 12 percent."
+- This rule is enforced post-generation. If you emit an em-dash or
+  en-dash anyway, it gets replaced with a hyphen and the result may
+  read worse than if you had written it correctly. Just don't.
 
 TONE
 {tone_desc}
@@ -159,6 +174,42 @@ def _parse_email(raw: str) -> tuple[str | None, str]:
     # blank lines.
     body = raw[m.end():].lstrip("\n").rstrip()
     return subject, body
+
+
+# ---------------------------------------------------------------------
+# Output sanitiser
+# ---------------------------------------------------------------------
+
+# v1.0.0di: Ben's writing-style rule is "no em-dashes, no AI cadence".
+# The system prompt forbids them but Claude occasionally slips one in
+# anyway, especially on longer email bodies. This post-process step
+# guarantees they never reach the user.
+#
+# Em-dash  (U+2014) -> hyphen-minus (U+002D)
+# En-dash  (U+2013) -> hyphen-minus (U+002D)
+# Also collapses common compound-spacing patterns the model uses (e.g.
+# ' - ' that originated as ' — ') so we don't end up with awkward
+# double spaces or stranded hyphens.
+
+_DASH_CHARS = {
+    "—": "-",   # em-dash
+    "–": "-",   # en-dash
+    "―": "-",   # horizontal bar (rare but same family)
+}
+
+
+def _strip_dashes(text: str | None) -> str | None:
+    """Replace em-dashes and en-dashes with regular hyphens. Returns
+    the input unchanged if it's None or contains none of the banned
+    characters."""
+    if not text:
+        return text
+    if not any(ch in text for ch in _DASH_CHARS):
+        return text
+    out = text
+    for bad, good in _DASH_CHARS.items():
+        out = out.replace(bad, good)
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -250,6 +301,13 @@ def draft(contact: dict[str, Any], channel: str, *,
     body = raw
     if channel == "email":
         subject, body = _parse_email(raw)
+
+    # v1.0.0di: hard-strip em-dashes and en-dashes from BOTH subject and
+    # body before anything else (mailto URL build, char count, return).
+    # This runs even if the model honoured the prompt, so it's a no-op
+    # in the happy path.
+    subject = _strip_dashes(subject)
+    body = _strip_dashes(body)
 
     mailto = None
     if channel == "email" and contact.get("email"):

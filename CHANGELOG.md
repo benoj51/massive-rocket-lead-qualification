@@ -5,6 +5,48 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0di] - 2026-05-28 - Outreach drafts: hard-strip em-dashes
+
+Ben: "When generating messages. Programme AI to make sure that it
+doesn't use em-dashes to create message drafts."
+
+The system prompt already said "no em-dashes" but Claude was still
+emitting them occasionally on longer email bodies. Two-layer fix:
+
+### Stronger prompt
+
+New BANNED CHARACTERS section in the outreach system prompt with
+explicit examples of bad/good rewrites and an honest "we strip them
+anyway, so just don't" closer. Sits below the WRITING STYLE block so
+the model sees it right before output rules.
+
+### Post-process sanitiser
+
+New `_strip_dashes()` function replaces every em-dash (U+2014),
+en-dash (U+2013), and horizontal bar (U+2015) with a regular
+hyphen-minus (U+002D) in BOTH subject and body before anything else
+(mailto URL build, char_count). Runs unconditionally - no-op when
+the model honoured the prompt, guaranteed safety net when it didn't.
+
+### Tests
+
+5 new tests in test_outreach.py:
+- `_strip_dashes` direct unit tests (em, en, none/empty, clean pass-through)
+- `draft()` end-to-end with a mock model that deliberately violates
+  the em-dash rule -> verifies the user never sees one
+
+### Verified
+
+1217 tests pass (+5 new). Server clean.
+
+### Followup (not in scope)
+
+The same sanitiser pattern could apply to other AI-generated text
+surfaces (synthesised lead notes in ai_summary.py, Jeff chat
+responses, expansion-associates suggestions). For now they all have
+"no em-dash" in their prompts. If you spot a stray one elsewhere,
+flag it and I'll add the sanitiser there too.
+
 ## [1.0.0dh] - 2026-05-27 - Partner contact notes/edit as right-side drawer
 
 Ben: notes/edit on partner contacts should open as a slide-in panel
