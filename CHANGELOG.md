@@ -5,6 +5,58 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dr] - 2026-05-28 - "Crisp Enterprise" light theme: it should not look like Claude made it
+
+Ben: "this design just looks like it was created by Claude. Look up designs and
+go with something that leans on the Massive Rocket colours. Needs to be modern
+throughout the platform."
+
+The diagnosis: the look was already token-driven and already MR-branded, but the
+light theme's treatment was the giveaway. A warm-beige paper palette
+(`#f4f1ea` / `#fffefb`), 16-20px corner radii and roomy padding read as the
+generic "AI-generated SaaS" aesthetic. The structure was fine; the surface
+finish was the tell. So this is a pure design pass: no behaviour, endpoint or
+data-shape changes. Because ~90% of the look lives in `:root` tokens and a
+handful of shared components, the rewrite is concentrated there and propagates
+app-wide.
+
+### Crisp Enterprise palette (light theme, now the default)
+
+`:root[data-theme="light"]` is rebuilt around a true-white / charcoal / MR-red
+system (the Stripe / Attio / Linear register):
+
+- Surfaces: `--bg #f7f8fa`, `--surface #ffffff`, true white cards on a faint
+  cool-grey page instead of cream-on-beige.
+- Text: near-black `#16171b` with cool-grey dims, replacing the warm browns.
+- Accent stays MR-red (`--mr-red`); steel-blue secondary (`--accent-2`) instead
+  of the old warm tint. Status colours retuned for white (green/amber/red).
+- Cool, low-spread shadows (`rgba(16,24,40,...)`) instead of warm soft ones.
+- Light is now the default theme on first load; a saved preference still wins.
+
+### Tighter geometry
+
+Radius scale dropped from 8/12/16/20/28 to 6/8/10/12 and base padding from 28 to
+22, so cards and controls read crisp and dense rather than soft and roomy.
+
+### Always-charcoal app chrome
+
+The util strip + top nav are now a single charcoal bar (`#16171b`) in both
+themes, with scoped overrides keeping nav text, pills and links legible. This is
+the Stripe/Attio pattern: a dark, stable frame around a bright workspace.
+
+### Compact, modern tables + sticky headers
+
+`table.stakeholders` / `table.pipeline` cells tightened to `10px 14px`; headers
+are quiet sentence-case at a muted colour. Headers are now `position: sticky` so
+they stay put while a long table scrolls. A small `_syncChromeHeight()` keeps the
+`--chrome-h` custom property equal to the real height of the sticky chrome (it
+grows when the brand wraps on narrow widths), so the sticky header pins flush
+below the charcoal bar instead of sliding under it, on every viewport width.
+
+Verified with a live screenshot sweep across Home, Pipeline, Dashboard,
+Expansion, Directory, Partners, Settings, the Jeff panel and Qualify. No test
+changes (CSS-only plus one presentational helper); full suite re-run green.
+
 ## [1.0.0dq] - 2026-05-28 - Comprehensive test pass: CLI module coverage + Notion-outage consistency
 
 Ben: "test platform comprehensively." Two of the four follow-up threads land

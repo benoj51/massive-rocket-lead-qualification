@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dq</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dr</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -69,12 +69,12 @@
     /* Radius scale - explicit names so components can opt into the
        right curve without hard-coding pixels. */
     --radius-xs: 4px;
-    --radius-sm: 8px;
-    --radius:    12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
+    --radius-sm: 6px;
+    --radius:    8px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
     --radius-pill: 999px;
-    --pad: 28px;       /* v1.0.0ci: 22 → 28 - Linear / Stripe-grade breathing room */
+    --pad: 22px;       /* v1.0.0dr: 28 → 22 - tighter, more intentional density (Crisp Enterprise) */
     /* v1.0.0cj: Inter first, system fallback. The platform stops
        looking like "default OS dashboard" the moment Inter loads. */
     --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -99,56 +99,53 @@
   }
 
   :root[data-theme="light"] {
-    /* v1.0.0cj: palette refresh - moved from flat neutral grey to a
-       warm tinted off-white (#f7f6f3, "paper") with slightly cooler
-       surface variants. This is the second pillar of the Inter +
-       palette change: even before reading text, the platform feels
-       like a different product because the BACKGROUND is different.
-       Inspiration: Attio, Stripe Dashboard, Notion - all use
-       slightly tinted backgrounds, never #fafafa flat. */
-    --bg: #f4f1ea;                 /* warm paper - pushed harder. Was #f6f6f6 flat grey. */
-    --surface: #fffefb;             /* off-white, sits on the paper bg */
-    --surface-2: #ede9df;
-    --surface-3: #e1ddd0;
-    --border: #d8d3c2;              /* warm, visibly different from grey */
-    --border-strong: #b6ae97;
-    --text: #14151a;                /* slightly darker than mr-dark-gray for sharper paper contrast */
-    --text-dim: #43454f;
-    --text-muted: #6b6d76;
+    /* v1.0.0dr: "CRISP ENTERPRISE" palette. Retired the warm-beige
+       "paper" look (it read as a generic AI-startup template) for a
+       true-white surface on a cool grey-white canvas. Charcoal text,
+       MR red as the single brand accent, slate-blue as the secondary.
+       Reads like Stripe Dashboard / Linear light / Attio: clean,
+       dense, boardroom-ready. */
+    --bg: #f7f8fa;                 /* cool grey-white canvas (NOT beige) */
+    --surface: #ffffff;             /* pure white cards */
+    --surface-2: #f1f3f5;           /* subtle cool grey - hover / inputs / chips */
+    --surface-3: #e8ebee;           /* elevated chrome */
+    --border: #e6e8ec;              /* hairline */
+    --border-strong: #cdd2d8;
+    --text: #16171b;
+    --text-dim: #5b5d66;
+    --text-muted: #8a8d96;
     --accent: var(--mr-red);
-    --accent-dim: #b8211b;
-    --accent-text: #c4231c;
+    --accent-dim: #c41e17;
+    --accent-text: #d3231c;         /* MR red, AA-legible on white */
     --green: #15803d;
-    --yellow: #92400e;             /* amber-burnt for warm-palette harmony */
-    --red: #b91c1c;
+    --yellow: #b45309;             /* clean amber (replaces burnt warm-palette tone) */
+    --red: #dc2626;
     --blue: var(--mr-blue);
-    /* v1.0.0cj: --accent-2 - the second hue the platform needed.
-       Slate-blue tied to the MR-blue brand swatch. Used for
-       non-destructive secondary actions (Refresh, Save view,
-       Export) so the brand red can stay reserved for the
-       create/destroy axis. */
-    --accent-2: #3b5b80;            /* slate-blue, MR brand-adjacent */
-    --accent-2-soft: #e6ecf3;
+    /* --accent-2 - slate-blue tied to the MR-blue brand swatch. Used
+       for non-destructive secondary actions (Refresh, Save view,
+       Export) so the brand red stays reserved for create/destroy. */
+    --accent-2: #355881;            /* slate-blue, MR brand swatch */
+    --accent-2-soft: #eef2f7;
     --accent-2-text: #2c4866;
-    /* v1.0.0ch: layered light shadows. Tighter contact + softer ambient. */
-    --shadow-xs: 0 1px 2px rgba(33,34,39,.04);
-    --shadow-sm: 0 1px 2px rgba(33,34,39,.06), 0 2px 6px rgba(33,34,39,.04);
-    --shadow:    0 1px 3px rgba(33,34,39,.06), 0 4px 14px rgba(33,34,39,.06);
-    --shadow-md: 0 2px 6px rgba(33,34,39,.07), 0 8px 24px rgba(33,34,39,.07);
-    --shadow-lg: 0 4px 10px rgba(33,34,39,.08), 0 16px 40px rgba(33,34,39,.10);
-    --shadow-xl: 0 8px 16px rgba(33,34,39,.09), 0 24px 56px rgba(33,34,39,.12);
-    --bg-glass: rgba(246,246,246,.85);
-    --bg-drawer-glass: rgba(255,255,255,.85);
-    --bg-radial-1: rgba(232,43,35,.05);
-    --bg-radial-2: rgba(53,88,129,.03);
-    --bg-fade-from: #efefe8;
-    --surface-tint: rgba(0,0,0,.018);
-    --tile-tint:    rgba(0,0,0,.014);
+    /* v1.0.0dr: cool, low-spread shadows (slate-tinted, not warm). */
+    --shadow-xs: 0 1px 2px rgba(16,24,40,.04);
+    --shadow-sm: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.04);
+    --shadow:    0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.06);
+    --shadow-md: 0 2px 4px rgba(16,24,40,.05), 0 6px 16px rgba(16,24,40,.08);
+    --shadow-lg: 0 4px 8px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.10);
+    --shadow-xl: 0 8px 16px rgba(16,24,40,.08), 0 20px 48px rgba(16,24,40,.12);
+    --bg-glass: rgba(247,248,250,.85);
+    --bg-drawer-glass: rgba(255,255,255,.9);
+    --bg-radial-1: rgba(232,43,35,.03);
+    --bg-radial-2: rgba(53,88,129,.02);
+    --bg-fade-from: #f2f4f7;
+    --surface-tint: rgba(16,24,40,.015);
+    --tile-tint:    rgba(16,24,40,.01);
     --input-bg: #ffffff;
     --input-focus-bg: #ffffff;
-    --focus-ring: rgba(232,43,35,.18);
-    --num-base: var(--mr-dark-gray);
-    --num-base-2: #4a4a52;
+    --focus-ring: rgba(232,43,35,.16);
+    --num-base: #16171b;
+    --num-base-2: #5b5d66;
   }
   /* Default --accent-text falls back to --accent in dark mode (same colour,
      since accent on dark bg already has good contrast). */
@@ -322,6 +319,39 @@
     filter: brightness(.96);
     box-shadow: 0 1px 2px rgba(232,43,35,.18);
     transform: translateY(0);
+  }
+  /* ============================================================
+     v1.0.0dr - CRISP ENTERPRISE chrome. The top app chrome (util
+     strip + header) is ALWAYS charcoal, in both themes, so the MR
+     mark + nav sit on a confident dark band over the white content
+     below (the Stripe / Attio / Linear pattern). Explicit colours
+     here intentionally override the theme tokens for the chrome
+     only - everything below the header still follows the palette. */
+  .util-strip {
+    background: #16171b;
+    border-bottom: 1px solid #2a2b31;
+    color: #9a9da7;
+  }
+  .util-strip .pill { border-color: rgba(255,255,255,.14); }
+  .util-strip .pill.ok   { color: #34d399; border-color: rgba(52,211,153,.35); }
+  .util-strip .pill.warn { color: #fbbf24; border-color: rgba(251,191,36,.35); }
+  .util-strip a, .util-strip a:visited { color: #9a9da7; }
+  .util-strip a:hover { color: #fff; }
+  .util-strip .util-divider { color: rgba(255,255,255,.16); }
+  .util-strip .util-action {
+    border-color: rgba(255,255,255,.18); color: #b9bcc6;
+  }
+  .util-strip .util-action:hover { color: #fff; border-color: rgba(255,255,255,.32); }
+  header.top {
+    background: rgba(22,23,27,.82);
+    border-bottom: 1px solid #2a2b31;
+  }
+  header.top .brand { color: #f3f3f6; }
+  header.top nav button { color: #b9bcc6; }
+  header.top nav button:hover { color: #fff; background: rgba(255,255,255,.08); }
+  header.top nav button.active {
+    color: #fff; background: rgba(255,255,255,.10);
+    border-color: rgba(255,255,255,.14); box-shadow: none;
   }
   /* v1.0.0bm: tab strip for Home (and any other tabbed surface).
      Sits above tab content; one chip per tab; active chip gets
@@ -1059,19 +1089,26 @@
   }
   table.stakeholders th, table.stakeholders td,
   table.pipeline th, table.pipeline td {
-    text-align: left; padding: 14px 16px;
+    /* v1.0.0dr: compact ~40px rows (was 14/16 ≈ 47px) for a denser,
+       more data-grade table - the Crisp Enterprise / Attio look. */
+    text-align: left; padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
   table.stakeholders th, table.pipeline th {
-    /* Replace SHOUTY UPPERCASE with quieter sentence-case label
-       at a slightly muted colour. Reads more like Linear / Stripe. */
+    /* Quiet sentence-case label at a muted colour. Reads like
+       Linear / Stripe. v1.0.0dr: header is sticky so it stays put
+       while a long table scrolls under the charcoal app chrome. */
     font-size: 12px; text-transform: none; letter-spacing: 0;
     color: var(--text-muted); font-weight: 600;
     cursor: pointer; user-select: none;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border-strong);
-    padding-top: 11px; padding-bottom: 11px;
+    padding-top: 8px; padding-bottom: 8px;
+    /* Sticky just below the charcoal app chrome so headers stay
+       visible while long tables scroll. z-index sits under the
+       chrome (z 30/31) so it never floats over the nav. */
+    position: sticky; top: var(--chrome-h, 84px); z-index: 4;
   }
   table.pipeline th:hover { color: var(--text); }
   /* Subtle row hover - clean, not the heavy fill the old style had. */
@@ -1599,8 +1636,11 @@
   (function () {
     var stored = null;
     try { stored = localStorage.getItem('mr-theme'); } catch (_) { /* private mode */ }
-    var theme = stored
-      || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    // v1.0.0dr: Crisp Enterprise light is the showcase look, so it is
+    // now the default. A saved preference still wins (a user who flips
+    // to dark keeps dark); only the no-preference fallback changed from
+    // OS-derived to an explicit 'light'.
+    var theme = stored || 'light';
     if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
   })();
 </script>
@@ -12006,6 +12046,23 @@
       console.error('[init]', err);
     }
   });
+
+  // v1.0.0dr: keep --chrome-h in sync with the real height of the sticky
+  // app chrome (charcoal util-strip + header), so sticky table headers
+  // (top: var(--chrome-h)) pin flush below it instead of sliding under.
+  // The header grows taller when the brand wraps on narrow widths, so we
+  // re-measure on resize rather than hardcoding a desktop-only offset.
+  function _syncChromeHeight() {
+    const header = document.querySelector('header.top');
+    if (!header) return;
+    const stickyTop = parseFloat(getComputedStyle(header).top) || 0;
+    const h = Math.ceil(stickyTop + header.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--chrome-h', h + 'px');
+  }
+  window.addEventListener('resize', _syncChromeHeight);
+  document.addEventListener('DOMContentLoaded', _syncChromeHeight);
+  // Belt-and-braces: also after full load (fonts can shift header height).
+  window.addEventListener('load', _syncChromeHeight);
 
   // v1.0.0i: cache-wipe detection banner. Polls /api/diagnostics/health
   // on init; if the server reports a likely cache wipe (cache empty +
