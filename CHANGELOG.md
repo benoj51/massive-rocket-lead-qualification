@@ -5,6 +5,60 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dj] - 2026-05-28 - Agentic foundation: MR tool registry + MCP server
+
+Ben: "build all improvements" (from the CRM agentic gap analysis).
+
+First increment of the agentic layer. The gap analysis against
+Salesforce Agentforce / HubSpot Breeze / Clay / the MCP ecosystem
+concluded the highest-leverage move is to expose MR's own data as a
+shared set of agent tools, defined once, callable from everywhere.
+
+### `mr_tools.py` — unified tool registry
+
+Single source of truth for the agentic layer. Each tool is a plain
+Python function + a JSON schema, registered via a decorator. Handlers
+call the existing stores/modules IN-PROCESS (no HTTP hop), so the same
+registry works from the Flask app and the standalone MCP server.
+
+Tools shipped (11):
+- `list_leads`, `get_lead`, `get_engagement_score` (pipeline)
+- `list_partner_contacts`, `get_overdue_contacts`,
+  `get_stakeholder_coverage` (partners)
+- `get_quarterly_progress` (targets, with attainment %)
+- `list_use_cases`, `match_proof_points` (proof-point catalog)
+- `draft_outreach` (email/linkedin/slack, em-dashes stripped)
+- `log_call` (the one WRITE tool, flagged `writes=True`)
+
+Helpers: `all_tools()`, `anthropic_tools()` (Messages `tools=` format),
+`call_tool()` (dispatch — never raises, always returns a dict so the
+agent loop can feed results straight back). Read tools are
+side-effect-free; write tools are flagged so callers can gate them.
+Every handler is defensive: returns `{"error": ...}` rather than
+raising, and degrades gracefully when Notion / Postgres / Anthropic
+isn't configured.
+
+### `mr_mcp_server.py` — Model Context Protocol server
+
+Standalone stdio MCP server exposing the registry to any MCP client
+(Claude Desktop, the Claude CLI, IDEs). `MR_MCP_READONLY=1` hides the
+write tool. The `mcp` package is intentionally NOT in requirements.txt
+(the Flask web service doesn't need it) — install it where you run the
+server. Includes Claude Desktop config example in the docstring.
+
+### Tests
+
+17 new tests in test_mr_tools.py: registry shape (unique names, valid
+schemas, expected tools present, anthropic format, write filter, tag
+filter), dispatch safety (unknown tool, handler errors never raise),
+and handlers against temp stores (partner contacts + coverage,
+quarterly attainment, use-cases graceful-without-DB, outreach with a
+mocked model, log_call write + persistence).
+
+### Verified
+
+All new tests pass. No changes to existing modules — purely additive.
+
 ## [1.0.0di] - 2026-05-28 - Outreach drafts: hard-strip em-dashes
 
 Ben: "When generating messages. Programme AI to make sure that it
