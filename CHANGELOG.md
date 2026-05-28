@@ -5,6 +5,46 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dl] - 2026-05-28 - Agent UI: persona switcher + audit cards
+
+Ben: "build all improvements" (CRM agentic gap analysis, step 2 + 4).
+
+Wires the v1.0.0dk agent into the floating chat panel. The panel that
+used to be just Jeff is now persona-aware: a selector at the top of the
+header lets you switch between Jeff (the pricing one-shot) and the
+tool-using agent personas (Account Researcher, Partner Relationship
+Coach, Briefing Writer, Pipeline Analyst).
+
+### Routing
+
+- Persona **jeff** keeps the existing pricing endpoint (`/api/jeff/chat`)
+  with its skill selector — unchanged, so pricing expertise doesn't
+  regress.
+- Every other persona routes to `/api/agent/chat` with `{persona,
+  messages, context}`; the skill selector hides (it's a pricing concept).
+
+### Audit cards
+
+Agent replies carry the `steps` audit trace from the API. Each reply
+renders a collapsed "N tool steps" disclosure beneath the bubble — every
+tool that fired with an ok/error icon, its one-line result summary, and a
+**write** badge for state-changing tools. This is gap-analysis step 4
+(audit cards for AI actions) surfaced in the UI.
+
+### Panel behaviour
+
+- Persona list loads from `/api/agent/personas`; the chosen persona is
+  persisted in localStorage and validated against what actually loaded.
+- Switching persona clears the thread (a researcher reply and a pricing
+  reply don't belong together) and reskins the title, empty-state intro,
+  starter prompts and input placeholder from each persona's metadata.
+- Starter buttons are now bound by delegation since they're rebuilt per
+  persona. Best-effort: if the agent endpoint is unreachable, the panel
+  still works as plain Jeff.
+
+No new tests — this is UI wiring over the already-tested v1.0.0dk
+endpoints. `<title>` bumped to v1.0.0dl.
+
 ## [1.0.0dk] - 2026-05-28 - Tool-using agent + persona library
 
 Ben: "build all improvements" (CRM agentic gap analysis, step 2 + 3).

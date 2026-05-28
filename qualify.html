@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dk</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dl</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -593,6 +593,47 @@
     color: var(--yellow); font-size: 12px; padding: 12px;
     background: rgba(251,191,36,.06); border: 1px solid rgba(251,191,36,.2);
     border-radius: 8px; margin: 14px;
+  }
+  /* v1.0.0dl: persona selector + agent audit trace. The panel now
+     switches between Jeff (pricing one-shot) and the tool-using agent
+     personas. Each agent reply can carry an audit trace of the tools
+     it fired. */
+  #jeff-panel header select#jeff-persona {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 3px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; max-width: 150px;
+  }
+  .jeff-steps {
+    margin-top: 8px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--surface);
+    overflow: hidden; font-size: 11px;
+  }
+  .jeff-steps > summary {
+    cursor: pointer; padding: 6px 10px; color: var(--text-muted);
+    list-style: none; display: flex; align-items: center; gap: 6px;
+    font-weight: 600; user-select: none;
+  }
+  .jeff-steps > summary::-webkit-details-marker { display: none; }
+  .jeff-steps > summary::before {
+    content: '▸'; font-size: 9px; transition: transform .12s;
+  }
+  .jeff-steps[open] > summary::before { transform: rotate(90deg); }
+  .jeff-step {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 6px 10px; border-top: 1px solid var(--border);
+  }
+  .jeff-step .jeff-step-name {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    white-space: nowrap;
+  }
+  .jeff-step .jeff-step-sum { color: var(--text-muted); flex: 1; }
+  .jeff-step .jeff-step-icon { font-size: 11px; }
+  .jeff-step .jeff-step-icon.ok { color: var(--green, #16a34a); }
+  .jeff-step .jeff-step-icon.err { color: var(--mr-red, #e82b23); }
+  .jeff-step .jeff-step-write {
+    font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+    background: rgba(251,191,36,.14); color: var(--yellow);
+    border-radius: 4px; padding: 1px 5px; font-weight: 700;
   }
 
   /* v1.0.0ci: wider main + more top padding so content breathes. */
@@ -12263,13 +12304,20 @@
   //     for an assistant chat.
   //   - the current "context" (view + open lead + pricing config) -
   //     attached to every request so Jeff can give targeted answers.
+  // v1.0.0dl: the panel is now persona-aware. Persona 'jeff' keeps the
+  // pricing one-shot (/api/jeff/chat) with its skill selector; every
+  // other persona routes to the tool-using agent (/api/agent/chat) and
+  // can carry an audit trace of the tools it fired.
   const jeffState = {
-    messages: [],   // [{role, content}]
+    messages: [],   // [{role, content, steps?}] - steps only on agent replies
     skill:    'intermediate',
     open:     false,
     busy:     false,
+    persona:  'jeff',
+    personas: [],   // [{key,label,description,can_write,starters}] from API
   };
-  const JEFF_SKILL_KEY = 'mr-jeff-skill';
+  const JEFF_SKILL_KEY   = 'mr-jeff-skill';
+  const JEFF_PERSONA_KEY = 'mr-jeff-persona';
 
   function _initJeff() {
     const trigger = $('#jeff-trigger');
@@ -12283,6 +12331,11 @@
         $('#jeff-skill').value = saved;
       }
     } catch (_) { /* localStorage unavailable - defaults are fine */ }
+    // Restore last-used persona (applied after the list loads).
+    try {
+      const savedP = localStorage.getItem(JEFF_PERSONA_KEY);
+      if (savedP) jeffState.persona = savedP;
+    } catch (_) {}
 
     trigger.addEventListener('click', () => {
       jeffState.open ? _jeffClose() : _jeffOpen();
@@ -12293,6 +12346,12 @@
       jeffState.skill = e.target.value;
       try { localStorage.setItem(JEFF_SKILL_KEY, jeffState.skill); } catch (_) {}
     });
+    const personaSel = $('#jeff-persona');
+    if (personaSel) {
+      personaSel.addEventListener('change', (e) => _jeffSetPersona(e.target.value));
+    }
+    // Load the agent persona library and merge it into the selector.
+    _jeffLoadPersonas();
     $('#jeff-send').addEventListener('click', _jeffSend);
     const input = $('#jeff-input');
     input.addEventListener('keydown', (e) => {
@@ -12307,17 +12366,119 @@
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     });
-    document.querySelectorAll('[data-jeff-prompt]').forEach(b => {
-      b.addEventListener('click', () => {
-        const text = b.dataset.jeffPrompt || '';
-        $('#jeff-input').value = text;
-        _jeffSend();
-      });
+    // Starter buttons are rebuilt per persona, so bind via delegation
+    // rather than to specific nodes.
+    panel.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-jeff-prompt]');
+      if (!b) return;
+      $('#jeff-input').value = b.dataset.jeffPrompt || '';
+      _jeffSend();
     });
     // Close on Esc when open.
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && jeffState.open) _jeffClose();
     });
+  }
+
+  // Fetch the agent persona library and fold it into the selector. The
+  // built-in 'jeff' (pricing one-shot) stays at the top; the agent
+  // personas are appended. Best-effort: if the endpoint is unreachable
+  // or unconfigured, the panel still works as plain Jeff.
+  async function _jeffLoadPersonas() {
+    const sel = $('#jeff-persona');
+    if (!sel) return;
+    let personas = [];
+    try {
+      const data = await jsonFetch('/api/agent/personas');
+      personas = Array.isArray(data.personas) ? data.personas : [];
+    } catch (_) { /* agent unavailable - keep Jeff only */ }
+    // Drop any persona keyed 'jeff' from the agent list; the static
+    // first <option> already represents pricing-Jeff.
+    jeffState.personas = personas.filter(p => p && p.key && p.key !== 'jeff');
+    // Rebuild options: keep the first (Jeff Pricing), append the rest.
+    sel.querySelectorAll('option:not([value="jeff"])').forEach(o => o.remove());
+    jeffState.personas.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.key;
+      opt.textContent = p.label || p.key;
+      sel.appendChild(opt);
+    });
+    // Validate the restored persona against what actually loaded.
+    const known = new Set(['jeff', ...jeffState.personas.map(p => p.key)]);
+    if (!known.has(jeffState.persona)) jeffState.persona = 'jeff';
+    sel.value = jeffState.persona;
+    _jeffApplyPersona();
+  }
+
+  // Switch persona: persist, clear the conversation (a researcher reply
+  // and a pricing reply don't belong in the same thread), and reskin.
+  function _jeffSetPersona(key) {
+    if (!key || key === jeffState.persona) {
+      _jeffApplyPersona();
+      return;
+    }
+    jeffState.persona  = key;
+    jeffState.messages = [];
+    try { localStorage.setItem(JEFF_PERSONA_KEY, key); } catch (_) {}
+    _jeffApplyPersona();
+    _jeffRender();
+    setTimeout(() => { const i = $('#jeff-input'); if (i) i.focus(); }, 30);
+  }
+
+  // Find the active persona record (null for built-in Jeff).
+  function _jeffPersona() {
+    return jeffState.personas.find(p => p.key === jeffState.persona) || null;
+  }
+
+  // Reskin the panel for the active persona: title, empty-state copy,
+  // starter prompts, and skill-selector visibility (Jeff only).
+  function _jeffApplyPersona() {
+    const p       = _jeffPersona();
+    const isJeff  = !p;  // built-in pricing persona
+    const titleEl = $('#jeff-title-text');
+    const skill   = $('#jeff-skill');
+    const skillLb = $('#jeff-skill-label');
+    const emptyT  = $('#jeff-empty-title');
+    const emptyI  = $('#jeff-empty-intro');
+    const input   = $('#jeff-input');
+    if (titleEl) titleEl.textContent = isJeff ? 'Jeff' : (p.label || p.key);
+    // Skill level only matters to the pricing one-shot.
+    if (skill)   skill.style.display   = isJeff ? '' : 'none';
+    if (skillLb) skillLb.style.display = isJeff ? '' : 'none';
+    if (emptyT) {
+      emptyT.textContent = isJeff ? "Hi, I'm Jeff." : (p.label || p.key);
+    }
+    if (emptyI) {
+      emptyI.textContent = isJeff
+        ? "Ask me anything about pricing, project scoping, rate cards, or how to handle a tricky client conversation. I'll adjust based on your skill level above."
+        : (p.description || '');
+    }
+    if (input) {
+      input.placeholder = isJeff ? 'Ask Jeff…'
+        : `Ask the ${(p.label || 'agent')}…`;
+    }
+    _jeffRenderStarters(isJeff ? null : p);
+  }
+
+  // Rebuild the starter-prompt buttons for the active persona. Jeff's
+  // defaults live in the static HTML; agent personas supply their own.
+  function _jeffRenderStarters(persona) {
+    const wrap = $('#jeff-starters');
+    if (!wrap) return;
+    if (!persona) {
+      // Restore Jeff's defaults.
+      wrap.innerHTML = [
+        'What rate card should I use for a new Shell expansion deal?',
+        'The client said our $200/hour rate is too high. How should I respond?',
+        'When should I add Project Ops and Contingency uplifts?',
+        "What's the difference between crm_build and crm_execute?",
+      ].map(t => `<button class="jeff-suggestion" type="button" data-jeff-prompt="${escapeAttr(t)}">${escapeHtml(t)}</button>`).join('');
+      return;
+    }
+    const starters = Array.isArray(persona.starters) ? persona.starters : [];
+    wrap.innerHTML = starters.map(t =>
+      `<button class="jeff-suggestion" type="button" data-jeff-prompt="${escapeAttr(t)}">${escapeHtml(t)}</button>`
+    ).join('');
   }
 
   function _jeffOpen() {
@@ -12337,7 +12498,9 @@
 
   async function _jeffClear() {
     if (!jeffState.messages.length) return;
-    if (!await confirmDialog('Clear this conversation with Jeff?')) return;
+    const p = _jeffPersona();
+    const who = p ? (p.label || p.key) : 'Jeff';
+    if (!await confirmDialog(`Clear this conversation with ${who}?`)) return;
     jeffState.messages = [];
     _jeffRender();
   }
@@ -12397,23 +12560,45 @@
     $('#jeff-send').disabled = true;
     _jeffRender();
     _jeffTyping(true);
+    const isJeff = jeffState.persona === 'jeff';
     try {
-      const data = await jsonFetch('/api/jeff/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: jeffState.messages,
-          skill:    jeffState.skill,
-          context:  _jeffContext(),
-        }),
-      });
-      jeffState.messages.push({ role: 'assistant', content: data.message || '' });
+      let data;
+      if (isJeff) {
+        // Pricing one-shot: richer pricing facts, skill-aware, no tools.
+        data = await jsonFetch('/api/jeff/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: jeffState.messages,
+            skill:    jeffState.skill,
+            context:  _jeffContext(),
+          }),
+        });
+        jeffState.messages.push({ role: 'assistant', content: data.message || '' });
+      } else {
+        // Tool-using agent: returns a `steps` audit trace we attach to
+        // the reply so the user can see which tools fired.
+        data = await jsonFetch('/api/agent/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            persona:  jeffState.persona,
+            messages: jeffState.messages,
+            context:  _jeffContext(),
+          }),
+        });
+        jeffState.messages.push({
+          role:    'assistant',
+          content: data.message || '',
+          steps:   Array.isArray(data.steps) ? data.steps : [],
+        });
+      }
     } catch (e) {
       // Surface as an assistant message so the conversation stays
       // coherent; toast the error too for visibility.
       const code = e.body?.code;
       let msg;
-      if (code === 'jeff_disabled') {
+      if (code === 'jeff_disabled' || code === 'agent_disabled') {
         msg = "I'm offline - `ANTHROPIC_API_KEY` isn't set on the server. Ask whoever runs the Railway deploy to add it.";
       } else {
         msg = `Sorry, that didn't work: ${e.body?.error || e.message}`;
@@ -12470,6 +12655,42 @@
     return out.join('');
   }
 
+  // Build the audit-trace disclosure for an agent reply: a collapsed
+  // <details> listing each tool that fired, its one-line summary, an
+  // ok/error icon, and a WRITE badge for state-changing tools.
+  function _jeffStepsEl(steps) {
+    const details = document.createElement('details');
+    details.className = 'jeff-steps';
+    const summary = document.createElement('summary');
+    const n = steps.length;
+    summary.textContent = `${n} tool ${n === 1 ? 'step' : 'steps'}`;
+    details.appendChild(summary);
+    steps.forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'jeff-step';
+      const icon = document.createElement('span');
+      icon.className = 'jeff-step-icon ' + (s.ok ? 'ok' : 'err');
+      icon.textContent = s.ok ? '✓' : '✕';
+      const name = document.createElement('span');
+      name.className = 'jeff-step-name';
+      name.textContent = s.tool || '(tool)';
+      const sum = document.createElement('span');
+      sum.className = 'jeff-step-sum';
+      sum.textContent = s.summary || '';
+      row.appendChild(icon);
+      row.appendChild(name);
+      if (s.writes) {
+        const badge = document.createElement('span');
+        badge.className = 'jeff-step-write';
+        badge.textContent = 'write';
+        row.appendChild(badge);
+      }
+      row.appendChild(sum);
+      details.appendChild(row);
+    });
+    return details;
+  }
+
   function _jeffRender() {
     const list = $('#jeff-messages');
     if (!list) return;
@@ -12482,16 +12703,18 @@
       if (typing) list.appendChild(typing);
       return;
     }
+    const persona = _jeffPersona();
+    const assistantName = persona ? (persona.label || persona.key) : 'Jeff';
     jeffState.messages.forEach((m) => {
       const wrap = document.createElement('div');
       wrap.className = 'jeff-msg ' + m.role;
       const who = document.createElement('div');
       who.className = 'who';
-      who.textContent = m.role === 'user' ? 'You' : 'Jeff';
+      who.textContent = m.role === 'user' ? 'You' : assistantName;
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      // User messages are plain text (no markdown injection); Jeff
-      // gets the minimal markdown pass.
+      // User messages are plain text (no markdown injection); the
+      // assistant gets the minimal markdown pass.
       if (m.role === 'assistant') {
         bubble.innerHTML = _jeffMarkdown(m.content);
       } else {
@@ -12499,6 +12722,10 @@
       }
       wrap.appendChild(who);
       wrap.appendChild(bubble);
+      // Audit trace: render the tools this agent reply fired (if any).
+      if (m.role === 'assistant' && Array.isArray(m.steps) && m.steps.length) {
+        wrap.appendChild(_jeffStepsEl(m.steps));
+      }
       list.appendChild(wrap);
     });
     if (typing) list.appendChild(typing);
@@ -17625,9 +17852,15 @@
         aria-label="Open Jeff chat">J</button>
 <div id="jeff-panel" role="dialog" aria-label="Jeff chat panel">
   <header>
-    <div class="jeff-title"><span class="dot"></span>Jeff</div>
+    <div class="jeff-title"><span class="dot"></span><span id="jeff-title-text">Jeff</span></div>
     <div style="display:flex;align-items:center;gap:8px;">
-      <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Skill</label>
+      <!-- v1.0.0dl: persona selector. 'jeff' routes to the pricing
+           one-shot (/api/jeff/chat); the rest route to the tool-using
+           agent (/api/agent/chat). Populated from /api/agent/personas. -->
+      <select id="jeff-persona" title="Choose an assistant">
+        <option value="jeff" selected>Jeff (Pricing)</option>
+      </select>
+      <label id="jeff-skill-label" style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Skill</label>
       <select id="jeff-skill">
         <option value="beginner">Beginner</option>
         <option value="intermediate" selected>Intermediate</option>
@@ -17642,13 +17875,17 @@
   </header>
   <div id="jeff-messages">
     <div id="jeff-empty">
-      <div style="color:var(--text);font-size:14px;font-weight:600;">Hi, I'm Jeff.</div>
-      <div>Ask me anything about pricing, project scoping, rate cards, or how to handle a tricky client conversation. I'll adjust based on your skill level above.</div>
+      <div id="jeff-empty-title" style="color:var(--text);font-size:14px;font-weight:600;">Hi, I'm Jeff.</div>
+      <div id="jeff-empty-intro">Ask me anything about pricing, project scoping, rate cards, or how to handle a tricky client conversation. I'll adjust based on your skill level above.</div>
       <div style="margin-top:6px;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Try one of these</div>
-      <button class="jeff-suggestion" type="button" data-jeff-prompt="What rate card should I use for a new Shell expansion deal?">What rate card should I use for a new Shell expansion deal?</button>
-      <button class="jeff-suggestion" type="button" data-jeff-prompt="The client said our $200/hour rate is too high. How should I respond?">The client said our $200/hour rate is too high - how should I respond?</button>
-      <button class="jeff-suggestion" type="button" data-jeff-prompt="When should I add Project Ops and Contingency uplifts?">When should I add Project Ops and Contingency uplifts?</button>
-      <button class="jeff-suggestion" type="button" data-jeff-prompt="What's the difference between crm_build and crm_execute?">What's the difference between crm_build and crm_execute?</button>
+      <!-- v1.0.0dl: starters are rebuilt per persona by _jeffRenderStarters().
+           These are Jeff's defaults for first paint. -->
+      <div id="jeff-starters">
+        <button class="jeff-suggestion" type="button" data-jeff-prompt="What rate card should I use for a new Shell expansion deal?">What rate card should I use for a new Shell expansion deal?</button>
+        <button class="jeff-suggestion" type="button" data-jeff-prompt="The client said our $200/hour rate is too high. How should I respond?">The client said our $200/hour rate is too high - how should I respond?</button>
+        <button class="jeff-suggestion" type="button" data-jeff-prompt="When should I add Project Ops and Contingency uplifts?">When should I add Project Ops and Contingency uplifts?</button>
+        <button class="jeff-suggestion" type="button" data-jeff-prompt="What's the difference between crm_build and crm_execute?">What's the difference between crm_build and crm_execute?</button>
+      </div>
     </div>
     <div id="jeff-typing">Jeff is thinking…</div>
   </div>
