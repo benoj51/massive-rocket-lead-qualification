@@ -5,6 +5,56 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dk] - 2026-05-28 - Tool-using agent + persona library
+
+Ben: "build all improvements" (CRM agentic gap analysis, step 2 + 3).
+
+Builds on v1.0.0dj's tool registry. Where Jeff was a one-shot chat that
+only knew what was in its prompt, the agent runs the Anthropic tool-use
+loop against mr_tools — it can read the pipeline, look up stakeholder
+coverage, match proof points, then reason over what it found.
+
+### `agent.py` — the engine
+
+`run_agent(persona_key, messages, *, context, allow_writes, max_steps)`
+runs the loop: call the model with the persona's scoped toolset, run
+any tool_use blocks via `mr_tools.call_tool`, feed results back, repeat
+until the model stops (or `max_steps`, then force a final synthesis).
+
+Returns the answer PLUS an audit trace (`steps`) — every tool that
+fired with its input, ok/error and a one-line result summary. This is
+the substrate for audit cards (UI) and the audit log.
+
+Shared ground rules baked into every persona: ground claims in tool
+data, never invent numbers, no em-dashes, drafts-only (never sends).
+
+### Persona library (5)
+
+- **Account Researcher** — pipeline + engagement + stakeholders + proof
+- **Partner Relationship Coach** — coverage gaps + re-engagement drafts
+- **Briefing Writer** — internal briefs grounded in real proof points
+  (never fabricates client metrics)
+- **Pipeline Analyst** — pipeline health + quarterly attainment
+- **Jeff (Pricing)** — pricing/scoping, now able to look up real data
+
+Each persona is scoped to a tool-tag set and a voice. Write tools are
+double-gated: persona must allow writes AND the request must opt in,
+otherwise they're removed from the toolset entirely.
+
+### Endpoints
+
+- `GET /api/agent/personas` — list personas + starter prompts
+- `POST /api/agent/chat` — run a turn; logs an `agent_chat` audit event
+  recording the persona, step count, tools fired and whether it wrote.
+
+### Tests
+
+12 new tests in test_agent.py: persona registry, unknown-persona +
+not-configured guards, a scripted tool loop (verifies the audit trace),
+write-tool exclusion + persona tool scoping, the max-steps synthesis
+path, and the two endpoints (incl. 400s). All pass with a fake
+Anthropic client.
+
 ## [1.0.0dj] - 2026-05-28 - Agentic foundation: MR tool registry + MCP server
 
 Ben: "build all improvements" (from the CRM agentic gap analysis).

@@ -5163,6 +5163,76 @@ def api_jeff_knowledge_save():
     return jsonify({"saved": True, "chars": len(body)})
 
 
+# v1.0.0dk: tool-using agent + persona library ----------------------------
+# The agent runs the Anthropic tool-use loop against the mr_tools
+# registry, so it can read the pipeline / coverage / proof points and
+# reason over them. Each persona is scoped to the right tools + voice.
+# The response carries an audit trace (`steps`) of every tool that
+# fired so the UI can render "here's what I did" cards.
+
+@app.route("/api/agent/personas", methods=["GET"])
+def api_agent_personas():
+    """List the available agent personas (key, label, description,
+    suggested starter prompts)."""
+    import agent
+    return jsonify({
+        "personas":   agent.list_personas(),
+        "configured": agent.is_configured(),
+    })
+
+
+@app.route("/api/agent/chat", methods=["POST"])
+def api_agent_chat():
+    """Run one tool-using agent turn.
+
+    Body:
+      {
+        "persona":      "researcher" | "partner_coach" | ...,
+        "messages":     [{"role": "user"|"assistant", "content": "..."}],
+        "context":      {"view": "...", "lead": {...}},   # optional
+        "allow_writes": false                              # opt-in
+      }
+
+    Returns: {"message", "persona", "steps": [...audit trace], "stopped"}
+    """
+    import agent
+    if not agent.is_configured():
+        return jsonify({
+            "error": "Agent is offline — ANTHROPIC_API_KEY isn't set on the server.",
+            "code":  "agent_disabled",
+        }), 503
+
+    body = request.get_json(silent=True) or {}
+    persona = (body.get("persona") or "researcher").strip().lower()
+    messages = body.get("messages") or []
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"error": "messages array required",
+                        "code": "invalid_request"}), 400
+    context = body.get("context") if isinstance(body.get("context"), dict) else {}
+    allow_writes = bool(body.get("allow_writes"))
+
+    result = agent.run_agent(persona, messages, context=context,
+                             allow_writes=allow_writes)
+
+    code = result.get("code")
+    if code:
+        status = {
+            "unknown_persona": 400,
+            "agent_disabled":  503,
+            "invalid_request": 400,
+            "upstream_error":  502,
+        }.get(code, 500)
+        return jsonify(result), status
+
+    steps = result.get("steps") or []
+    audit.log_event("agent_chat", actor=_actor(),
+                    persona=persona,
+                    steps=len(steps),
+                    tools=",".join(s.get("tool", "") for s in steps)[:200],
+                    wrote=any(s.get("writes") for s in steps))
+    return jsonify(result)
+
+
 # v1.0.0br: Directory ------------------------------------------------------
 # Cross-surface roster. One place to browse every account + every
 # contact across all stores (Notion pipeline, expansion targets,
