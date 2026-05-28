@@ -5,6 +5,52 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dh] - 2026-05-27 - Partner contact notes/edit as right-side drawer
+
+Ben: notes/edit on partner contacts should open as a slide-in panel
+from the right (like the lead drawer in Pipeline), not expand inline
+under the table.
+
+The inline expand was a problem on 137-row Braze/Hightouch tables -
+the panel rendered far below the fold and the v1.0.0k scroll-into-
+view + flash hack only partly solved it. A drawer beats both.
+
+### Changes
+
+- **New `#pc-drawer-overlay` + `#pc-drawer` markup** mirrors the lead
+  drawer (`.drawer` + `.drawer-overlay` CSS reused, same slide-in
+  animation, glass header, 560px width).
+- **`openPartnerContactDrawer({title, subtitle})`** helper opens the
+  drawer + sets header text + wires Esc-to-close.
+- **`closePartnerContactDrawer()`** slides it back, restores focus,
+  clears body after the transition.
+- **`openContactForm` and `openContactNotes` retargeted** to render
+  into `#pc-drawer-body` instead of `#ptn-contact-detail`. Inner
+  Cancel / Done buttons now close the drawer instead of clearing
+  an inline div.
+- **Overlay click + Esc** both close (wired once on script init).
+- **Legacy `#ptn-contact-detail` element kept in DOM** as a fallback
+  mount point so any straggling code paths don't NPE - both functions
+  fall back to it if the drawer body is missing.
+
+### Verified via Preview MCP
+
+- Drawer slides in from the right with backdrop dim
+- Title shows the contact name; subtitle shows title + email
+- Body renders the full 3001-char notes UI (Type / Note / Add /
+  Done / Refresh summary)
+- Esc + X + overlay click all close
+
+### Followup (cosmetic, not blocking)
+
+Inner card still has its own `<h4>Notes - {name}</h4>` header which
+now duplicates the drawer's title bar. Trim that in a small followup
+so the name doesn't show twice.
+
+### Verified
+
+1212 tests pass. Server clean. JS clean.
+
 ## [1.0.0dg] - 2026-05-26 - Use-cases catalog read layer + lead drawer card
 
 Step 1 of 3 in integrating Ben's separate Django use-cases platform.
