@@ -5,6 +5,18 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ds] - 2026-05-28 - Partners blurb: Hightouch in the example, mParticle stays a partner
+
+Ben: "Replace mParticle with Hightouch here" (the Partners view subtitle), then
+"Keep mparticles as list of partners."
+
+Copy-only. The Partners view subtitle now reads "Braze, Snowflake, Hightouch,
+etc." instead of naming mParticle in that one example sentence. mParticle is
+otherwise untouched — it remains a selectable partner in both partner-picker
+dropdowns, in `PARTNER_OPTIONS`, in the assign-partner helper copy, and in the
+`partners_store` / `lead_partner_assignments` docstrings. No behaviour,
+endpoint, data-shape or partner-list changes.
+
 ## [1.0.0dr] - 2026-05-28 - "Crisp Enterprise" light theme: it should not look like Claude made it
 
 Ben: "this design just looks like it was created by Claude. Look up designs and
