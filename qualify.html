@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dm</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dn</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -2678,6 +2678,11 @@
         <button class="tab-btn" type="button" data-settings-tab="targets">
           Targets
         </button>
+        <!-- v1.0.0dn: Scheduled agents. Run the recurring AI jobs on
+             demand + see each one's last output. -->
+        <button class="tab-btn" type="button" data-settings-tab="agents">
+          Scheduled Agents
+        </button>
       </div>
 
       <!-- USERS TAB -->
@@ -2757,6 +2762,23 @@
           <button id="settings-qt-reload" class="btn ghost sm" type="button">Reload</button>
         </div>
         <div id="settings-qt-host" class="muted" style="font-size:12px;">Loading…</div>
+      </div>
+
+      <!-- v1.0.0dn: SCHEDULED AGENTS TAB. Recurring AI jobs (Monday
+           pipeline digest, Wednesday news sweep, Friday stale-stakeholder
+           list). Cron runs them on a cadence; this tab lets a human run
+           one on demand and read its last output + audit trace. -->
+      <div class="tab-pane" data-settings-pane="agents">
+        <p class="muted" style="margin:0 0 6px;font-size:11px;">
+          Recurring AI jobs that run on a schedule (a cron / Railway
+          scheduled job calls <code>run_scheduled.py --today</code>). Run
+          any of them on demand below and read the last output. Agent jobs
+          show the tools they used.
+        </p>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button id="settings-agents-reload" class="btn ghost sm" type="button">Reload</button>
+        </div>
+        <div id="settings-agents-host" class="muted" style="font-size:12px;">Loading…</div>
       </div>
     </div>
   </section>
@@ -12932,7 +12954,18 @@
         if (target === 'targets') {
           _loadSettingsTargets();
         }
+        // v1.0.0dn: Scheduled agents tab.
+        if (target === 'agents') {
+          _loadSettingsAgents();
+        }
       });
+    });
+    // v1.0.0dn: scheduled-agents reload button.
+    const agReload = $('#settings-agents-reload');
+    if (agReload) agReload.addEventListener('click', () => {
+      const host = $('#settings-agents-host');
+      if (host) host.dataset.loaded = '';
+      _loadSettingsAgents();
     });
     // v1.0.0db: editor button wiring (outside the tab loop so they
     // bind once on init).
@@ -12987,6 +13020,157 @@
         host.dataset.loaded = '1';
       } catch (e) {
         host.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+
+    // =========================================================
+    //  v1.0.0dn: Scheduled agents tab
+    // =========================================================
+    // Lists the recurring AI jobs (Monday pipeline digest, Wednesday
+    // news sweep, Friday stale-stakeholder list) with each one's last
+    // run. "Run now" POSTs to the run endpoint and re-renders. Agent
+    // jobs reuse the audit-trace cards (_jeffStepsEl) + markdown
+    // renderer (_jeffMarkdown) from the Jeff panel.
+    let _settingsAgents = [];   // cached job list (with last_run records)
+
+    async function _loadSettingsAgents() {
+      const host = document.querySelector('#settings-agents-host');
+      if (!host) return;
+      if (host.dataset.loaded === '1') return;
+      host.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;">Loading scheduled agents…</div>';
+      try {
+        const data = await jsonFetch('/api/agent/scheduled');
+        _settingsAgents = Array.isArray(data.jobs) ? data.jobs : [];
+        _renderSettingsAgents();
+        host.dataset.loaded = '1';
+      } catch (e) {
+        host.innerHTML = `<div style="color:var(--red);font-size:12px;padding:10px;">Failed to load: ${escapeHtml(e.body?.error || e.message)}</div>`;
+      }
+    }
+
+    function _agentAgoLabel(iso) {
+      if (!iso) return 'never run';
+      const then = new Date(iso);
+      if (isNaN(then.getTime())) return iso;
+      const secs = Math.max(0, (Date.now() - then.getTime()) / 1000);
+      let rel;
+      if (secs < 90) rel = 'just now';
+      else if (secs < 3600) rel = `${Math.round(secs / 60)}m ago`;
+      else if (secs < 86400) rel = `${Math.round(secs / 3600)}h ago`;
+      else rel = `${Math.round(secs / 86400)}d ago`;
+      return `${then.toLocaleString()} (${rel})`;
+    }
+
+    function _renderSettingsAgents() {
+      const host = document.querySelector('#settings-agents-host');
+      if (!host) return;
+      if (!_settingsAgents.length) {
+        host.innerHTML = '<div class="muted" style="font-size:12px;padding:10px;">No scheduled agents defined.</div>';
+        return;
+      }
+      host.innerHTML = '';
+      _settingsAgents.forEach((job) => {
+        const lr = job.last_run || null;
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.cssText = 'margin-bottom:12px;padding:14px 16px;';
+
+        // Header row: label + cadence pill + Run button.
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight:600;font-size:14px;color:var(--text);';
+        title.textContent = job.label || job.key;
+        const cadence = document.createElement('span');
+        cadence.className = 'pill';
+        cadence.style.cssText = 'font-size:10px;';
+        cadence.textContent = job.cadence || '';
+        const kind = document.createElement('span');
+        kind.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--text-muted);';
+        kind.textContent = job.kind === 'agent' ? `agent · ${job.persona || ''}` : job.kind;
+        const spacer = document.createElement('div');
+        spacer.style.flex = '1';
+        const runBtn = document.createElement('button');
+        runBtn.className = 'btn sm';
+        runBtn.type = 'button';
+        runBtn.textContent = 'Run now';
+        runBtn.addEventListener('click', () => _runScheduledJob(job.key, runBtn));
+        head.appendChild(title);
+        head.appendChild(cadence);
+        head.appendChild(kind);
+        head.appendChild(spacer);
+        head.appendChild(runBtn);
+        card.appendChild(head);
+
+        // Description.
+        if (job.description) {
+          const desc = document.createElement('div');
+          desc.className = 'muted';
+          desc.style.cssText = 'font-size:11px;margin-top:4px;';
+          desc.textContent = job.description;
+          card.appendChild(desc);
+        }
+
+        // Last-run line.
+        const meta = document.createElement('div');
+        meta.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;';
+        const status = document.createElement('span');
+        if (lr) {
+          status.className = 'pill ' + (lr.ok ? 'ok' : 'warn');
+          status.style.fontSize = '10px';
+          status.textContent = lr.ok ? 'ok' : 'failed';
+          meta.appendChild(status);
+        }
+        const when = document.createElement('span');
+        when.className = 'muted';
+        when.textContent = 'Last run: ' + _agentAgoLabel(lr && lr.ran_at);
+        meta.appendChild(when);
+        card.appendChild(meta);
+
+        // Last-run output (collapsed). Reuses Jeff's markdown + steps.
+        if (lr && (lr.message || (lr.steps && lr.steps.length))) {
+          const det = document.createElement('details');
+          det.style.cssText = 'margin-top:10px;';
+          const sum = document.createElement('summary');
+          sum.style.cssText = 'cursor:pointer;font-size:11px;color:var(--text-muted);font-weight:600;';
+          sum.textContent = 'Last output';
+          det.appendChild(sum);
+          if (lr.message) {
+            const body = document.createElement('div');
+            body.className = 'jeff-msg assistant';
+            body.style.cssText = 'max-width:100%;margin-top:8px;';
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.innerHTML = _jeffMarkdown(lr.message);
+            body.appendChild(bubble);
+            det.appendChild(body);
+          }
+          if (lr.steps && lr.steps.length) {
+            det.appendChild(_jeffStepsEl(lr.steps));
+          }
+          card.appendChild(det);
+        }
+
+        host.appendChild(card);
+      });
+    }
+
+    async function _runScheduledJob(key, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+      try {
+        const rec = await jsonFetch(`/api/agent/scheduled/${encodeURIComponent(key)}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        // Splice the new run back into the cached list + re-render.
+        const idx = _settingsAgents.findIndex(j => j.key === key);
+        if (idx >= 0) _settingsAgents[idx] = { ..._settingsAgents[idx], last_run: rec };
+        _renderSettingsAgents();
+        toast(rec.ok ? `${rec.label || key} ran` : `${rec.label || key} finished with errors`,
+              rec.ok ? 'success' : 'error');
+      } catch (e) {
+        toast(`Run failed: ${e.body?.error || e.message}`, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Run now'; }
       }
     }
 

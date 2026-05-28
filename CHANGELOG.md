@@ -5,6 +5,37 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dn] - 2026-05-28 - Scheduled Agents settings tab (UI surface)
+
+Ben: "build all improvements" (CRM agentic gap analysis, step 5 — the UI
+surface for the scheduler shipped in v1.0.0dm). The jobs were runnable from
+cron and the API; now they're visible and runnable from the app.
+
+### Settings → Scheduled Agents
+
+A new tab in the Settings view (after Targets) lists every scheduled job
+with its cadence, kind (`agent · <persona>` or `sweep`), and description.
+Each job card shows:
+
+- a **cadence pill** and **kind** label,
+- a **Run now** button that POSTs to `/api/agent/scheduled/<key>/run`,
+  splices the returned record back into the cached list, re-renders, and
+  toasts ok / errors,
+- a **last-run line** — an ok/failed pill plus a relative-time label
+  ("…(2h ago)") via `_agentAgoLabel`,
+- a collapsible **Last output** `<details>` that reuses Jeff's markdown
+  renderer (`_jeffMarkdown`) for the message and the audit-card renderer
+  (`_jeffStepsEl`) for the agent's tool trace.
+
+The tab lazy-loads on first open (the `host.dataset.loaded` gate) and a
+Reload button forces a refresh. No new endpoints — it consumes the two
+shipped in v1.0.0dm.
+
+`<title>` bumped to v1.0.0dn. JS syntax check clean; full suite stays
+green (1257 tests). This completes the original 5-step gap-analysis
+sequence (MCP server → tool-using Jeff → persona library → audit cards →
+scheduled agents).
+
 ## [1.0.0dm] - 2026-05-28 - Scheduled agents (cron-style recurring jobs)
 
 Ben: "build all improvements" (CRM agentic gap analysis, step 5 — the
