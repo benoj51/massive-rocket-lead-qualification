@@ -22,16 +22,13 @@ Schema per note:
 """
 from __future__ import annotations
 
-import json
 import os
-import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 _DEFAULT_DIR = Path(__file__).parent / "cache" / "lead_contact_notes"
-_LOCK = threading.Lock()
 
 NOTE_TYPES = ["call", "email", "intro", "touch", "follow_up", "other"]
 
@@ -61,20 +58,28 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _load_raw(lead_id: str, contact_id: str) -> list[dict[str, Any]]:
-    p = _path(lead_id, contact_id)
-    if not p.exists():
-        return []
+def _load_raw(lead_id: str, contact_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
+    """Load this contact's notes. v1.0.0dp: routed through the
+    corruption-aware loader. Mutation callers pass strict=True so a file
+    we cannot read aborts the write (translated to our own error type)
+    instead of silently clobbering recoverable history; read callers use
+    the default lenient mode (returns [], recovers from .bak)."""
+    import json_file_store
     try:
-        with _LOCK:
-            return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
+        return json_file_store.load_list_safe(_path(lead_id, contact_id), strict=strict)
+    except json_file_store.CorruptStoreError as e:
+        raise LeadContactNotesStoreError(
+            "note history file is unreadable; refusing to save so existing "
+            "notes are not overwritten") from e
 
 
 def _write_raw(lead_id: str, contact_id: str, notes: list[dict[str, Any]]) -> None:
-    with _LOCK:
-        _path(lead_id, contact_id).write_text(json.dumps(notes, indent=2))
+    # v1.0.0dp: atomic write + .bak sidecar (write_json_backup). Brings
+    # this store in line with partner_notes_store / calls_store, which
+    # migrated off plain write_text() in v1.0.0cu, and adds the backup
+    # so a bad write or accidental wipe stays recoverable.
+    import json_file_store
+    json_file_store.write_json_backup(_path(lead_id, contact_id), notes)
 
 
 def list_notes(lead_id: str, contact_id: str) -> list[dict[str, Any]]:
@@ -100,14 +105,14 @@ def add_note(lead_id: str, contact_id: str, payload: dict[str, Any]) -> dict[str
         "author": (payload.get("author") or "").strip() or None,
         "created_at": _now_iso(),
     }
-    rows = _load_raw(lead_id, contact_id)
+    rows = _load_raw(lead_id, contact_id, strict=True)
     rows.append(note)
     _write_raw(lead_id, contact_id, rows)
     return note
 
 
 def delete_note(lead_id: str, contact_id: str, note_id: str) -> bool:
-    rows = _load_raw(lead_id, contact_id)
+    rows = _load_raw(lead_id, contact_id, strict=True)
     new_rows = [r for r in rows if r.get("id") != note_id]
     if len(new_rows) == len(rows):
         return False
@@ -117,9 +122,13 @@ def delete_note(lead_id: str, contact_id: str, note_id: str) -> bool:
 
 def delete_all_for_contact(lead_id: str, contact_id: str) -> bool:
     """Cascade delete — called when a contact is removed."""
+    import json_file_store
     p = _path(lead_id, contact_id)
     if not p.exists():
         return False
+    # v1.0.0dp: snapshot to .bak before the cascade removes the live
+    # file, so an accidental contact deletion doesn't vaporise notes.
+    json_file_store.backup_file(p)
     try:
         p.unlink()
         return True

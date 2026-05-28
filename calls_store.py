@@ -31,14 +31,12 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 _DEFAULT_DIR = Path(__file__).parent / "cache" / "calls"
-_LOCK = threading.Lock()
 
 
 class CallsStoreError(RuntimeError):
@@ -65,15 +63,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _load_raw(lead_id: str) -> list[dict[str, Any]]:
-    p = _path(lead_id)
-    if not p.exists():
-        return []
+def _load_raw(lead_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
+    """Load this lead's call / note log. v1.0.0dp: routed through the
+    corruption-aware loader. Mutation callers pass strict=True so a file
+    we cannot read aborts the write (translated to CallsStoreError)
+    instead of silently clobbering recoverable history; read callers use
+    the default lenient mode (returns [], recovers from .bak)."""
+    import json_file_store
     try:
-        with _LOCK:
-            return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
+        return json_file_store.load_list_safe(_path(lead_id), strict=strict)
+    except json_file_store.CorruptStoreError as e:
+        raise CallsStoreError(
+            "call/note history file is unreadable; refusing to save so "
+            "existing notes are not overwritten") from e
 
 
 def _write_raw(lead_id: str, rows: list[dict[str, Any]]) -> None:
@@ -81,12 +83,14 @@ def _write_raw(lead_id: str, rows: list[dict[str, Any]]) -> None:
     # a crash during write_text() could corrupt the calls file and the
     # load path swallows the JSONDecodeError silently, losing every
     # note for that lead. tempfile + os.replace prevents partial writes.
+    # v1.0.0dp: write_json_backup adds a .bak sidecar so a bad write or
+    # an accidental wipe stays recoverable.
     import json_file_store
-    json_file_store.write_json(_path(lead_id), rows)
+    json_file_store.write_json_backup(_path(lead_id), rows)
 
 
 def list_calls(lead_id: str) -> list[dict[str, Any]]:
-    rows = _load_raw(lead_id)
+    rows = _load_raw(lead_id)  # read path: lenient (recovers from .bak, never raises)
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return rows
 
@@ -126,7 +130,7 @@ def add_call(lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         # contact_id is optional for "Braze partnership team" attribution.
         "partner_source": _normalise_partner_source(payload.get("partner_source")),
     }
-    rows = _load_raw(lead_id)
+    rows = _load_raw(lead_id, strict=True)
     rows.append(record)
     _write_raw(lead_id, rows)
     return record
@@ -159,7 +163,7 @@ def update_call(lead_id: str, call_id: str, edits: dict[str, Any]) -> dict[str, 
     """Apply edits to an existing call (note, title, attendees). The raw
     content + AI-extracted block stay immutable — to change those, delete
     and re-add."""
-    rows = _load_raw(lead_id)
+    rows = _load_raw(lead_id, strict=True)
     for r in rows:
         if r.get("id") != call_id:
             continue
@@ -181,7 +185,7 @@ def update_call(lead_id: str, call_id: str, edits: dict[str, Any]) -> dict[str, 
 
 
 def delete_call(lead_id: str, call_id: str) -> bool:
-    rows = _load_raw(lead_id)
+    rows = _load_raw(lead_id, strict=True)
     new_rows = [r for r in rows if r.get("id") != call_id]
     if len(new_rows) == len(rows):
         return False

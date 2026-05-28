@@ -5,6 +5,67 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dp] - 2026-05-28 - Guard against removing existing notes
+
+Ben: "guard against removing existing notes in the platform."
+
+v1.0.0cu (the note-loss audit) made every note and call write atomic, so
+a crash can no longer leave a half-written file behind. It left one hole
+open on the read side: the load path returned an empty list for a file
+that existed but could not be parsed, so the very next add or delete
+loaded that empty list, appended to it, and wrote it back. A single
+unreadable read could therefore wipe an entire contact's note history,
+even though the bytes were still sitting on disk and recoverable.
+
+This closes that path for the three stores that hold human-authored
+history with no other source of truth: `lead_contact_notes_store`,
+`partner_notes_store`, and `calls_store`.
+
+### `json_file_store.py` — corruption-aware load + backup sidecar
+
+Three new primitives:
+
+- `load_list_safe(path, *, strict)` distinguishes a genuinely absent
+  file (returns `[]`) from one that exists but cannot be parsed. On a
+  corrupt primary it transparently recovers from a `.bak` sidecar.
+  When neither is readable: `strict=True` raises `CorruptStoreError`
+  (mutation paths refuse to overwrite), `strict=False` returns `[]`
+  (read paths degrade).
+- `write_json_backup(path, data)` does the same atomic write as
+  `write_json`, but first snapshots the prior good state to a `.bak`
+  sidecar. It never overwrites a good `.bak` with a corrupt primary, so
+  the last known-good copy survives a corruption event.
+- `backup_file(path)` snapshots before a destructive op (cascade delete).
+
+The `.bak` suffix is deliberately not matched by the `glob('*.json')`
+and `endswith('.json')` consumers elsewhere, so the sidecars stay
+invisible to every existing aggregator.
+
+### The three stores
+
+- Reads (`list_notes`, `list_calls`, `aggregate_extractions`) load
+  lenient: they still degrade to `[]` and now also self-heal from `.bak`.
+- Mutations (`add`, `update`, `delete`) load strict: a file we cannot
+  read aborts the write (surfaced as the store's own error) instead of
+  silently clobbering recoverable notes.
+- All writes go through `write_json_backup`, so every save leaves a
+  recoverable snapshot of the prior state.
+- Cascade delete now snapshots to `.bak` before removing the live file,
+  so an accidental contact deletion is recoverable while `list_notes`
+  still correctly reports the cascade as empty.
+- `lead_contact_notes_store` also picked up atomic writes here; it was
+  the one note store still on plain `write_text()` (the others moved in
+  v1.0.0cu).
+
+### Tests
+
+`tests/test_note_loss_guard.py` (17 cases): the loader's missing vs
+corrupt vs recoverable distinction, backup-never-clobbers-good-bak, and
+the headline regression per store (corrupt the file mid-life, then add a
+note, and assert the existing note survives rather than being wiped).
+Plus the unrecoverable case: with no `.bak`, the store refuses and leaves
+the on-disk bytes untouched for manual recovery.
+
 ## [1.0.0do] - 2026-05-28 - Security hardening: rate limits + auth startup guard
 
 Ben: "review security risks" then "go with recommendation". The review
