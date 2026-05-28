@@ -5,6 +5,57 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dm] - 2026-05-28 - Scheduled agents (cron-style recurring jobs)
+
+Ben: "build all improvements" (CRM agentic gap analysis, step 5 — the
+last item). Recurring jobs that run a persona on a cadence and leave
+their output where the team can read it.
+
+### `scheduled_agents.py` — the scheduler logic
+
+Three jobs, mirroring the gap analysis:
+
+- **Monday pipeline digest** — Pipeline Analyst persona writes the weekly
+  pipeline-health + quarterly-attainment digest.
+- **Wednesday news sweep** — runs the watchlist news sweep (no LLM; reuses
+  the extracted `watchlist_sweep.run_sweep`).
+- **Friday stale-stakeholder list** — Partner Relationship Coach lists
+  partner contacts who are overdue or under-covered, by tier.
+
+`run_job(key)` runs the job, persists its latest result (one file per job
+under `cache/scheduled_runs/`) and writes a `scheduled_job_ran` audit
+event. Agent jobs carry the same `steps` audit trace as interactive
+turns. The WHAT/HOW lives here; the WHEN is delegated to cron.
+
+### `watchlist_sweep.py` — extracted, shared
+
+The watchlist news-sweep body that used to live inline in the
+`/api/admin/watchlist/sweep` endpoint is lifted into `run_sweep()` so the
+scheduled job can run it without HTTP. The endpoint is now a thin wrapper
+(behaviour unchanged). Reduces duplication, in the spirit of v1.0.0cg.
+
+### `run_scheduled.py` — cron entry point
+
+`python run_scheduled.py --today` runs whatever job matches today's
+weekday; `--all`, `--list`, or an explicit job key also work. Exit code
+reflects success so a cron wrapper can alert. Typical Railway setup: a
+weekly scheduled job per day calling `--today`.
+
+### Endpoints
+
+- `GET /api/agent/scheduled` — list jobs + each one's latest run.
+- `POST /api/agent/scheduled/<key>/run` — run a job now (persist + audit).
+
+### Tests
+
+11 new tests in test_scheduled_agents.py: registry shape, weekday
+matching, an agent job (scripted fake Anthropic — verifies the run is
+persisted, surfaced in list_jobs, and audited), the offline guard, the
+sweep job (mocked run_sweep, summary + data + ok-false-on-errors), and
+the two endpoints. Full suite stays green (1257 tests).
+
+`<title>` bumped to v1.0.0dm (backend increment; UI surface to follow).
+
 ## [1.0.0dl] - 2026-05-28 - Agent UI: persona switcher + audit cards
 
 Ben: "build all improvements" (CRM agentic gap analysis, step 2 + 4).
