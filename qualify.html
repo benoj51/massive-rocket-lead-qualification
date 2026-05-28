@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dp</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dq</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -4833,6 +4833,17 @@
       populatePipelineFilterOptions();
       populateGroupFilterOptions();
       renderPipeline();
+      // v1.0.0dq: the endpoint now degrades to an empty-but-200 payload when
+      // Notion is unreachable. Surface the warning so an empty pipeline is
+      // never silently mistaken for "no leads".
+      if (data.notion_unavailable) {
+        toast(data.warning || 'Live pipeline data unavailable.', 'error');
+        const empty = $('#pipeline-empty');
+        if (empty) {
+          empty.style.display = 'block';
+          empty.innerHTML = `<div class="big" style="color:var(--red);">${icon('alert', { size: 32 })}</div><div>${escapeHtml(data.warning || 'Live pipeline data unavailable.')}</div>`;
+        }
+      }
     } catch (e) {
       console.error(e);
       $('#pipeline-table tbody').innerHTML = '';
@@ -14796,6 +14807,11 @@
       const data = await jsonFetch(`/api/dashboard?${qs.toString()}`);
       dashboardState.data = data;
       renderDashboard();
+      // v1.0.0dq: dashboard already continued on a Notion outage; now it
+      // flags it explicitly so the zeroed lead stats aren't read as real.
+      if (data.notion_unavailable) {
+        toast(data.warning || 'Live pipeline data unavailable.', 'error');
+      }
       // v1.0.0aw: kick off the engagement-leaderboard fetch in parallel.
       // Slower than the dashboard itself (scoring fan-out), so let the
       // main paint happen first and backfill the leaderboard card.
@@ -15367,6 +15383,11 @@
       const data = await jsonFetch('/api/forecast?horizon=4');
       forecastState.data = data;
       renderForecast();
+      // v1.0.0dq: forecast degrades to an empty-but-200 payload on a Notion
+      // outage. Warn so the zeroed forecast isn't read as a real one.
+      if (data.notion_unavailable) {
+        toast(data.warning || 'Live pipeline data unavailable.', 'error');
+      }
     } catch (e) {
       $('#fc-kpis').innerHTML = `<div style="grid-column:1/-1;color:var(--red);font-size:12px;padding:10px;background:rgba(239,68,68,.08);border-radius:6px;">Forecast failed: ${escapeHtml(e.body?.error || e.message)}</div>`;
     } finally {

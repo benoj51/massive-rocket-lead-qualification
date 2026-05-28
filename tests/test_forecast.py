@@ -426,13 +426,23 @@ class ForecastEndpointTests(unittest.TestCase):
         self.assertEqual(data["by_partner"]["Braze"]["deal_count"], 2)
         self.assertEqual(data["by_partner"]["Hightouch"]["deal_count"], 1)
 
-    def test_forecast_endpoint_502_on_notion_error(self):
+    def test_forecast_degrades_gracefully_on_notion_error(self):
+        # v1.0.0dq: a Notion outage no longer hard-502s the Forecast view.
+        # It returns 200 with an empty-but-valid forecast and an explicit
+        # notion_unavailable flag + warning, matching /api/dashboard and
+        # /api/pipeline. This keeps the view renderable while making the
+        # data gap visible rather than silently showing a zeroed forecast.
         from notion_sync import NotionSyncError
         with self._mock_notion_sync(
             list_pipeline_side_effect=NotionSyncError("502 from Notion")
         ):
             r = self.client.get("/api/forecast")
-        self.assertEqual(r.status_code, 502)
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertTrue(data["notion_unavailable"])
+        self.assertIn("Live pipeline data unavailable", data["warning"])
+        # Still a structurally valid forecast payload (just empty).
+        self.assertEqual(data["totals"]["deal_count"], 0)
 
 
 if __name__ == "__main__":

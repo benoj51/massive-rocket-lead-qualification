@@ -1686,6 +1686,12 @@ def api_pipeline_csv():
         sync = NotionSync()
         rows = sync.list_pipeline(limit=limit)
     except (NotionSyncError, ValueError) as e:
+        # Deliberate exception to the graceful-degrade pattern used by the
+        # pipeline / dashboard / forecast *view* endpoints: this is a file
+        # download, so failing loudly with 502 is the honest UX. Handing
+        # back an empty CSV (HTTP 200) would look like a successful export
+        # of an empty pipeline and quietly lose the user's data on disk.
+        log.warning("Pipeline CSV export failed: %s", e)
         return jsonify({"error": str(e)}), 502
     buf = io.StringIO()
     cols = ["company", "icp_normalised", "status", "sales_stage", "vertical",
@@ -2605,8 +2611,17 @@ def api_pipeline():
             r["is_parent"] = rid in parents_set
         return jsonify({"rows": rows, "count": len(rows)})
     except (NotionSyncError, ValueError) as e:
-        log.warning("Pipeline list failure: %s", e)
-        return jsonify({"error": str(e), "rows": []}), 502
+        # v1.0.0dq: degrade gracefully instead of hard-502, matching
+        # /api/dashboard. A transient Notion outage should render an empty
+        # pipeline with an explicit warning the UI surfaces, not black out
+        # the whole view. notion_unavailable lets the client show a banner
+        # so the empty state is never mistaken for "no leads".
+        log.warning("Pipeline list failure (degrading to empty): %s", e)
+        return jsonify({
+            "rows": [], "count": 0,
+            "notion_unavailable": True,
+            "warning": f"Live pipeline data unavailable: {e}",
+        })
     except Exception as e:
         log.exception("Pipeline list crash")
         return jsonify({"error": str(e), "rows": []}), 500
@@ -6639,17 +6654,25 @@ def api_dashboard():
     # Pipeline rows fetched best-effort; if Notion is unavailable we
     # still return partner-side stats so the dashboard isn't blank.
     pipeline_rows: list[dict] = []
+    notion_warning = None
     try:
         sync = NotionSync()
         pipeline_rows = sync.list_pipeline(limit=500)
     except (NotionSyncError, ValueError) as e:
         log.warning("Dashboard: pipeline fetch failed (continuing without lead stats): %s", e)
+        # v1.0.0dq: previously swallowed silently, so a Notion outage showed
+        # zeroed lead stats with no signal. Surface the same notion_unavailable
+        # flag the pipeline / forecast endpoints now use so the UI can warn.
+        notion_warning = f"Live pipeline data unavailable: {e}"
     try:
         payload = dashboard.build_dashboard(
             window_days=window,
             owner_filter=owner_filter,
             pipeline_rows=pipeline_rows,
         )
+        if notion_warning:
+            payload["notion_unavailable"] = True
+            payload["warning"] = notion_warning
         return jsonify(payload)
     except Exception as e:
         log.exception("Dashboard build failed")
@@ -6673,16 +6696,25 @@ def api_forecast():
         horizon = max(1, min(8, int(request.args.get("horizon", "4"))))
     except ValueError:
         horizon = 4
+    notion_warning = None
     try:
         sync = NotionSync()
         # Pull a generous slab so we capture the long tail. The
         # forecast logic filters out disqualified/on-hold/closed-lost.
         rows = sync.list_pipeline(limit=500)
     except (NotionSyncError, ValueError) as e:
-        log.warning("Forecast: pipeline fetch failed: %s", e)
-        return jsonify({"error": str(e)}), 502
+        # v1.0.0dq: degrade gracefully like /api/dashboard and /api/pipeline.
+        # An empty forecast with an explicit notion_unavailable flag keeps
+        # the Forecast view renderable during a Notion outage instead of
+        # hard-502-ing it, while the warning makes the data gap visible.
+        log.warning("Forecast: pipeline fetch failed (degrading to empty): %s", e)
+        rows = []
+        notion_warning = f"Live pipeline data unavailable: {e}"
     try:
         payload = forecast.build_forecast(rows, horizon_quarters=horizon)
+        if notion_warning:
+            payload["notion_unavailable"] = True
+            payload["warning"] = notion_warning
         return jsonify(payload)
     except Exception as e:
         log.exception("Forecast build failed")

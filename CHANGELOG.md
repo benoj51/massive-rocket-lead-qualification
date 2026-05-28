@@ -5,6 +5,59 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dq] - 2026-05-28 - Comprehensive test pass: CLI module coverage + Notion-outage consistency
+
+Ben: "test platform comprehensively." Two of the four follow-up threads land
+here (the line-level coverage report and the live browser walkthrough were
+the other two).
+
+### Coverage for the eight untested entry-point modules
+
+The standalone CLIs and side servers (`auto_qualify`, `qualify_lead`,
+`run_scheduled`, `mr_mcp_server`, `research_server`, `research`,
+`diagnostics`, `legacy_hubspot`) were the only first-party files with zero
+test coverage. They are not imported by the Flask app, so a syntax error or
+a broken top-level import in any of them shipped silently.
+
+New `tests/test_cli_modules.py` (38 tests + 8 subtests):
+
+- A clean-import smoke test for all eight, so an import-time regression
+  fails the suite instead of only surfacing when someone runs the script.
+- Targeted unit tests for their network-free pure logic: `research`'s text
+  miners (domain/name/revenue/employee/vertical/tech/complexity/region
+  parsers, query builder, report + prompt formatters), `auto_qualify`'s
+  HTML/tech-detection helpers and HTML report builder, `qualify_lead`'s fit
+  summary / next steps / stakeholder targets, `diagnostics`' env checks and
+  `main` (fixture mode, no network), and `run_scheduled`'s cron dispatch
+  (with `scheduled_agents` mocked).
+
+Coverage on those modules went from 0% to: research 91%, run_scheduled 98%,
+diagnostics 77%, qualify_lead 40%, auto_qualify 34%, mr_mcp_server 31%,
+research_server 30%, legacy_hubspot 15% — the remainder being the
+network/server/interactive paths now baseline-guarded by the import test.
+
+### Consistent Notion-outage behaviour across read endpoints
+
+A comprehensive boot test surfaced an inconsistency: when Notion is
+unreachable, `/api/dashboard` degraded gracefully to a 200 (continuing with
+partner-side stats), but `/api/pipeline` and `/api/forecast` hard-502'd,
+blacking out those views.
+
+`/api/pipeline` and `/api/forecast` now degrade the same way as the
+dashboard: a 200 with an empty-but-valid payload plus an explicit
+`notion_unavailable: true` flag and a `warning` string. The dashboard, which
+previously swallowed the failure silently, now sets the same flag so a
+zeroed lead count is never mistaken for a real one. The SPA surfaces the
+warning as a non-blocking banner/toast on all three views.
+
+`/api/pipeline/export.csv` deliberately keeps its hard 502: a file download
+must fail loudly rather than hand back an empty CSV that looks like a
+successful export of an empty pipeline.
+
+Tests: new `tests/test_pipeline_endpoint.py` (success, graceful degrade, CSV
+loud-fail); `tests/test_forecast.py` updated (the old 502 assertion is now a
+graceful-degrade assertion). Full suite green.
+
 ## [1.0.0dp] - 2026-05-28 - Guard against removing existing notes
 
 Ben: "guard against removing existing notes in the platform."
