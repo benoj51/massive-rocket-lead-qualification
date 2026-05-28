@@ -5,6 +5,53 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0do] - 2026-05-28 - Security hardening: rate limits + auth startup guard
+
+Ben: "review security risks" then "go with recommendation". The review
+surfaced two cheap, high-value fixes; this ships both.
+
+### `rate_limit.py` — throttle the cost-bearing endpoints
+
+Anything that calls Anthropic, plus the watchlist news sweep, had no
+throttle. With a single shared auth token, a leaked token or a runaway
+client loop could rack up unbounded Anthropic spend and hammer the
+outbound RSS fetch. A dependency-free, in-process fixed-window limiter
+(keyed by the first X-Forwarded-For hop, falling back to remote_addr)
+now bounds them:
+
+- `@rate_limit.llm()` — a shared bucket across `/api/qualify`,
+  `/api/lead/extract`, `/api/lead/<id>/summary` (POST),
+  `/api/roadmap/<id>/ai-refine`, `/api/roadmap/<id>/ai-suggest-extended`,
+  `/api/jeff/chat`, `/api/agent/chat`, and
+  `/api/agent/scheduled/<key>/run`. Default 60/min/client.
+- `@rate_limit.sweep()` — `/api/admin/watchlist/sweep`. Default 12/min.
+
+Over the limit returns HTTP 429 + `Retry-After`. Limits are read from
+the environment at call time (`RATE_LIMIT_LLM_PER_MIN`,
+`RATE_LIMIT_SWEEP_PER_MIN`), so ops can tune them without a redeploy;
+0 disables a scope. No new dependency: chose a 40-line counter over
+flask-limiter since this is a single-instance deploy with a handful of
+users.
+
+### Auth startup guard
+
+`server.py` now logs a loud SECURITY banner at startup when
+`APP_AUTH_TOKEN` is unset — the state in which the entire `/api/*`
+surface (write paths + the LLM endpoints) is unauthenticated. Dev still
+works open; a misconfigured production deploy is now obvious in the logs.
+
+### Tests
+
+7 new tests in test_rate_limit.py: the window logic (allows up to the
+limit then 429s, independent keys, expiry, reset), env parsing, and the
+endpoint wiring (429 after the limit with a Retry-After header; no-op
+when the limit is 0). A new `tests/conftest.py` disables the limiter for
+the rest of the suite (its counters are global and the whole run sits in
+one 60s window, which would otherwise trip 429s on later tests). Full
+suite: 1264 tests green.
+
+`<title>` bumped to v1.0.0do.
+
 ## [1.0.0dn] - 2026-05-28 - Scheduled Agents settings tab (UI surface)
 
 Ben: "build all improvements" (CRM agentic gap analysis, step 5 — the UI

@@ -70,6 +70,7 @@ import pricing_store
 import project_store
 import qualify_service
 import rate_cards
+import rate_limit
 import roadmap as roadmap_module
 import scope as scope_module
 import slack_digest
@@ -135,6 +136,19 @@ except OSError:
 
 AUTH_TOKEN = os.environ.get("APP_AUTH_TOKEN", "").strip()
 AUTH_ALLOW_QUERY_TOKEN = os.environ.get("AUTH_TOKEN_ALLOW_QUERY") == "1"
+
+# v1.0.0do: fail loud (not closed — dev needs the open path) when auth
+# is disabled. If APP_AUTH_TOKEN is unset, the entire /api/* surface,
+# including write paths and the cost-bearing LLM endpoints, is open to
+# anyone who can reach the host. Production MUST set it. Emit a banner
+# at startup so a misconfigured deploy is obvious in the logs.
+if not AUTH_TOKEN:
+    log.warning(
+        "SECURITY: APP_AUTH_TOKEN is not set. The /api/* surface is "
+        "UNAUTHENTICATED. This is fine for local dev, but in any shared "
+        "or production environment set APP_AUTH_TOKEN so requests must "
+        "present 'Authorization: Bearer <token>'."
+    )
 
 
 def _request_token() -> str:
@@ -241,6 +255,7 @@ def _compose_live_project_name(company: str | None,
 
 
 @app.route("/api/qualify", methods=["POST"])
+@rate_limit.llm()
 def api_qualify():
     body = request.get_json(silent=True) or {}
     name = (body.get("name") or "").strip()
@@ -276,6 +291,7 @@ def api_qualify():
 
 
 @app.route("/api/lead/extract", methods=["POST"])
+@rate_limit.llm()
 def api_lead_extract():
     """Run Anthropic over notes/transcripts and return MEDDPICC + scope fills."""
     body = request.get_json(silent=True) or {}
@@ -2120,6 +2136,7 @@ def api_lead_summary_get(lead_id: str):
 
 
 @app.route("/api/lead/<lead_id>/summary", methods=["POST"])
+@rate_limit.llm()
 def api_lead_summary_refresh(lead_id: str):
     """Run Claude over the lead's full context, cache + return the result.
 
@@ -2235,6 +2252,7 @@ def api_roadmap_seed_from_package(lead_id: str):
 
 
 @app.route("/api/roadmap/<lead_id>/ai-refine", methods=["POST"])
+@rate_limit.llm()
 def api_roadmap_ai_refine(lead_id: str):
     if not ai_summary.is_configured():
         return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
@@ -2286,6 +2304,7 @@ def api_roadmap_ai_refine(lead_id: str):
 
 
 @app.route("/api/roadmap/<lead_id>/ai-suggest-extended", methods=["POST"])
+@rate_limit.llm()
 def api_roadmap_ai_suggest_extended(lead_id: str):
     if not ai_summary.is_configured():
         return jsonify({"error": "AI unavailable (ANTHROPIC_API_KEY not set)"}), 503
@@ -5031,6 +5050,7 @@ def api_okr_kr_delete(okr_id: str, kr_id: str):
 # system prompt assembly (which pulls from code) to live server-side.
 
 @app.route("/api/jeff/chat", methods=["POST"])
+@rate_limit.llm()
 def api_jeff_chat():
     """Chat turn for Jeff.
 
@@ -5182,6 +5202,7 @@ def api_agent_personas():
 
 
 @app.route("/api/agent/chat", methods=["POST"])
+@rate_limit.llm()
 def api_agent_chat():
     """Run one tool-using agent turn.
 
@@ -5247,6 +5268,7 @@ def api_agent_scheduled_list():
 
 
 @app.route("/api/agent/scheduled/<key>/run", methods=["POST"])
+@rate_limit.llm()
 def api_agent_scheduled_run(key):
     """Run one scheduled job now. Persists the result + audits it."""
     import scheduled_agents
@@ -6054,6 +6076,7 @@ def api_lead_news_refresh(lead_id: str):
 
 
 @app.route("/api/admin/watchlist/sweep", methods=["POST"])
+@rate_limit.sweep()
 def api_watchlist_sweep():
     """Scan every watched account: fetch news, score, persist new
     items, fire `news_alert` notifications to each watcher for items
