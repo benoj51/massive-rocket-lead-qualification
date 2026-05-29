@@ -233,6 +233,10 @@ sibling brands with their statuses).
 Return ONE JSON object, no preamble, no markdown fences:
 
 {
+  "qualification": {
+    "rag": "<green | amber | red — the overall health of this deal>",
+    "rationale": "<one sentence: why this colour, the deciding factor>"
+  },
   "state_of_play": "<2-3 sentence summary of where the deal sits right now>",
   "key_facts": [
     "<bullet 1 — what we know with confidence>",
@@ -245,19 +249,37 @@ Return ONE JSON object, no preamble, no markdown fences:
     "<bullet 3-4>"
   ],
   "next_action": "<one sentence: the AE's next concrete move>",
+  "coaching": [
+    "<coaching point 1 — how the AE should advance THIS deal>",
+    "<2-4 total>"
+  ],
   "risks": [
     "<concrete risk worth flagging, or omit the array entirely if none>"
   ]
 }
 
 Rules:
-- 2–3 sentences for state_of_play. No fluff. Lead with the most important
+- qualification.rag is a sober verdict on deal health: green = strong fit
+  with momentum and a clear path; amber = real but with material gaps or
+  stalled; red = weak fit, blocked, or going cold. qualification.rationale
+  is ONE sentence naming the single biggest reason for the colour. Weigh
+  the MEDDPICC coverage, ICP score/status, recency, and momentum. If the
+  data is too thin to judge, use amber and say so in the rationale.
+- 2-3 sentences for state_of_play. No fluff. Lead with the most important
   thing.
-- 3–5 key_facts. Ground every bullet in the data — no fabrication.
-- 3–4 open_questions — what specifically the AE should ask on the next
+- 3-5 key_facts. Ground every bullet in the data, no fabrication.
+- 3-4 open_questions: what specifically the AE should ask on the next
   call.
 - next_action must be concrete and doable this week.
-- Plain English. No em-dashes. No marketing tone.
+- 2-4 coaching points: strategic advice for the AE on advancing the deal,
+  framed through MEDDICC (multi-thread to the Economic Buyer, arm the
+  Champion, validate Decision Criteria, neutralise the incumbent, etc.).
+  These are deal-strategy nudges, distinct from next_action (the single
+  immediate step). Each is one short imperative sentence. Omit the array
+  if there is genuinely nothing useful to advise.
+- Voice: neutral, factual, executive-level consultant. UK English spelling
+  (optimise, prioritise, programme, organisation, behaviour). No em-dashes.
+  No marketing tone, no emojis, no decorative symbols.
 - If the data is thin (e.g. only one note), say so honestly in
   state_of_play.
 
@@ -338,13 +360,24 @@ def synthesise_lead(payload: dict) -> dict | None:
         log.warning("Lead synthesis failed: %s", e)
         return None
     # Normalise
-    return {
+    out = {
         "state_of_play": str(data.get("state_of_play") or "").strip(),
         "key_facts": [str(b).strip() for b in (data.get("key_facts") or []) if str(b).strip()][:6],
         "open_questions": [str(b).strip() for b in (data.get("open_questions") or []) if str(b).strip()][:6],
         "next_action": str(data.get("next_action") or "").strip(),
+        "coaching": [str(b).strip() for b in (data.get("coaching") or []) if str(b).strip()][:5],
         "risks": [str(b).strip() for b in (data.get("risks") or []) if str(b).strip()][:5],
     }
+    # Qualification verdict: only keep a clean {rag, rationale} when the
+    # model returned a recognised RAG colour, so the UI can trust the badge.
+    qual = data.get("qualification") or {}
+    rag = str(qual.get("rag") or "").strip().lower()
+    if rag in ("green", "amber", "red"):
+        out["qualification"] = {
+            "rag": rag,
+            "rationale": str(qual.get("rationale") or "").strip(),
+        }
+    return out
 
 
 def suggest_extended_engagement(*, current_scope_streams: list[str],

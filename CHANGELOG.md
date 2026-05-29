@@ -5,6 +5,43 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dt] - 2026-05-29 - Opportunity summary: qualification RAG verdict + AE coaching points
+
+Ben asked to fold the high-value parts of a "Discovery Gem" sales-brief prompt
+into the synthesised summary at the top of an opportunity, without bloating the
+15-second scan into a full Jira brief. Most of that prompt's sections already
+live elsewhere (Account News, agency/competitor context, tech-stack chips,
+MEDDPICC tracking, the per-call Discovery section), so this pass takes only the
+two genuinely additive pieces plus the house voice.
+
+### What the lead synthesis now returns
+
+`ai_summary.synthesise_lead` gains two fields on top of the existing
+state_of_play / key_facts / open_questions / next_action / risks:
+
+- `qualification`: `{ rag: "green|amber|red", rationale: "<one sentence>" }` — a
+  sober deal-health verdict weighing MEDDPICC coverage, ICP score/status,
+  recency and momentum. Only kept when the model returns a recognised RAG
+  colour, so the badge is always trustworthy.
+- `coaching`: 2-4 numbered strategy nudges for the AE, framed through MEDDICC
+  (multi-thread to the Economic Buyer, arm the Champion, validate Decision
+  Criteria, neutralise the incumbent). Distinct from `next_action`, which stays
+  the single immediate step.
+
+The prompt also now pins the voice: neutral executive-consultant tone, UK
+English spelling, no em-dashes, no marketing fluff.
+
+### Where it shows
+
+- Lead drawer summary: a coloured RAG pill ("On track" / "Watch" / "At risk")
+  with its one-line rationale sits above the state-of-play; a numbered
+  "Coaching" list sits under "Next move".
+- Copy-to-clipboard markdown and the Notion summary block both carry the new
+  Qualification line and Coaching list.
+
+Pure additive change: existing summaries without the new fields render exactly
+as before.
+
 ## [1.0.0ds] - 2026-05-28 - Partners blurb: Hightouch in the example, mParticle stays a partner
 
 Ben: "Replace mParticle with Hightouch here" (the Partners view subtitle), then

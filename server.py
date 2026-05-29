@@ -2196,6 +2196,11 @@ def _format_summary_for_notion(summary: dict) -> str:
     (the rich_text helper chunks further if needed).
     """
     parts: list[str] = []
+    qual = summary.get("qualification") or {}
+    rag = str(qual.get("rag") or "").strip().upper()
+    if rag:
+        rationale = str(qual.get("rationale") or "").strip()
+        parts.append(f"QUALIFICATION: {rag}" + (f". {rationale}" if rationale else ""))
     state = (summary.get("state_of_play") or "").strip()
     if state:
         parts.append(state)
@@ -2208,6 +2213,9 @@ def _format_summary_for_notion(summary: dict) -> str:
     next_action = (summary.get("next_action") or "").strip()
     if next_action:
         parts.append(f"NEXT ACTION: {next_action}")
+    coaching = [c.strip() for c in (summary.get("coaching") or []) if c]
+    if coaching:
+        parts.append("COACHING:\n" + "\n".join(f"• {c}" for c in coaching))
     risks = [r.strip() for r in (summary.get("risks") or []) if r]
     if risks:
         parts.append("RISKS:\n" + "\n".join(f"• {r}" for r in risks))

@@ -48,8 +48,19 @@ class AiSynthesisPromptSchemaTests(unittest.TestCase):
     def test_prompt_documents_full_schema(self):
         import ai_summary
         for key in ("state_of_play", "key_facts", "open_questions",
-                    "next_action", "risks"):
+                    "next_action", "risks", "qualification", "coaching"):
             self.assertIn(key, ai_summary._LEAD_SUMMARY_SYSTEM_PROMPT)
+
+    def test_prompt_documents_rag_verdict(self):
+        """v1.0.0dt: qualification RAG verdict + AE coaching folded in."""
+        import ai_summary
+        prompt = ai_summary._LEAD_SUMMARY_SYSTEM_PROMPT
+        # The three RAG colours must be named so the model emits a value
+        # the UI badge can map.
+        for colour in ("green", "amber", "red"):
+            self.assertIn(colour, prompt)
+        # House voice: UK English + no em-dashes.
+        self.assertIn("UK English", prompt)
 
     def test_prompt_documents_group_context(self):
         """v0.10.0d: prompt teaches Claude about parent/sibling context."""
@@ -185,6 +196,23 @@ class FormatSummaryForNotionTests(unittest.TestCase):
         self.assertNotIn("KEY FACTS:", out)
         self.assertNotIn("OPEN QUESTIONS:", out)
         self.assertNotIn("RISKS:", out)
+        self.assertNotIn("QUALIFICATION:", out)
+        self.assertNotIn("COACHING:", out)
+
+    def test_qualification_and_coaching_render(self):
+        """v1.0.0dt: the RAG verdict + coaching points flow into Notion."""
+        out = self.server._format_summary_for_notion({
+            "qualification": {"rag": "amber",
+                              "rationale": "Strong fit but no Economic Buyer yet."},
+            "state_of_play": "Mid-discovery on a CDP build.",
+            "coaching": ["Multi-thread to the CFO",
+                         "Arm the champion with the ROI deck"],
+        })
+        self.assertIn("QUALIFICATION: AMBER", out)
+        self.assertIn("Strong fit but no Economic Buyer yet.", out)
+        self.assertIn("COACHING:", out)
+        self.assertIn("• Multi-thread to the CFO", out)
+        self.assertIn("• Arm the champion with the ROI deck", out)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0ds</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dt</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -9149,8 +9149,28 @@
       `<li style="margin:3px 0;">${escapeHtml(f)}</li>`).join('');
     const questionsHtml = (ai.open_questions || []).map(q =>
       `<li style="margin:3px 0;">${escapeHtml(q)}</li>`).join('');
+    const coachingHtml = (ai.coaching || []).map(c =>
+      `<li style="margin:3px 0;">${escapeHtml(c)}</li>`).join('');
     const risksHtml = (ai.risks || []).map(r =>
       `<li style="margin:3px 0;color:var(--red);">${escapeHtml(r)}</li>`).join('');
+    // Qualification RAG verdict: instant red/amber/green health read.
+    const qual = ai.qualification;
+    let qualHtml = '';
+    if (qual && qual.rag) {
+      const ragMap = {
+        green: { token: 'var(--green)',  label: 'On track' },
+        amber: { token: 'var(--yellow)', label: 'Watch' },
+        red:   { token: 'var(--red)',    label: 'At risk' },
+      };
+      const rc = ragMap[qual.rag] || ragMap.amber;
+      qualHtml = `
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${rc.token};border:1px solid ${rc.token};border-radius:999px;padding:3px 9px;white-space:nowrap;">
+            <span style="width:7px;height:7px;border-radius:50%;background:${rc.token};"></span>${rc.label}
+          </span>
+          ${qual.rationale ? `<span style="font-size:12px;color:var(--text-dim);line-height:1.4;">${escapeHtml(qual.rationale)}</span>` : ''}
+        </div>`;
+    }
     el.innerHTML = `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;">
         ${lastCallLabel ? `
@@ -9160,6 +9180,7 @@
             </span>
           </div>
         ` : ''}
+        ${qualHtml}
         <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px;">
           ${escapeHtml(ai.state_of_play || '')}
         </div>
@@ -9174,6 +9195,10 @@
         ${ai.next_action ? `
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin-bottom:4px;">Next move</div>
           <div style="font-size:12px;color:var(--text);font-weight:500;margin-bottom:10px;">${escapeHtml(ai.next_action)}</div>
+        ` : ''}
+        ${coachingHtml ? `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-2, var(--accent));margin-bottom:4px;">Coaching</div>
+          <ol style="margin:0 0 10px 18px;padding:0;font-size:12px;color:var(--text-dim);">${coachingHtml}</ol>
         ` : ''}
         ${risksHtml ? `
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);margin-bottom:4px;">Risks</div>
@@ -10443,6 +10468,11 @@
   function formatLeadSummaryForCopy(ai, company) {
     const lines = [];
     if (company) lines.push(`# Lead Summary - ${company}`, '');
+    if (ai.qualification && ai.qualification.rag) {
+      const verdict = ai.qualification.rag.toUpperCase();
+      const rationale = ai.qualification.rationale ? `. ${ai.qualification.rationale}` : '';
+      lines.push(`**Qualification:** ${verdict}${rationale}`, '');
+    }
     if (ai.state_of_play) lines.push(ai.state_of_play, '');
     if ((ai.key_facts || []).length) {
       lines.push('**Key facts**');
@@ -10455,6 +10485,11 @@
       lines.push('');
     }
     if (ai.next_action) lines.push(`**Next action:** ${ai.next_action}`, '');
+    if ((ai.coaching || []).length) {
+      lines.push('**Coaching**');
+      ai.coaching.forEach((c, i) => lines.push(`${i + 1}. ${c}`));
+      lines.push('');
+    }
     if ((ai.risks || []).length) {
       lines.push('**Risks**');
       ai.risks.forEach(r => lines.push(`- ${r}`));
