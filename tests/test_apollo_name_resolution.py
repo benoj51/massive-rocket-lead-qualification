@@ -51,6 +51,55 @@ class ResolvePersonNameTests(unittest.TestCase):
         self.assertEqual(self.apollo._resolve_person_name(p),
                           "Ada Lovelace")
 
+    # --- v1.0.0du: recover surname from the LinkedIn slug -----------------
+    # Apollo's people search often returns a first name with last_name
+    # masked (null). The LinkedIn vanity slug still carries the real
+    # handle, so we recover the surname from there before showing a bare
+    # first name like "Kirstey".
+    def test_surname_recovered_from_clean_linkedin_slug(self):
+        p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey",
+             "linkedin_url": "https://www.linkedin.com/in/kirstey-mcleod"}
+        self.assertEqual(self.apollo._resolve_person_name(p),
+                          "Kirstey Mcleod")
+
+    def test_surname_recovered_when_slug_has_trailing_id(self):
+        p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey",
+             "linkedin_url":
+                 "https://www.linkedin.com/in/kirstey-mcleod-1a2b3c4d/"}
+        self.assertEqual(self.apollo._resolve_person_name(p),
+                          "Kirstey Mcleod")
+
+    def test_vanity_handle_not_treated_as_surname(self):
+        """`kirstey-at-subway` is three name-shaped tokens, not
+        first-surname, so we must NOT invent "Kirstey At"."""
+        p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey",
+             "linkedin_url": "https://linkedin.com/in/kirstey-at-subway"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "Kirstey")
+
+    def test_compound_slug_skipped(self):
+        p = {"first_name": "John", "last_name": None, "name": "John",
+             "linkedin_url": "https://www.linkedin.com/in/john-van-der-berg"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "John")
+
+    def test_slug_first_token_must_match_first_name(self):
+        p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey",
+             "linkedin_url": "https://www.linkedin.com/in/k-mcleod"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "Kirstey")
+
+    def test_no_linkedin_url_stays_first_only(self):
+        p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "Kirstey")
+
+    def test_normalise_person_recovers_surname_from_slug(self):
+        p = {"id": "y", "first_name": "Kirstey", "last_name": None,
+             "name": "Kirstey", "title": "VP Marketing",
+             "linkedin_url": "https://www.linkedin.com/in/kirstey-mcleod-99"}
+        out = self.apollo._normalise_person(p)
+        self.assertEqual(out["name"], "Kirstey Mcleod")
+        # first_name / last_name passthrough is untouched.
+        self.assertEqual(out["first_name"], "Kirstey")
+        self.assertIsNone(out["last_name"])
+
     def test_normalise_person_exposes_full_name(self):
         """The downstream `_normalise_person` should surface the full
         name AND keep first_name / last_name available for any consumer

@@ -220,8 +220,8 @@ def _normalise_person(p: dict) -> dict:
 def _resolve_person_name(p: dict) -> str:
     """Return the best available full name. Prefers first + last when
     both present; otherwise prefers Apollo's `name` field; otherwise
-    whichever single component exists. Always returns a stripped str
-    (may be empty)."""
+    recovers a surname from the LinkedIn slug; otherwise whichever single
+    component exists. Always returns a stripped str (may be empty)."""
     first = (p.get("first_name") or "").strip()
     last  = (p.get("last_name") or "").strip()
     if first and last:
@@ -230,10 +230,56 @@ def _resolve_person_name(p: dict) -> str:
     # If Apollo's `name` looks fuller than what we have, use it.
     if apollo_name and " " in apollo_name:
         return apollo_name
+    # v1.0.0du: Apollo's people search routinely returns a first name with
+    # last_name == null — surnames sit behind credit-consuming enrichment,
+    # so the table ends up showing a bare "Kirstey". The LinkedIn URL slug
+    # still encodes the person's real public handle
+    # (e.g. /in/kirstey-mcleod-1a2b3c4d), so recover the surname from there
+    # before giving up. Strictly first-surname shaped only, so we never
+    # fabricate a surname from a vanity handle.
+    if first and not last:
+        derived = _surname_from_linkedin(first, p.get("linkedin_url"))
+        if derived:
+            return f"{first} {derived}"
     # Otherwise pick whichever single piece is longest / non-empty.
     if first or last:
         return f"{first} {last}".strip()
     return apollo_name
+
+
+def _surname_from_linkedin(first: str, linkedin_url: str | None) -> str | None:
+    """Best-effort surname recovery from a LinkedIn vanity slug.
+
+    Returns a single title-cased surname token only when the slug looks
+    like `first-surname` (with an optional trailing Apollo id), and the
+    leading token matches the known first name. Anything more ambiguous
+    (vanity handles like `kirstey-at-subway`, compound `van-der-berg`
+    slugs, or a mismatched first token) returns None so we surface the
+    bare first name rather than an invented surname.
+    """
+    if not first or not linkedin_url:
+        return None
+    url = str(linkedin_url).strip().lower()
+    marker = "/in/"
+    idx = url.find(marker)
+    if idx == -1:
+        return None
+    slug = url[idx + len(marker):]
+    slug = slug.split("?", 1)[0].split("#", 1)[0].strip("/").strip()
+    if not slug:
+        return None
+    tokens = [t for t in slug.split("-") if t]
+    # Apollo appends hex / numeric ids to disambiguate slugs — drop them.
+    while tokens and any(ch.isdigit() for ch in tokens[-1]):
+        tokens.pop()
+    if len(tokens) != 2:
+        return None
+    if tokens[0] != first.strip().lower():
+        return None
+    surname = tokens[1]
+    if len(surname) < 2 or not surname.isalpha():
+        return None
+    return surname.title()
 
 
 def enrich_organization(domain_or_url: str, cfg: ApolloConfig | None = None) -> dict:

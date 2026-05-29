@@ -5,6 +5,43 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0du] - 2026-05-29 - Stakeholders: recover masked surnames from the LinkedIn slug
+
+Ben flagged (again, on a Subway opportunity) that the AI-suggested stakeholders
+table still shows bare first names: "Kirstey", "Nicola", "Hollie" with no
+surname. v1.0.0x already taught `_resolve_person_name` to prefer
+`first_name + last_name`, but Apollo's people search routinely returns the
+surname as `null` because surnames sit behind credit-consuming enrichment. With
+only a first name to work with, the table had nothing to show.
+
+### Fix
+
+`apollo._resolve_person_name` gains a final fallback before giving up on a bare
+first name: recover the surname from the person's LinkedIn vanity slug, which
+Apollo returns even for un-revealed contacts (e.g.
+`/in/kirstey-mcleod-1a2b3c4d`). This reads the person's real public handle
+rather than inventing anything.
+
+New `apollo._surname_from_linkedin` helper is deliberately strict:
+
+- only fires when first_name is present but last_name is missing;
+- strips trailing Apollo id tokens (anything containing a digit);
+- requires the slug to be exactly `first-surname` shaped AND the leading token
+  to match the known first name;
+- skips vanity handles (`kirstey-at-subway`), compound slugs
+  (`john-van-der-berg`) and mismatched first tokens (`k-mcleod`).
+
+So we either surface a confident "Kirstey Mcleod" or fall back to the bare first
+name — never a fabricated surname. The recovered name flows through
+`_normalise_person` into the qualify stakeholders table and any contact saved
+from it.
+
+### Tests
+
+`tests/test_apollo_name_resolution.py` gains seven cases covering clean slugs,
+trailing ids, vanity handles, compound surnames, first-token mismatch, the
+no-LinkedIn path, and the `_normalise_person` passthrough.
+
 ## [1.0.0dt] - 2026-05-29 - Opportunity summary: qualification RAG verdict + AE coaching points
 
 Ben asked to fold the high-value parts of a "Discovery Gem" sales-brief prompt
