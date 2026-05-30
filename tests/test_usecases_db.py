@@ -205,6 +205,45 @@ class UseCasesDbTests(unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class RankMatchesSortTests(unittest.TestCase):
+    """v1.0.0dv: the Python-side ranking must not crash when two equally
+    scored rows carry a mix of date and None delivered_at. The previous
+    implementation had a secondary sort keyed on `delivered_at or ""`,
+    which raised TypeError comparing a date against an empty string."""
+
+    def setUp(self):
+        sys.modules.pop("usecases_db", None)
+        import usecases_db
+        self.uc = usecases_db
+
+    def test_equal_scores_mixed_delivered_at_does_not_crash(self):
+        import datetime
+        rows = [
+            {"id": 1, "slug": "a", "industry_slug_lc": "qsr",
+             "platform_slugs_lc": ["braze"], "platform_names_lc": ["braze"],
+             "delivered_at": datetime.date(2025, 1, 1)},
+            {"id": 2, "slug": "b", "industry_slug_lc": "qsr",
+             "platform_slugs_lc": ["braze"], "platform_names_lc": ["braze"],
+             "delivered_at": None},
+        ]
+        out = self.uc._rank_matches(rows, industry="qsr",
+                                     tech_stack=["Braze"], limit=6)
+        self.assertEqual(len(out), 2)
+        self.assertTrue(all(r["match_score"] == 5 for r in out))
+        # Stable order: the SQL delivered_at-desc order is preserved on a
+        # score tie because Python's sort is stable.
+        self.assertEqual([r["id"] for r in out], [1, 2])
+        self.assertNotIn("industry_slug_lc", out[0])
+
+    def test_limit_is_applied(self):
+        rows = [{"id": i, "slug": str(i), "industry_slug_lc": "qsr",
+                  "platform_slugs_lc": [], "platform_names_lc": [],
+                  "delivered_at": None} for i in range(10)]
+        out = self.uc._rank_matches(rows, industry="qsr",
+                                     tech_stack=None, limit=3)
+        self.assertEqual(len(out), 3)
+
+
 class UseCasesEndpointTests(unittest.TestCase):
     """End-to-end via Flask test client - the endpoint itself."""
 

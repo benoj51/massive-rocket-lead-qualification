@@ -407,6 +407,23 @@ def calculate_icp_score(company_data):
     }
 
 
+def apply_hard_disqualifier_status(score, disqualifiers):
+    """A hard disqualifier is an automatic Qualify Out, regardless of the
+    numeric ICP score (PRD section 9). The raw score keeps the numbers, but
+    status / status_display are forced to qualify_out so the verdict, the
+    next-steps guidance, and the Notion status all agree. Without this a
+    high-scoring but disqualified lead synced to Notion as "Qualified".
+
+    Mutates and returns the score dict. No-op when there are no
+    disqualifiers or status is already qualify_out.
+    """
+    if disqualifiers and score.get("status") != "qualify_out":
+        score["status"] = "qualify_out"
+        score["status_display"] = QUALIFICATION_STATUS["qualify_out"]
+        score["status_forced_by_disqualifier"] = True
+    return score
+
+
 def check_hard_disqualifiers(company_data):
     """Check for hard disqualifiers."""
     disqualifiers = []

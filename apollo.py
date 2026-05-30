@@ -279,7 +279,29 @@ def _surname_from_linkedin(first: str, linkedin_url: str | None) -> str | None:
     surname = tokens[1]
     if len(surname) < 2 or not surname.isalpha():
         return None
+    # The trailing-id strip above only removes tokens containing a digit.
+    # Apollo / LinkedIn also append all-letter hex blobs (e.g.
+    # /in/jon-deadbeef), which would otherwise be promoted to a fake
+    # surname "Deadbeef". Reject anything that looks like an id blob so we
+    # fall back to the bare first name rather than fabricating a surname.
+    if _looks_like_id_token(surname):
+        return None
     return surname.title()
+
+
+def _looks_like_id_token(tok: str) -> bool:
+    """True when a slug token looks like an id blob rather than a real
+    surname: an all-hex run of 6+ chars (e.g. 'deadbeef', 'abcdef'), or a
+    6+ char run with no vowel (treating y as a vowel so real surnames like
+    'Lynch' or 'Smyth' are not rejected)."""
+    t = (tok or "").strip().lower()
+    if not t:
+        return True
+    if len(t) >= 6 and all(c in "0123456789abcdef" for c in t):
+        return True
+    if len(t) >= 6 and not any(v in t for v in "aeiouy"):
+        return True
+    return False
 
 
 def enrich_organization(domain_or_url: str, cfg: ApolloConfig | None = None) -> dict:

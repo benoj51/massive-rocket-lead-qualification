@@ -177,6 +177,11 @@ OPPORTUNITY_TYPES = {
         "description": "Braze already in stack. Help them extract more value.",
         "play": "Optimisation, personalisation uplift, Hightouch CDP layer"
     },
+    "retention_light": {
+        "label": "Retention Light",
+        "description": "Braze plus a non-Snowflake warehouse confirmed. Optimise and layer the CDP.",
+        "play": "Optimisation, warehouse-to-Braze data layer, personalisation uplift"
+    },
     "migration": {
         "label": "Migration",
         "description": "Competitor CEP in stack. Migrate to Braze.",

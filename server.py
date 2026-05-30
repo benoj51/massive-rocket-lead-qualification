@@ -5793,6 +5793,7 @@ def api_expansion_overview():
 
 
 @app.route("/api/expansion/<lead_id>/suggest-associates", methods=["GET"])
+@rate_limit.llm()
 def api_expansion_suggest_associates(lead_id: str):
     """v1.0.0cw: AI-suggested associated accounts.
 
@@ -6066,6 +6067,7 @@ def api_lead_news_list(lead_id: str):
 
 
 @app.route("/api/lead/<lead_id>/news/refresh", methods=["POST"])
+@rate_limit.llm()
 def api_lead_news_refresh(lead_id: str):
     """Fetch fresh news for this lead, score via Claude, persist.
     Returns the updated list. UI calls this when the AE clicks
@@ -6393,6 +6395,7 @@ def api_use_cases_lookups():
 # channel-aware prompt. Drafts only - never auto-sends.
 
 @app.route("/api/outreach/draft", methods=["POST"])
+@rate_limit.llm()
 def api_outreach_draft():
     import outreach
     body = request.get_json(silent=True) or {}

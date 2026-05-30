@@ -19,6 +19,7 @@ import ai_summary
 import bant_health
 import parent_detector
 from scoring import (
+    apply_hard_disqualifier_status,
     calculate_icp_score,
     check_hard_disqualifiers,
     identify_positive_signals,
@@ -111,7 +112,7 @@ def _generate_fit_summary(org: dict, score: dict, disqualifiers: list[str]) -> s
 
     sentences = [
         f"{name} is a {vertical_label.lower()} business with {revenue} revenue and {employees_str} employees, primarily {region}.",
-        f"Opportunity type: {opp_label} — {opp_desc}.",
+        f"Opportunity type: {opp_label}. {opp_desc}.",
         f"Status: {status} at {normalized}/10.",
     ]
     if disqualifiers:
@@ -122,7 +123,7 @@ def _generate_fit_summary(org: dict, score: dict, disqualifiers: list[str]) -> s
 def _next_steps(score: dict, disqualifiers: list[str], stakeholders: list[dict]) -> list[str]:
     if disqualifiers:
         return [
-            "Mark as Qualify Out — hard disqualifier in play.",
+            "Mark as Qualify Out: hard disqualifier in play.",
             "Capture rationale in Notion for partner team feedback loop.",
             "If status changes (e.g. Braze adoption), re-run qualification.",
         ]
@@ -133,6 +134,8 @@ def _next_steps(score: dict, disqualifiers: list[str], stakeholders: list[dict])
         base_steps.append("Book a 30-min intro call with the named champion.")
         if opp_type == "retention":
             base_steps.append("Lead with Braze optimisation + Hightouch CDP angle.")
+        elif opp_type == "retention_light":
+            base_steps.append("Lead with Braze optimisation + a warehouse-to-Braze data layer.")
         elif opp_type == "migration":
             base_steps.append("Open with migration risk-mitigation framework + Braze partner intro.")
         elif opp_type == "augmentation":
@@ -142,13 +145,13 @@ def _next_steps(score: dict, disqualifiers: list[str], stakeholders: list[dict])
         base_steps.append("Confirm budget cycle + signing authority during discovery.")
     elif status == "borderline":
         base_steps.append("Run a 30-min qualification call before investing further.")
-        base_steps.append("Confirm tech stack (Braze? warehouse?) — current score may move with confirmation.")
+        base_steps.append("Confirm tech stack (Braze? warehouse?): current score may move with confirmation.")
         base_steps.append("Validate executive sponsor + budget timeline.")
     else:
-        base_steps.append("Park lead — revisit if stack/intent signal changes.")
+        base_steps.append("Park lead. Revisit if stack/intent signal changes.")
 
     if not stakeholders:
-        base_steps.append("Stakeholder map missing — Apollo returned no decision-makers; manual LinkedIn dig required.")
+        base_steps.append("Stakeholder map missing: Apollo returned no decision-makers; manual LinkedIn dig required.")
     return base_steps
 
 
@@ -167,13 +170,13 @@ def _stakeholder_priority(person: dict) -> str:
 def _stakeholder_why(person: dict) -> str:
     title = (person.get("title") or "").lower()
     if any(t in title for t in ("crm", "lifecycle")):
-        return "Owns CRM/lifecycle — direct Braze stakeholder."
+        return "Owns CRM/lifecycle: direct Braze stakeholder."
     if "growth" in title:
-        return "Growth lead — owns activation and retention metrics."
+        return "Growth lead: owns activation and retention metrics."
     if any(t in title for t in ("marketing", "cmo")):
-        return "Marketing leadership — economic buyer for CEP investment."
+        return "Marketing leadership: economic buyer for CEP investment."
     if "data" in title:
-        return "Data leadership — owns warehouse + Hightouch decisions."
+        return "Data leadership: owns warehouse + Hightouch decisions."
     return "Influence on lifecycle/CRM agenda."
 
 
@@ -253,6 +256,9 @@ def qualify(
 
     score = calculate_icp_score(company_data)
     disqualifiers = check_hard_disqualifiers(company_data)
+    # A hard disqualifier is an automatic Qualify Out: force the status so
+    # the verdict, the next-steps, and the Notion sync all agree.
+    apply_hard_disqualifier_status(score, disqualifiers)
     signals = identify_positive_signals(company_data)
     signals.extend(ov.extra_signals or [])
 
@@ -293,6 +299,7 @@ def qualify(
             "revenue": org.get("annual_revenue_printed") or company_data["revenue"],
             "employees": org.get("estimated_num_employees"),
             "tech_stack": tech_stack_str,
+            "stack_confidence": company_data.get("stack_confidence"),
             "complexity": company_data["complexity"],
             "region": company_data["region"],
         },
@@ -326,6 +333,7 @@ def qualify(
             "employees": org.get("estimated_num_employees"),
             "vertical": org.get("industry"),
             "tech_stack": tech_stack_str,
+            "stack_confidence": company_data.get("stack_confidence"),
             "complexity": company_data["complexity"],
             "region": company_data["region"],
             "deal_size_gbp_per_month": deal_size_gbp,

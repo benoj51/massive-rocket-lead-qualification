@@ -5,6 +5,86 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dv] - 2026-05-29 - Code-review hardening: AI, qualify path, store path safety
+
+A full code-review pass across the platform (AI features, the qualify pipeline,
+the use-cases system, and the store/security layer). Ground truth first: 1331
+tests passing, diagnostics clean apart from the expected unset local keys. The
+review surfaced a set of real, verified defects, fixed here. Each carries a
+test. The larger data-integrity item (atomic writes across the ~20 raw
+write_text stores) is documented as a follow-up rather than bundled in.
+
+### Correctness fixes
+
+- **Apollo surname recovery no longer fabricates names.** v1.0.0du recovered a
+  masked surname from the LinkedIn slug, but the trailing-id strip only dropped
+  digit-bearing tokens. An all-letter hex blob (e.g. `/in/jon-deadbeef`) was
+  promoted to a fake surname "Deadbeef". `apollo._surname_from_linkedin` now
+  rejects id-looking tokens via a new `_looks_like_id_token` (all-hex of 6+
+  chars, or a 6+ char run with no vowel, with `y` counted so real surnames like
+  Lynch / Smyth survive). When in doubt it returns the bare first name rather
+  than inventing a surname.
+- **Use-cases match ranking no longer risks a crash.** `usecases_db.match_for_lead`
+  had a dead first sort keyed on `delivered_at or ""` that could raise a
+  TypeError comparing a date against an empty string on a score tie. The Python
+  scoring + ranking is now a pure `_rank_matches` helper with a single stable
+  sort (score desc, SQL delivered_at-desc tie-break preserved).
+- **A hard disqualifier is now an automatic Qualify Out.** The numeric status
+  ignored disqualifiers, so a high-scoring but disqualified lead synced to
+  Notion as "Qualified" while the next-steps said "Qualify Out". New pure
+  `scoring.apply_hard_disqualifier_status` forces status / status_display to
+  qualify_out (and flags `status_forced_by_disqualifier`); the orchestrator
+  applies it. Notion's status map already routes qualify_out to "Disqualified".
+- **`retention_light` opportunities now carry metadata.** `classify_opportunity_type`
+  can return `retention_light` (Braze plus a non-Snowflake warehouse), but it
+  was missing from `OPPORTUNITY_TYPES`, so its play came back blank and there was
+  no tailored next step. Added the config entry and a `_next_steps` branch.
+- **`stack_confidence` now flows into the discovered payload.** It was set on the
+  company data and drove scoring, but was dropped from `discovered`, so Notion
+  always recorded "Confirmed". Added to both the preliminary and returned
+  payloads.
+- **Note extraction guards a non-dict `meddpicc`.** `ai_summary.extract_from_notes`
+  assumed `data["meddpicc"]` was a dict; a model reply with a list or string
+  raised an uncaught AttributeError (500). Now treated as "no signal", with a
+  per-entry isinstance guard too.
+
+### Security / hardening
+
+- **Note-store path hardening.** `lead_contact_notes_store` and
+  `partner_notes_store` interpolated the raw `contact_id` into the filename. It
+  is now slugified like the first segment (a no-op for the real lowercase-hex
+  ids, so no existing note files are orphaned), closing the path-segment gap.
+- **Rate limits on the remaining LLM routes.** `@rate_limit.llm()` added to
+  `/api/expansion/<id>/suggest-associates`, `/api/lead/<id>/news/refresh`, and
+  `/api/outreach/draft`, which called Claude unthrottled.
+
+### House voice
+
+- Swept the em-dashes out of the heuristic `next_steps`, `fit_summary`, and
+  `_stakeholder_why` strings in `qualify_service.py`. These surface to the UI and
+  Notion (next_steps is always heuristic, even with AI configured), so they were
+  a live no-em-dash violation.
+
+### Tests (+ across new + extended files)
+
+`test_apollo_name_resolution.py` (id-blob rejection + classifier),
+`test_usecases_db.py` (`_rank_matches` mixed-date no-crash + limit),
+`test_scoring_hardening.py` (new: retention_light metadata + disqualifier
+override), `test_store_path_safety.py` (new: hostile contact_id stays in the
+store dir), `test_qualify_e2e.py` (stack_confidence present + disqualifier
+forces qualify_out end to end).
+
+### Documented follow-up (not in this version)
+
+- Atomic writes: ~20 stores still use raw `write_text` paired with a lenient
+  loader, so a crash mid-write can truncate a file and the next save overwrites
+  with `[]`. Worst blast radius is the single-file stores (`partners_store`,
+  `mr_owners_store`). Recommend routing them through
+  `json_file_store.write_json` / `write_json_backup` in a dedicated pass.
+- Cross-process lost-update race under gunicorn `--workers 2` (per-process locks
+  + per-process rate-limit buckets). Document or add `fcntl.flock` on the
+  single-file stores.
+
 ## [1.0.0du] - 2026-05-29 - Stakeholders: recover masked surnames from the LinkedIn slug
 
 Ben flagged (again, on a Subway opportunity) that the AI-suggested stakeholders

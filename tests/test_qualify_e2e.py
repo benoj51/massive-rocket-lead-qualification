@@ -54,6 +54,21 @@ class DeliverooFixtureTests(unittest.TestCase):
     def test_no_hard_disqualifiers(self):
         self.assertEqual(self.result["disqualifiers"], [])
 
+    def test_discovered_carries_stack_confidence(self):
+        """v1.0.0dv: stack_confidence must flow into the discovered payload
+        so Notion records the real confidence instead of defaulting to
+        'Confirmed'."""
+        self.assertIn("stack_confidence", self.result["discovered"])
+
+    def test_hard_disqualifier_forces_qualify_out(self):
+        """v1.0.0dv: a hard disqualifier is an automatic Qualify Out, even
+        when the numeric score would otherwise qualify the lead. Without
+        this the lead synced to Notion as 'Qualified'."""
+        r = qualify("Deliveroo", "deliveroo.co.uk", overrides={"employees": "100"})
+        self.assertTrue(r["disqualifiers"], "expected an employee-count disqualifier")
+        self.assertEqual(r["score"]["status"], "qualify_out")
+        self.assertTrue(r["score"].get("status_forced_by_disqualifier"))
+
     def test_stakeholders_returned(self):
         self.assertGreaterEqual(len(self.result["stakeholders"]), 1)
         first = self.result["stakeholders"][0]

@@ -276,10 +276,6 @@ def match_for_lead(*, industry: str | None = None,
     if pool is None:
         return []
 
-    # Normalise inputs
-    industry_norm = (industry or "").strip().lower()
-    stack_norm = {(t or "").strip().lower() for t in (tech_stack or []) if (t or "").strip()}
-
     try:
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -318,6 +314,26 @@ def match_for_lead(*, industry: str | None = None,
         log.warning("match_for_lead failed: %s", e)
         return []
 
+    return _rank_matches(rows, industry=industry, tech_stack=tech_stack,
+                          limit=limit)
+
+
+def _rank_matches(rows: list[dict[str, Any]], *, industry: str | None,
+                   tech_stack: list[str] | None,
+                   limit: int) -> list[dict[str, Any]]:
+    """Pure scoring + ranking for match_for_lead (no DB). Kept separate so
+    it can be unit-tested with synthetic rows.
+
+    Rows are expected pre-ordered by delivered_at DESC (the SQL does this).
+    Because Python's sort is stable, a single sort by match_score desc
+    preserves that delivered_at tie-break. The earlier implementation had a
+    second sort keyed on `delivered_at or ""`, which could raise a
+    TypeError comparing a date against an empty string on a score tie.
+    """
+    industry_norm = (industry or "").strip().lower()
+    stack_norm = {(t or "").strip().lower()
+                  for t in (tech_stack or []) if (t or "").strip()}
+
     scored: list[dict[str, Any]] = []
     for r in rows:
         score = 0
@@ -342,9 +358,7 @@ def match_for_lead(*, industry: str | None = None,
             r.pop("platform_names_lc", None)
             scored.append(r)
 
-    scored.sort(key=lambda x: (-x["match_score"],
-                                 (x.get("delivered_at") or "")), reverse=False)
-    # Sort key above only flips the score descending; sort_at desc
-    # handled by the SQL order, so just slice.
+    # Stable single sort: score desc, delivered_at tie-break inherited
+    # from the SQL ordering.
     scored.sort(key=lambda x: x["match_score"], reverse=True)
     return scored[:limit]

@@ -49,7 +49,9 @@ def _slugify(value: str) -> str:
 
 
 def _path(partner_id: str, contact_id: str) -> Path:
-    return _store_dir() / f"{_slugify(partner_id)}__{contact_id}.json"
+    # Both segments are slugified so a hostile contact_id path segment
+    # cannot escape the store dir or collide via odd characters.
+    return _store_dir() / f"{_slugify(partner_id)}__{_slugify(contact_id)}.json"
 
 
 def _now_iso() -> str:

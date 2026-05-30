@@ -90,6 +90,32 @@ class ResolvePersonNameTests(unittest.TestCase):
         p = {"first_name": "Kirstey", "last_name": None, "name": "Kirstey"}
         self.assertEqual(self.apollo._resolve_person_name(p), "Kirstey")
 
+    # --- v1.0.0dv: never promote an id blob into a fabricated surname ----
+    def test_all_hex_slug_token_not_treated_as_surname(self):
+        """The trailing-id strip only removes digit-bearing tokens; Apollo
+        also appends all-letter hex blobs (e.g. /in/jon-deadbeef). Those
+        must NOT become the surname 'Deadbeef'."""
+        p = {"first_name": "Jon", "last_name": None, "name": "Jon",
+             "linkedin_url": "https://www.linkedin.com/in/jon-deadbeef"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "Jon")
+
+    def test_hex_blob_with_trailing_numeric_id_not_surname(self):
+        p = {"first_name": "Jon", "last_name": None, "name": "Jon",
+             "linkedin_url": "https://www.linkedin.com/in/jon-deadbeef-1a2b"}
+        self.assertEqual(self.apollo._resolve_person_name(p), "Jon")
+
+    def test_looks_like_id_token_classifier(self):
+        looks = self.apollo._looks_like_id_token
+        # id-like
+        self.assertTrue(looks("deadbeef"))   # all hex, len 8
+        self.assertTrue(looks("abcdef"))     # all hex, len 6
+        self.assertTrue(looks("xkcdzz"))     # no vowel, len 6
+        # real surnames must survive
+        self.assertFalse(looks("mcleod"))    # has vowels
+        self.assertFalse(looks("lynch"))     # 'y' counts as a vowel; len 5 anyway
+        self.assertFalse(looks("smyth"))
+        self.assertFalse(looks("ng"))        # short
+
     def test_normalise_person_recovers_surname_from_slug(self):
         p = {"id": "y", "first_name": "Kirstey", "last_name": None,
              "name": "Kirstey", "title": "VP Marketing",

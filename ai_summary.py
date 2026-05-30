@@ -703,8 +703,16 @@ def extract_from_notes(notes: str, *, company_name: str | None = None,
 
     # Normalise + filter to known keys only.
     meddpicc_out: dict[str, dict[str, Any]] = {}
+    raw_meddpicc = data.get("meddpicc")
+    if not isinstance(raw_meddpicc, dict):
+        # The model occasionally returns meddpicc as a list or string;
+        # treat anything non-dict as "no signal" rather than crashing the
+        # extraction endpoint with an AttributeError.
+        raw_meddpicc = {}
     for k in _MEDDPICC_KEYS:
-        entry = (data.get("meddpicc") or {}).get(k) or {}
+        entry = raw_meddpicc.get(k) or {}
+        if not isinstance(entry, dict):
+            continue
         value = entry.get("value")
         health = entry.get("health")
         # Only include a row when there's a usable signal — either value or health.
