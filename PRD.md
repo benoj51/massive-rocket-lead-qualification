@@ -1,233 +1,333 @@
-# Lead Qualification Platform — PRD
+# Lead Qualification Platform - PRD
 
-**Status:** v0.2.0 shipped 2026-05-13
-**Owner:** Ben Ojuolape (Head of Partnerships, Massive Rocket)
-**Reviewers:** CEO, Head of GTM, AE leadership
+**Status:** v1.0.0du (live), 2026-05-29
+**Owner:** Ben Ojuolape (Head of Partnerships + AE management, Massive Rocket)
+**Reviewers:** CEO, Head of GTM, AE leadership, Delivery
+**Repo:** `Massive Rocket/lead-qualification-platform/`
+**Companion docs:** [README.md](README.md) (run/deploy) , [HANDOVER.md](HANDOVER.md) (continuity brief for a fresh build session) , [CHANGELOG.md](CHANGELOG.md) (full version history)
+
+> This PRD was rewritten on 2026-05-29 to reflect the platform as actually
+> shipped. The original v0.2.0 PRD (2026-05-13) described a two-view scoring
+> tool. The platform has since grown into a full pre-sale and account
+> operations workspace (76 Python modules, ~180 API routes, 1331 tests). The
+> v0.x roadmap in older revisions is superseded by section 13 here. Where the
+> ICP scoring rubric is concerned (section 9), the numbers are unchanged and
+> remain load-bearing.
 
 ---
 
 ## 1. Problem
 
-Lead qualification at Massive Rocket today is inconsistent. Partner Managers,
-AEs, and the leadership team all evaluate inbound and outbound accounts with
-different mental models, scattered across spreadsheets, Slack threads, and
-ad-hoc HubSpot notes. The downstream pain:
+Lead qualification and account work at Massive Rocket started out inconsistent.
+Partner Managers, AEs, and leadership evaluated accounts with different mental
+models scattered across spreadsheets, Slack threads, and ad-hoc notes. The
+original pain points still frame the product:
 
-- **Slow handoffs.** A lead can sit two weeks before anyone agrees whether
-  it's worth pursuing.
-- **Inconsistent prioritisation.** Two AEs faced with the same account often
-  reach different conclusions about fit.
-- **No shared pipeline view.** The CEO and Head of Partnerships can't see, at
-  a glance, what's actively being qualified and where it sits.
-- **Manual enrichment.** Revenue, headcount, tech stack — all hand-typed from
+- Slow handoffs. A lead could sit for two weeks before anyone agreed whether it
+  was worth pursuing.
+- Inconsistent prioritisation. Two AEs faced with the same account often reached
+  different conclusions about fit.
+- No shared pipeline view. Leadership could not see, at a glance, what was being
+  qualified and where it sat.
+- Manual enrichment. Revenue, headcount, and tech stack were hand-typed from
   LinkedIn, web search, or guesswork.
 
-We have an ICP scoring engine in Python and a Notion tracker, but they're not
-wired together and they're not usable by the team.
+As the tool matured, the problem widened from "score a lead" to "run the whole
+pre-sale motion in one place": discovery calls and notes, MEDDPICC, scope and
+pricing and SOW, partner relationships, expansion across group accounts, live
+project handover, and the analytics leadership needs.
 
 ## 2. Goal
 
-A team-facing web platform that:
+A single team-facing web workspace that:
 
-1. Scores any company against MR's ICP in under 30 seconds, with one click.
-2. Enriches the account automatically (Apollo) so AEs aren't typing
+1. Scores any company against MR's ICP in seconds, with one click.
+2. Enriches the account automatically (Apollo) so AEs are not typing
    revenue/headcount/tech.
-3. Pushes the result to Notion as the single source of truth for pipeline.
-4. Lets AEs track MEDDICC progress per account in the same view.
-5. Surfaces a pipeline dashboard the whole team — and the CEO — can read.
+3. Treats Notion as the durable system of record for the pipeline.
+4. Tracks MEDDPICC, discovery calls, contacts, and stakeholder maps per account.
+5. Carries a qualified deal through Project Build, Scope, Pricing, and a draft
+   SOW.
+6. Surfaces the analytics leadership reads weekly (pipeline, forecast,
+   engagement, quarterly targets, manager report).
+7. Uses Claude to summarise, qualify, coach, and draft, with a strict no-hype,
+   fact-only house voice.
 
 ## 3. Non-goals
 
-- **Not a HubSpot replacement.** HubSpot remains the system of record for
-  contacts and deals. (HubSpot write-back is a v0.3 feature, post-CEO sign-off.)
-- **Not a forecasting tool.** Stages and weighted pipeline value live in
-  HubSpot.
-- **Not a full CRM.** No activity logging, no email integration.
-- **Not multi-tenant.** Single MR instance, internal use only.
-- **Not external-facing.** Behind Railway auth; no prospect-facing surface.
+- Not a HubSpot replacement. HubSpot remains the company system of record for
+  contacts and deals. A HubSpot write path exists but is disabled by default
+  and parked pending CEO sign-off.
+- Not a forecasting system of record. The forecast view is a working aid, not
+  the board number.
+- Not multi-tenant. Single MR instance, internal use only.
+- Not external-facing. Behind app auth, no prospect-facing surface.
+- Not a full CRM replacement for activity/email logging beyond what discovery
+  notes and contact cadence cover.
 
 ## 4. Users
 
-| Persona | Daily use case | Primary view |
-| ------- | -------------- | ------------ |
-| Partner Manager (stages 1-3) | Qualify inbound from Braze/Hightouch referrals, decide whether to take an intro call. | Qualify Lead |
-| AE / Client Partner (stages 4+) | Pick up qualified leads from Partner Manager, track MEDDICC, push pipeline view to leadership. | Qualify Lead + Pipeline |
-| Head of Partnerships (Ben) | Audit consistency, review pipeline, override scores. | Pipeline + per-lead detail |
-| CEO | Glance at top-of-funnel + qualified pipeline weekly. | Pipeline |
+| Persona | Use case | Primary surfaces |
+| ------- | -------- | ---------------- |
+| Partner Manager (early stages) | Qualify inbound from Braze / Hightouch / Snowflake referrals, decide whether to take an intro call, track partner relationships. | Qualify, Partners, Pipeline |
+| AE / Client Partner | Pick up qualified leads, run discovery, track MEDDPICC, build scope and pricing, draft SOW, work expansion. | Pipeline, lead drawer, Project Build, Expansion |
+| Head of Partnerships (Ben) | Audit consistency, manage AEs, review pipeline and partner coverage, override scores. | Pipeline, Dashboard, Partners, Directory |
+| CEO / leadership | Weekly glance at pipeline, forecast, quarterly targets, and the manager report. | Dashboard, Forecast |
+| Delivery | Pick up validated scope, run live projects and OKRs once a deal converts. | Live, Project Build |
 
-## 5. Functional requirements
+## 5. The platform today (navigation)
 
-### 5.1 Qualify a lead
-- **Input:** company name + URL.
-- **Auto-enrichment** via Apollo `organizations/enrich`: revenue, employee
-  count, industry, headquarters country, current tech stack.
-- **Stakeholder discovery** via Apollo `mixed_people/search` for CMO / VP
-  CRM / Head of Lifecycle / Director Marketing roles.
-- **Scoring** against the 7-criterion ICP (revenue, employees, vertical, tech
-  stack, complexity, deal size, region). Output is weighted-of-51 + normalised
-  10-point score.
-- **Opportunity classification:** Retention / Retention Light / Migration /
+Single-page app (`qualify.html`). Top nav (restructured in v1.0.0bm):
+
+- **Home** - morning brief, needs-attention, watched accounts, todos, activity.
+- **Pipeline** (dropdown): Pipeline table , Project Build , Forecast.
+- **Live** - converted engagements, OKRs, stakeholder map, concurrent agencies.
+- **Expansion** - group/associated accounts, expansion targets.
+- **Directory** - cross-store roster of all accounts and contacts.
+- **Partners** - partner orgs (Braze, Hightouch, Snowflake, mParticle, etc.),
+  partner contacts, notes, assignment to leads.
+- **Insights** (dropdown): Dashboard (engagement leaderboard, loss reasons,
+  weekly manager report, quarterly targets, stakeholder coverage).
+- **Settings** - users/owners, enums/dropdowns, integrations status, scheduled
+  agents.
+- **+ Qualify** (pinned CTA) - the qualify-a-lead action.
+- Global contact search (Cmd-K), a floating "Jeff" pricing assistant, and an
+  agentic chat surface.
+
+## 6. Functional capabilities
+
+### 6.1 Qualify a lead
+- Input: company name + URL.
+- Auto-enrichment via Apollo `organizations/enrich`: revenue, employees,
+  industry, HQ country, tech stack.
+- Stakeholder discovery via Apollo `mixed_people/api_search` for marketing /
+  martech / CRM / lifecycle / data leadership, with optional region filter.
+  Names resolve to "First Last", recovering masked surnames from the LinkedIn
+  slug where Apollo gates them (v1.0.0du).
+- Scoring against the 7-criterion ICP (section 9): weighted-of-51, normalised to
+  a 10-point score.
+- Opportunity classification: Retention / Retention Light / Migration /
   Augmentation / Greenfield / Unknown.
-- **Override:** every discovered field is click-to-edit; user can re-score.
-- **Output:** ICP score, status (Qualify In / Borderline / Qualify Out),
-  signals, hard disqualifiers, fit summary, next-step list, stakeholder table.
+- Every discovered field is click-to-edit; the user can re-score.
+- Output: ICP score, status (Qualify In / Borderline / Qualify Out), positive
+  signals, hard disqualifiers, fit summary, next steps, stakeholder table.
 
-### 5.2 MEDDICC tracking
-- Six fields: Metrics, Economic Buyer, Decision Criteria, Decision Process,
-  Identify Pain, Champion.
-- Each field has a free-text note and a Not-Started / In-Progress / Confirmed
-  toggle.
-- Roll-up score (0-18) computed automatically.
+### 6.2 Discovery calls, notes, and AI synthesis
+- Per-lead calls/notes store (transcript or note), with Claude extraction of
+  MEDDPICC signals, competitive agencies, and tech stack.
+- AI "contact suggestions": people spotted in a note, offered for one-click
+  save.
+- Aggregated lead summary at the top of the opportunity
+  (`ai_summary.synthesise_lead`): state of play, key facts, open questions, next
+  action, risks, plus a qualification RAG verdict (green/amber/red with
+  rationale) and 2-4 AE coaching points (v1.0.0dt). Group/parent/sibling context
+  is fed in for accounts that belong to a group.
 
-### 5.3 Push to Notion
-- Single button creates or updates a page in the Lead Qualification Tracker.
-- Notion is treated as the system of record for the qualification artefact.
-- On update: properties replaced, page content blocks left intact so AE
-  comments aren't clobbered.
+### 6.3 MEDDPICC tracking
+- Per-criterion free-text note plus a Not-Started / In-Progress / Confirmed
+  toggle, with an automatic roll-up. UI labelled MEDDPICC (full Paper Process +
+  Competition criteria pending Notion schema work).
 
-### 5.4 Pipeline dashboard
-- Sortable table (Company, ICP, Status, Stage, Vertical, Opportunity Type,
-  Owner, Next Step).
-- Filter chips: All / Qualified / Borderline / Qualified Out / Active only.
-- Data pulled live from Notion via `/api/pipeline`.
+### 6.4 Contacts and stakeholder mapping
+- Per-lead contacts with role (sponsor/champion/user/blocker), influence, and
+  interest; an influence/interest map; reports-to relationships; contact cadence
+  and overdue tracking; CSV import; per-contact notes.
 
-### 5.5 Configuration
-- ICP weights and tier definitions live in `config.py`. Calibration changes
-  require a code change and a deploy (intentional — the scoring rubric is
-  load-bearing).
+### 6.5 Pipeline and lifecycle
+- Sortable, filterable pipeline pulled live from Notion. Sales stages and lead
+  statuses are configurable enums. Stage flips prompt for loss reasons where
+  relevant. Default filter excludes Nurture and Rejected. CSV export is
+  sanitised against formula injection.
 
-## 6. Non-functional requirements
+### 6.6 Project Build, Scope, Pricing, SOW, Roadmap
+- Project Build stage between Pipeline and SOW. Five project types
+  (CRM Strategy / Build / Execute / Data / Engineering). Per-criterion 3-state
+  scope qualification that feeds pricing. Pricing calculator (`pricing.py`)
+  reproduces the reference deal. Delivery validation gate
+  (draft -> pending_validation -> validated/rejected) before pricing is sent.
+  Draft SOW renderer with versioning and a compliance check. Roadmap builder
+  with AI refine and extended-engagement suggestions.
 
-- **Latency.** First qualification (cold Apollo call): under 4s. Subsequent
-  qualifications of the same domain (cache hit): under 200ms.
-- **Availability.** Best-effort. Single Railway instance is fine for v0.2.
-- **Security.** API keys live only in Railway env vars; never committed,
-  never returned by the API. UI fetches only via same-origin.
-- **Data residency.** Apollo cache (24h TTL) stored in container ephemeral
-  storage. Notion is the durable layer.
-- **Observability.** Flask access logs to stdout (Railway tail) plus health
-  endpoint reflecting upstream integration status.
+### 6.7 Engagement scoring
+- Per-lead engagement score from recency and activity, with snapshots over time,
+  trend arrows, at-risk detection and notifications, and an owner leaderboard on
+  the Dashboard.
 
-## 7. Success metrics
+### 6.8 Expansion and group accounts
+- Parent/child account detection, group context, AI-suggested associated
+  accounts, and an expansion targets store with its own contacts.
 
-| Metric | Baseline | 90-day target |
-| ------ | -------- | ------------- |
-| Median time from "new lead" to scored | ~2 days | < 5 minutes |
-| % of leads with an ICP score in Notion | < 20% | > 90% |
-| AE adoption (weekly active users) | 0 | 4 of 5 AEs + 3 Partner Managers |
-| CEO weekly check-in uses the Pipeline view | n/a | yes, every Monday |
-| Apollo credit consumption | n/a | < 200 enrichments/month (cache covers re-views) |
+### 6.9 Live projects
+- Promote a converted lead to a live project; OKRs and key results; stakeholder
+  map; concurrent agencies.
 
-## 8. ICP scoring model (summary)
+### 6.10 Partners
+- Partner orgs and partner contacts (tier, sentiment, seniority, team), notes,
+  bulk update, CSV import, touch cadence, and assignment of the right partner
+  contact to a lead. Partner-sourced notes feed the lead synthesis.
+
+### 6.11 Account intelligence
+- Account news (Google News RSS plus AI relevance scoring) per watched account,
+  a watchlist, and a sweep endpoint suitable for scheduling.
+
+### 6.12 Analytics and leadership
+- Dashboard: engagement leaderboard, loss-reason breakdown, weekly manager
+  report, stakeholder coverage metric. Quarterly targets (team and per-owner,
+  plan vs actual). Forecast view with configurable weighting.
+
+### 6.13 Assistants and agents
+- "Jeff": a pricing/knowledge assistant grounded in a Markdown knowledge base
+  (editable in-app).
+- Agentic chat: a tool-using Claude agent with a persona library and a tool
+  registry (`mr_tools.py`), exposed both in-app and as an MCP server
+  (`mr_mcp_server.py`, read-only by default).
+- Scheduled agents: cron-style recurring jobs with a Settings surface.
+
+### 6.14 Outreach
+- AI outreach drafter (email / LinkedIn / Slack) per stakeholder. Drafts only,
+  never auto-sent. Em-dashes are hard-stripped from output.
+
+### 6.15 Notion sync
+- One action creates or updates the lead's page in the Lead Qualification
+  Tracker. Properties are replaced; page content blocks are preserved so AE
+  comments are not clobbered. Notion is the system of record for the
+  qualification artefact. Backup/mirror/restore and Notion history endpoints
+  guard against accidental note loss.
+
+### 6.16 Supporting surfaces
+- Notifications, todos, activity feed, append-only audit log, use-cases catalog
+  (read from a Postgres database), filter presets, and a diagnostics health
+  endpoint.
+
+## 7. Non-functional requirements
+
+- **Latency.** First qualification (cold Apollo): a few seconds. Repeat views of
+  the same domain hit a 24h file cache.
+- **Auth.** All `/api/*` routes require `Authorization: Bearer <APP_AUTH_TOKEN>`
+  when that env var is set. `/` and `/api/health` stay open so the UI can
+  negotiate auth. Query-param tokens are off by default.
+- **Rate limiting + startup guard.** `rate_limit.py` plus an auth startup guard
+  (v1.0.0do).
+- **Security.** API keys live only in env vars, never committed, never returned
+  by the API. CSV export sanitised. `MAX_CONTENT_LENGTH` set. Store paths
+  slugified. CORS tightened.
+- **Persistence.** Notion is the durable layer for the pipeline. App-specific
+  state (calls, contacts, partners, projects, todos, etc.) lives in JSON file
+  stores under `cache/`, intended to sit on a Railway volume in prod (see
+  `RAILWAY_VOLUME_MOUNT.md`). The use-cases catalog is read from a separate
+  Postgres database (`DATABASE_URL_USECASES`).
+- **Observability.** Flask logs to stdout (Railway tail). `/api/health` and
+  `/api/diagnostics/health` reflect integration status.
+
+## 8. Success metrics
+
+| Metric | Baseline | Target |
+| ------ | -------- | ------ |
+| Median time from new lead to scored | ~2 days | < 5 minutes |
+| % of active leads with an ICP score in Notion | < 20% | > 90% |
+| Team adoption (weekly active) | 0 | AEs + Partner Managers |
+| Leadership uses the Dashboard weekly | n/a | yes |
+| Apollo credit consumption | n/a | covered by cache on re-views |
+
+## 9. ICP scoring model (unchanged, load-bearing)
 
 | Criterion | Weight | Max | Notes |
 | --------- | ------ | --- | ----- |
-| Revenue | 3× | 9 | < $100M = 0 ... > $1B = 3 |
-| Employees | 2× | 6 | < 500 = 0 ... 3,000+ = 3 |
-| Vertical | 3× | 9 | Direct weighted: QSR/Roadside = 9, Delivery/C-store = 7, Retail/Travel = 6, Fintech/Telecom = 5, Other = 3 |
-| Tech Stack | 3× | 9 | Opportunity-typed: Retention (Braze+Snowflake) = 9, Retention Light = 7, Migration = 5, Augmentation = 4, Greenfield = 2, Unknown = 0 (strict) |
-| Complexity | 2× | 6 | Single = 1, Multi-brand or Multi-market = 2, Both = 3 |
-| Deal Size | 3× | 9 | < £10k/mo = 0 ... > £50k/mo = 3 |
-| Region | 1× | 3 | Other = 0, APAC = 1, NAM/EMEA = 2, Multi-region = 3 |
-| **Total** | | **51** | Normalised to /10. ≥ 7.0 Qualify In · 5.0-6.9 Borderline · < 5.0 Qualify Out |
+| Revenue | 3x | 9 | < $100M = 0 ... > $1B = 3 |
+| Employees | 2x | 6 | < 500 = 0 ... 3,000+ = 3 |
+| Vertical | 3x | 9 | QSR/Roadside = 9, Delivery/C-store = 7, Retail/Travel = 6, Fintech/Telecom = 5, Other = 3 |
+| Tech Stack | 3x | 9 | Retention (Braze+Snowflake) = 9, Retention Light = 7, Migration = 5, Augmentation = 4, Greenfield = 2, Unknown = 0 (strict) |
+| Complexity | 2x | 6 | Single = 1, Multi-brand or Multi-market = 2, Both = 3 |
+| Deal Size | 3x | 9 | < GBP 10k/mo = 0 ... > GBP 50k/mo = 3 |
+| Region | 1x | 3 | Other = 0, APAC = 1, NAM/EMEA = 2 (DACH supported), Multi-region = 3 |
+| **Total** | | **51** | Normalised to /10. >= 7.0 Qualify In , 5.0-6.9 Borderline , < 5.0 Qualify Out |
 
 ### Hard disqualifiers (automatic Qualify Out)
-- Revenue < $50M
-- Employees < 200
-- No Braze and no plans to adopt
-- Sales cycle > 18 months
-- Competing agency locked in (non-incumbent)
-- No executive sponsor access
-- Budget cycle > 12 months away
-- Non-English-speaking market only
+Revenue < $50M , employees < 200 , no Braze and no plans to adopt , sales cycle
+> 18 months , competing agency locked in (non-incumbent) , no executive sponsor
+access , budget cycle > 12 months away , non-English-speaking market only.
 
-## 9. System architecture
+Calibration changes are a deliberate code change in `config.py` plus a deploy,
+covered by the seeded-account calibration tests.
+
+## 10. Architecture
 
 ```
-Browser (qualify.html)
-   │
-   ▼  fetch /api/...
-Flask (server.py)
-   ├── apollo.py ──► Apollo REST (cached, 24h)
-   ├── scoring.py + config.py
-   └── notion_sync.py ──► Notion REST (data-source-aware)
+Browser (qualify.html, single-page app, vanilla JS + Chart.js)
+   | fetch /api/...
+Flask (server.py, ~180 routes; reads qualify.html into memory once at boot)
+   |
+   |- qualify_service.py  orchestrator: Apollo -> ICP shape -> scoring -> signals -> fit summary -> stakeholders
+   |- apollo.py           Apollo REST client (24h file cache; fixture fallback)
+   |- scoring.py + config.py   ICP engine + rubric
+   |- ai_summary.py       Anthropic synthesis (summaries, RAG verdict, coaching, fit, roadmap)
+   |- agent.py + mr_tools.py + mr_mcp_server.py   tool-using agent + MCP server
+   |- notion_sync.py      Notion REST (2025-09 data-source-aware) upsert + pipeline
+   |- *_store.py (many)   JSON file stores under cache/ (calls, contacts, partners, projects, ...)
+   |- usecases_db.py      Postgres read layer for the use-cases catalog
+   |- pricing.py / scope.py / sow.py / roadmap.py   pre-sale build chain
+   |- engagement.py / forecast.py / dashboard.py / stakeholder_coverage.py   analytics
+   `- account_news.py / slack_digest.py / outreach.py / scheduled_agents.py   integrations + jobs
 ```
 
-- **Hosting:** Railway, Dockerfile-based deploy.
-- **Data store:** Notion (Lead Qualification Tracker). No Postgres.
-- **Cache:** Local file cache for Apollo responses (24h TTL).
+- **Hosting:** Railway, Dockerfile build, gunicorn (`Procfile`), healthcheck on
+  `/api/health` (`railway.json`).
+- **Durable data:** Notion (pipeline) + Railway volume (JSON stores) + Postgres
+  (use-cases).
 
-## 10. Phases & roadmap
+## 11. Integrations
 
-### v0.2 — shipped 2026-05-13
-Everything in §5 above.
+| Integration | Module | Status |
+| ----------- | ------ | ------ |
+| Apollo (enrich + people search) | `apollo.py` | Live. 24h cache. Fixture fallback when no key. |
+| Notion (tracker) | `notion_sync.py` | Live. System of record. |
+| Anthropic (Claude) | `ai_summary.py`, `agent.py`, `jeff_knowledge.py` | Live when `ANTHROPIC_API_KEY` set; heuristic fallbacks otherwise. |
+| Postgres (use-cases) | `usecases_db.py` | Read-only catalog via `DATABASE_URL_USECASES`. |
+| Slack | `slack_digest.py` | Optional weekly digest via `SLACK_WEBHOOK_URL`. |
+| Google News | `account_news.py` | RSS + AI relevance for watched accounts. |
+| HubSpot | `hubspot_sync.py`, `legacy_hubspot.py` | Parked. 503 unless `HUBSPOT_SYNC_ENABLED=1`. Awaits CEO sign-off. |
 
-### v0.2.1 — shipped 2026-05-13
-Shared-secret auth, Sales Stage + Owner selectors, MEDDICC notes preserved
-on the Notion page, seeded-account calibration tests, AI fit summary
-(v0.4 brought forward), server + auth integration tests.
+## 12. Conventions and engineering workflow
 
-### v0.3 — shipped 2026-05-13 (HubSpot disabled by default)
-- `/api/hubspot/sync` mirrors `/api/notion/sync` shape.
-- Creates or updates HubSpot company with ICP score, opportunity type,
-  fit summary, lifecyclestage.
-- **Awaits CEO approval before activation.** Toggle via `HUBSPOT_API_KEY`
-  + `HUBSPOT_SYNC_ENABLED=1`. Returns 503 when off.
+These are enforced and should carry to any future build session:
 
-### v0.4 — shipped in v0.2.1 (brought forward)
-AI-assisted fit summaries via Anthropic, with heuristic fallback. See
-`ai_summary.py`. The "outreach line per stakeholder" piece is still TODO.
+- **Per-increment shipping.** Each change ships as its own version: bump the
+  `<title>` in `qualify.html`, add a CHANGELOG entry, add/extend tests, run the
+  full suite, commit. Do not push unless asked.
+- **Versioning.** Currently in a long `v1.0.0xx` alpha-suffix sequence
+  (`...dt`, `du`, ...).
+- **Tests.** `python3 -m pytest` (not `python`). 1331 tests at v1.0.0du.
+- **House voice.** UK English. No em-dashes in user-facing prose or
+  AI-generated text. No marketing tone, no emojis, no invented statistics.
+- **Outreach is drafts-only.** Never auto-send.
+- **Secrets.** Never paste live secrets (especially the company `DATABASE_URL`)
+  into chat. Set them in Railway. `cache/` is gitignored and never committed.
+- **server.py reads qualify.html once at boot,** so UI edits need a server
+  restart to show in a running preview.
 
-### v0.5 — shipped 2026-05-13
-- Append-only JSON-lines audit log at `cache/audit.jsonl`. Every qualify
-  + sync writes one event with timestamp, actor, outcome.
-- `GET /api/audit` reads the log + emits a rollup summary.
-- Slack weekly digest builder (`slack_digest.py`). `GET /api/slack/digest`
-  previews; `POST .../digest?send=1` posts to `SLACK_WEBHOOK_URL`. Schedule
-  via Railway Cron or external scheduler.
+## 13. Roadmap / open items
 
-### v0.4 — shipped 2026-05-15 (Project Build + Pricing)
-- **Project Build** stage between Pipeline and (future) SOW.
-- 5 project types: CRM Strategy / CRM Build / CRM Execute / Data / Engineering.
-- Per-criterion 3-state qualification (Unqualified → Qualifying →
-  Qualified). Criteria are tagged with role drivers so scope answers
-  feed pricing.
-- **Pricing Calculator** codified in `pricing.py`. Reference deal reproduced
-  ($1.19M gross / $1.11M net). Single blended USD/hour rate, per-phase
-  team allocations, configurable discount.
-- **Delivery validation gate.** Scope flows `draft →
-  pending_validation → validated/rejected` before Pricing is sent.
-- MEDDICC label renamed to MEDDPICC throughout the UI (criteria
-  unchanged — full 8-criteria MEDDPICC pending Notion schema additions).
+- Full MEDDPICC: add Paper Process + Competition criteria and the Notion schema.
+- HubSpot deal sync activation (post CEO sign-off).
+- Outreach-line drafter polish per stakeholder.
+- Stakeholder rationale text (`qualify_service._stakeholder_why`) still contains
+  em-dashes; bring it in line with the no-em-dash rule.
+- Move any remaining ephemeral state fully onto the Railway volume / durable
+  storage as volume justifies.
+- Refresh `SETUP.md` (it still describes the legacy `index.html` + `app.js`
+  flow) and the Obsidian wiki note (legacy `tools/` scripts).
 
-### v0.5 — TBD (next up)
-- Draft SOW renderer pulling Apollo + scope + pricing into a single
-  reviewable document.
-- Slack notification when scope hits `pending_validation` so delivery
-  picks it up promptly.
-- Filter chips for `pending_validation` in the Pipeline view.
+## 14. Open questions
 
-### v0.6 — TBD
-- Outreach-line drafter per stakeholder (Anthropic).
-- Move audit log + project store off ephemeral disk to durable storage
-  (Railway volume or Postgres) once daily volume justifies it.
-- Custom dashboard panels: stage-by-stage conversion, time-in-stage.
-- Full MEDDPICC (add Paper Process + Competition criteria + Notion schema).
+1. Apollo billing visibility: who monitors monthly credit consumption?
+2. Score recalibration cadence: when does the ICP weight table get reviewed?
+3. Push policy after the move to the corporate Claude license / corporate repo
+   (see HANDOVER.md): which remote is the source of truth, and who approves
+   writes to it.
+4. Disqualifier overrides: do we need a signed-off "qualified exception" mode?
 
-## 11. Open questions
+## 15. Out of scope (deferred)
 
-1. **Apollo billing visibility.** Who monitors monthly credit consumption?
-2. **Score recalibration cadence.** When does the ICP weight table get
-   reviewed? (Last calibration: 7 April 2026.)
-3. **Multi-owner support.** Today every page is owned by Ben on push. Should
-   the UI surface an owner picker before push?
-4. **Disqualifier overrides.** A hard disqualifier flips Status to Qualify
-   Out automatically. Do we need a "qualified exception" mode for cases
-   where a hard rule should be overridden with sign-off?
-
-## 12. Out of scope (will defer)
-
-- LinkedIn enrichment (Apollo covers ~80% of the LinkedIn fields we need).
-- A mobile native app — the responsive web UI is sufficient.
-- Per-vertical custom scoring (e.g. different weights for QSR vs Fintech).
-- Permissions / role-based UI (everyone with the URL sees everything).
+LinkedIn enrichment beyond Apollo , a native mobile app , per-vertical custom
+scoring weights , role-based permissions (everyone with the URL sees
+everything).
