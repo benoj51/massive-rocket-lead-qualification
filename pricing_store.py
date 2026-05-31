@@ -27,6 +27,7 @@ Schema (all fields optional, defaults match pricing.QuoteInputs):
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from datetime import datetime, timezone
@@ -81,7 +82,7 @@ def save(lead_id: str, config: dict[str, Any]) -> dict[str, Any]:
     cleaned["updated_at"] = _now_iso()
     p = _path(lead_id)
     with _LOCK:
-        p.write_text(json.dumps(cleaned, indent=2))
+        json_file_store.write_json(p, cleaned)
     return cleaned
 
 

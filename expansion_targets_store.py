@@ -68,6 +68,7 @@ API
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -133,7 +134,7 @@ def _load_raw(target_id: str) -> dict[str, Any] | None:
 def _save_raw(target: dict[str, Any]) -> None:
     p = _path(target["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(target, indent=2, ensure_ascii=False))
+    json_file_store.write_json(p, target)
 
 
 def _normalise_contact(c: dict[str, Any]) -> dict[str, Any]:

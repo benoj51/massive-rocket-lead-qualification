@@ -40,6 +40,7 @@ API
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -94,7 +95,7 @@ def _load_raw(lead_id: str) -> list[dict[str, Any]]:
 def _save_raw(lead_id: str, rows: list[dict[str, Any]]) -> None:
     p = _path(lead_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+    json_file_store.write_json(p, rows)
 
 
 def list_for(lead_id: str, *, limit: int = 20) -> list[dict[str, Any]]:

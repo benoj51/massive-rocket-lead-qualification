@@ -13,6 +13,7 @@ from the settings panel.
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from datetime import datetime, timezone
@@ -110,5 +111,5 @@ def save(updates: dict[str, Any]) -> dict[str, Any]:
             pass
     current["updated_at"] = _now_iso()
     with _LOCK:
-        _path().write_text(json.dumps(current, indent=2))
+        json_file_store.write_json(_path(), current)
     return current

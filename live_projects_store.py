@@ -50,6 +50,7 @@ API
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -113,7 +114,7 @@ def _save_raw(project: dict[str, Any]) -> None:
     pid = project["id"]
     p = _path(pid)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(project, indent=2, ensure_ascii=False))
+    json_file_store.write_json(p, project)
 
 
 def _normalise(p: dict[str, Any]) -> dict[str, Any]:

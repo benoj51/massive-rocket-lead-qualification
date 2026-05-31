@@ -18,6 +18,7 @@ Why a single file and not per-lead like the other stores?
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from pathlib import Path
@@ -49,7 +50,7 @@ def _load() -> dict[str, str]:
 
 
 def _write(data: dict[str, str]) -> None:
-    _path().write_text(json.dumps(data, indent=2, sort_keys=True))
+    json_file_store.write_json(_path(), data)
 
 
 def _norm(lead_id: str) -> str:

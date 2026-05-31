@@ -17,6 +17,7 @@ Public surface:
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -60,7 +61,7 @@ def save(lead_id: str, snapshot: dict[str, Any]) -> int:
         path = _lead_dir(lead_id) / f"v{version}.json"
         payload = dict(snapshot)
         payload["version"] = version
-        path.write_text(json.dumps(payload, indent=2))
+        json_file_store.write_json(path, payload)
         return version
 
 

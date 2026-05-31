@@ -39,6 +39,7 @@ Public API:
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 import uuid
@@ -125,7 +126,7 @@ def _load_raw(partner_id: str) -> list[dict[str, Any]]:
 
 def _write_raw(partner_id: str, contacts: list[dict[str, Any]]) -> None:
     with _LOCK:
-        _path(partner_id).write_text(json.dumps(contacts, indent=2))
+        json_file_store.write_json_backup(_path(partner_id), contacts)
 
 
 def _coerce_tag_list(value: Any) -> list[str]:

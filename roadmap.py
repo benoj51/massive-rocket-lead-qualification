@@ -28,6 +28,7 @@ Public surface:
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 import uuid
@@ -209,7 +210,7 @@ def save(lead_id: str, payload: dict[str, Any] | Roadmap) -> Roadmap:
     rm.lead_id = lead_id
     rm.touch()
     with _LOCK:
-        _path(lead_id).write_text(json.dumps(to_dict(rm), indent=2))
+        json_file_store.write_json(_path(lead_id), to_dict(rm))
     return rm
 
 

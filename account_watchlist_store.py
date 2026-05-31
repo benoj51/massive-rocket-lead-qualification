@@ -56,6 +56,7 @@ API
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -110,7 +111,7 @@ def _load_raw(user: str) -> list[dict[str, Any]]:
 def _save_raw(user: str, rows: list[dict[str, Any]]) -> None:
     p = _path(user)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+    json_file_store.write_json_backup(p, rows)
 
 
 def _normalise(entry: dict[str, Any]) -> dict[str, Any]:

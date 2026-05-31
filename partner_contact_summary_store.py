@@ -19,6 +19,7 @@ so the file shape stays predictable.
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from datetime import datetime, timezone
@@ -66,7 +67,7 @@ def save(partner_id: str, contact_id: str, summary: dict[str, Any]) -> dict[str,
     payload = dict(summary)
     payload["generated_at"] = _now_iso()
     with _LOCK:
-        _path(partner_id, contact_id).write_text(json.dumps(payload, indent=2))
+        json_file_store.write_json(_path(partner_id, contact_id), payload)
     return payload
 
 

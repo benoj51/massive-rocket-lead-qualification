@@ -11,6 +11,7 @@ so listing projects = listing files.
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -47,7 +48,7 @@ def save(scope: scope_module.ProjectScope) -> None:
     payload = scope_module.to_dict(scope)
     path = _path_for(scope.lead_id)
     with _LOCK:
-        path.write_text(json.dumps(payload, indent=2))
+        json_file_store.write_json(path, payload)
 
 
 def load(lead_id: str) -> scope_module.ProjectScope | None:

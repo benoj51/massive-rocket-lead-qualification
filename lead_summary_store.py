@@ -10,6 +10,7 @@ Storage: cache/lead_summaries/<lead_id>.json
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from datetime import datetime, timezone
@@ -51,7 +52,7 @@ def save(lead_id: str, summary: dict[str, Any]) -> dict[str, Any]:
     payload = dict(summary)
     payload["generated_at"] = _now_iso()
     with _LOCK:
-        _path(lead_id).write_text(json.dumps(payload, indent=2))
+        json_file_store.write_json(_path(lead_id), payload)
     return payload
 
 

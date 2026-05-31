@@ -31,6 +31,7 @@ Contact shape (lenient — only `id` and at least one of name/email required):
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 import uuid
@@ -76,7 +77,7 @@ def _load_raw(lead_id: str) -> list[dict[str, Any]]:
 def _write_raw(lead_id: str, contacts: list[dict[str, Any]]) -> None:
     p = _path(lead_id)
     with _LOCK:
-        p.write_text(json.dumps(contacts, indent=2))
+        json_file_store.write_json_backup(p, contacts)
 
 
 STATUSES = ["active", "dormant", "left"]

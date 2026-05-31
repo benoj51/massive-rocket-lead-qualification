@@ -46,6 +46,7 @@ API
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import re
 import threading
@@ -105,7 +106,7 @@ def _load_raw(okr_id: str) -> dict[str, Any] | None:
 def _save_raw(okr: dict[str, Any]) -> None:
     p = _path(okr["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(okr, indent=2, ensure_ascii=False))
+    json_file_store.write_json(p, okr)
 
 
 def _normalise_kr(kr: dict[str, Any]) -> dict[str, Any]:

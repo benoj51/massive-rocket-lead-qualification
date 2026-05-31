@@ -18,6 +18,7 @@ present, so the UI can add / remove / reorder without a redeploy.
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from datetime import datetime, timezone
@@ -132,7 +133,7 @@ def save(updates: dict[str, Any]) -> dict[str, list[str]]:
     payload = dict(current)
     payload["updated_at"] = _now_iso()
     with _LOCK:
-        _path().write_text(json.dumps(payload, indent=2))
+        json_file_store.write_json(_path(), payload)
     # Strip metadata from the returned dict (only return enum lists).
     return {k: v for k, v in payload.items() if k in _ENUM_KEYS}
 

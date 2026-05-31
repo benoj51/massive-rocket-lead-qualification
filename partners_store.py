@@ -18,6 +18,7 @@ Public API:
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 import uuid
@@ -74,7 +75,7 @@ def _load_raw() -> list[dict[str, Any]]:
 
 def _write_raw(rows: list[dict[str, Any]]) -> None:
     with _LOCK:
-        _path().write_text(json.dumps(rows, indent=2))
+        json_file_store.write_json_backup(_path(), rows)
 
 
 def _normalise(p: dict[str, Any]) -> dict[str, Any]:

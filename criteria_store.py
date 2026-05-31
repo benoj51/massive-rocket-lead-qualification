@@ -27,6 +27,7 @@ Each criterion dict has these keys:
 from __future__ import annotations
 
 import json
+import json_file_store
 import os
 import threading
 from pathlib import Path
@@ -111,7 +112,7 @@ def save(library: dict[str, list[dict[str, Any]]]) -> None:
         cleaned[pt] = cleaned_list
     path = _path()
     with _LOCK:
-        path.write_text(json.dumps(cleaned, indent=2))
+        json_file_store.write_json(path, cleaned)
 
 
 def upsert_criterion(project_type: str, criterion: dict[str, Any]) -> dict[str, Any]:

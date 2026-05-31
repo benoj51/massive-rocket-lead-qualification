@@ -5,6 +5,56 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dw] - 2026-05-29 - Atomic store writes: kill the truncate-on-crash data-loss vector
+
+The deferred data-integrity item from the v1.0.0dv review. ~25 JSON stores
+still wrote with a plain `path.write_text(json.dumps(...))`, which is not
+atomic: a crash mid-write (a gunicorn `--timeout 120` kill, OOM, a deploy
+restart) could leave a half-written / truncated file. Paired with the lenient
+loaders (which return `[]` on a corrupt file), the very next save would then
+load `[]`, append, and overwrite, permanently destroying the prior records.
+This is the exact note-loss pattern fixed for the notes/calls stores in
+v1.0.0dp, but left unfixed everywhere else.
+
+### Change
+
+Every store's single write now routes through the existing atomic helpers in
+`json_file_store.py` (one added import + one swapped write line per file, no
+other changes):
+
+- `write_json` (tempfile + fsync + `os.replace`) for the machine-generated and
+  per-entity dict stores: account_news, engagement_snapshots, notifications,
+  expansion_targets, live_projects, live_project_okrs, partner_contact_summary,
+  criteria, enum_config, forecast_config, pricing, project (scope), roadmap,
+  sow, lead_summary, accounts_graph.
+- `write_json_backup` (atomic + a `.bak` sidecar of the prior good state) for
+  the irreplaceable human-authored list stores: contacts, partner_contacts,
+  partners, mr_owners, todos, lead_agencies, lead_partner_assignments,
+  account_watchlist, filter_presets. The worst blast radius was the single-file
+  roster stores (`partners_store`, `mr_owners_store`), where one bad write lost
+  every partner / user; those now keep a recoverable sidecar.
+
+The atomic write closes the corruption vector at its source: a reader now sees
+either the old complete file or the new one, never a half-written one.
+
+### Not changed (documented next step)
+
+The read side still uses the lenient `_load_raw` on mutation paths. Switching
+the 9 human-authored stores to `load_list_safe(strict=True)` (as the
+notes/calls stores already do) would add auto-recovery from the `.bak` and make
+a mutation refuse to overwrite an unreadable file, rather than relying on manual
+restore. Left as a separate, behaviour-changing pass.
+
+Also unchanged by design: the Apollo response cache (regenerable), the Jeff KB
+markdown writer (not JSON), and the auto_qualify CLI report writer.
+
+### Tests
+
+`test_store_atomic_writes.py` (new): partners_store (single-file roster) and
+contacts_store (per-lead) each leave a parseable `.bak` sidecar after a second
+write, proving the human stores are wired to `write_json_backup`. Full suite
+green; the migration is behaviour-preserving.
+
 ## [1.0.0dv] - 2026-05-29 - Code-review hardening: AI, qualify path, store path safety
 
 A full code-review pass across the platform (AI features, the qualify pipeline,
