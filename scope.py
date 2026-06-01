@@ -482,8 +482,16 @@ def role_drivers_for_project(scope: ProjectScope) -> dict[str, float]:
             numeric = _coerce_number(answer.value)
             if numeric is None or scale == 0:
                 continue
-            # Normalise: 0-10 maps to 0.0-1.0, capped.
-            normalised = min(numeric / 10.0, 1.0)
+            # v1.0.0ea: counts 0-10 ramp linearly to 1.0 (unchanged). Above
+            # 10 the ramp continues gently so a 40-campaign build prices above
+            # a 10-campaign one, but it stays bounded (max 1.5) so a single
+            # criterion can't dominate the quote. The previous code hard-capped
+            # the normaliser at 10, so a 10-template and a 50-template build
+            # produced an identical price.
+            if numeric <= 10:
+                normalised = numeric / 10.0
+            else:
+                normalised = 1.0 + min((numeric - 10.0) / 80.0, 0.5)
             bump = normalised * scale
             multipliers[role] = max(multipliers.get(role, 1.0) + bump, 0.5)
     return multipliers

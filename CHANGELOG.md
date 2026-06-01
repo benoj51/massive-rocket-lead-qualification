@@ -5,6 +5,37 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0ea] - 2026-05-29 - Pricing: effort multiplier keeps scaling above 10
+
+Follow-up #3 from the notes-to-price review. `scope.role_drivers_for_project`
+turns scope counts (campaigns, templates, integrations, SDK surfaces) into
+pricing effort multipliers, but the normaliser was `min(value/10, 1.0)`, which
+hard-saturated at 10. A 10-template and a 50-template build produced an
+identical multiplier, so the price stopped differentiating exactly where the big
+deals live.
+
+### Change
+
+The 0-10 region is unchanged (no quoted price moves for small counts), but above
+10 the ramp now continues gently and is bounded:
+
+```
+value <= 10:  normalised = value / 10            # unchanged
+value  > 10:  normalised = 1.0 + min((value-10)/80, 0.5)   # 30 -> 1.25, 50 -> 1.5 (cap)
+```
+
+So a 30-campaign build now prices above a 10-campaign one, and a 50-campaign
+build above that, while a single criterion still can't dominate the quote (the
+bump is capped at +0.5 over the old ceiling). The reference deal calibration is
+untouched because it prices off the base team template, not the multipliers.
+
+### Tests
+
+`test_role_drivers.py` (new): the 0-10 region is unchanged (5 -> 1.5, 10 -> 2.0),
+counts above 10 keep rising (30 -> 2.25, 50 -> 2.5), and the curve saturates
+above 50 so it stays bounded. `test_pricing.py` still passes, confirming the
+reference quote is unaffected.
+
 ## [1.0.0dz] - 2026-05-29 - Surface AI-inferred project types for one-click stream creation
 
 Follow-up #2 from the notes-to-price review. The AI already infers which project
