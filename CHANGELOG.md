@@ -5,6 +5,39 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dz] - 2026-05-29 - Surface AI-inferred project types for one-click stream creation
+
+Follow-up #2 from the notes-to-price review. The AI already infers which project
+types a deal needs (by which scope_criteria blocks it returns from the notes),
+but that inference was stranded: `_apply_scope_prefill` only writes into streams
+the AE has already created. So if the AE hadn't opened Project Build and picked
+the types, the AI's read on "this is a CRM Build + Data deal" went nowhere.
+
+### Backend
+
+- `_suggested_project_types_from_scope(lead_id, scope_criteria)`: returns the
+  project types the AI inferred from the notes that aren't yet streams on the
+  project, but only when their block carries at least one concrete value. Each
+  carries its extracted `fields` so the create action can prefill immediately.
+- The note-extraction response now includes `scope_suggested_types`.
+- New `POST /api/scope/<lead_id>/add-streams`: additively adds streams (never
+  drops existing ones, unlike the upsert) and applies the passed `scope_criteria`
+  prefill, so accepting the AI's inferred types lands their note-extracted values
+  in one step.
+
+### Frontend
+
+- A "✨ AI inferred N project types from this note" banner in the lead drawer
+  (next to the contact-suggestions panel), with the inferred type chips and a
+  "Create streams" button. One click creates the Project Build streams and
+  prefills their criteria, then the deal can be priced off the notes.
+
+### Tests
+
+`test_scope_prefill.py`: the suggester returns only inferred-not-existing types
+with concrete values, and the add-streams endpoint is additive (keeps existing
+streams) and prefills the new ones. JS blocks parse.
+
 ## [1.0.0dy] - 2026-05-29 - Fix: Data Work / CRM Execute scope prefill silently dropped
 
 A review of the notes-to-price flow found that the AI scope extraction prefilled

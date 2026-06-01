@@ -185,6 +185,44 @@ class ApplyScopePrefillTests(unittest.TestCase):
         qa = next(c for c in ce.criteria if c.key == "qa_required")
         self.assertEqual(qa.value, "Heavy")
 
+    # --- v1.0.0dz: surface inferred project types + one-click create ------
+    def test_suggested_project_types_from_scope(self):
+        """Only inferred types not already on the project, and only when the
+        AI block carries at least one concrete value."""
+        self._seed_project("sug1", project_types=("crm_build",))
+        suggested = self.server._suggested_project_types_from_scope("sug1", {
+            "crm_build": {"templates_count": "5"},       # existing stream -> skip
+            "data_work": {"data_sources_count": "4"},    # new + value -> keep
+            "crm_execute": {"monthly_campaign_volume": None},  # new but null -> skip
+        })
+        self.assertEqual({s["project_type"] for s in suggested}, {"data_work"})
+        dw = next(s for s in suggested if s["project_type"] == "data_work")
+        self.assertEqual(dw["field_count"], 1)
+        self.assertEqual(dw["fields"], {"data_sources_count": "4"})
+
+    def test_add_streams_endpoint_is_additive_and_prefills(self):
+        self._seed_project("add1", project_types=("crm_build",))
+        client = self.server.app.test_client()
+        r = client.post("/api/scope/add1/add-streams", json={
+            "company_name": "Add Co",
+            "project_types": ["data_work"],
+            "scope_criteria": {"data_work": {
+                "data_sources_count": "7", "data_warehouse": "Snowflake"}},
+            "source_call_id": "note-suggestion",
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        stream_types = [s["project_type"] for s in body["project"]["streams"]]
+        # New stream added, existing crm_build preserved (not dropped).
+        self.assertIn("data_work", stream_types)
+        self.assertIn("crm_build", stream_types)
+        self.assertEqual(len(body["prefilled"]), 2)
+        import project_store
+        proj = project_store.load("add1")
+        dw = next(s for s in proj.streams if s.project_type == "data_work")
+        sources = next(c for c in dw.criteria if c.key == "data_sources_count")
+        self.assertEqual(sources.value, "7")
+
     def test_returns_empty_when_no_project(self):
         applied = self.server._apply_scope_prefill("no-project-lead", {
             "crm_build": {"templates_count": "5"},

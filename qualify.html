@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dy</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dz</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -3120,6 +3120,9 @@
              after a note save when the AI spotted named people not
              already in this lead's contacts. -->
         <div id="ld-contact-suggestions" style="display:none;margin-bottom:10px;"></div>
+        <!-- v1.0.0dz: AI-inferred project types from the notes - one-click
+             create the Project Build streams (and prefill their criteria). -->
+        <div id="ld-scope-suggestions" style="display:none;margin-bottom:10px;"></div>
         <div id="ld-calls-list" class="muted" style="font-size:12px;">Loading…</div>
       </div>
     </details>
@@ -8250,6 +8253,66 @@
     }
   }
 
+  // v1.0.0dz: AI-inferred project types from the notes. The server returns
+  // scope_suggested_types: [{project_type, label, field_count, fields}] for
+  // streams the AI spotted that aren't on the project yet. One click creates
+  // the Project Build streams AND prefills their criteria from the notes.
+  function renderScopeSuggestions(leadId, suggestions) {
+    const el = $('#ld-scope-suggestions');
+    if (!el) return;
+    if (!Array.isArray(suggestions) || !suggestions.length) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    el.style.display = 'block';
+    const chips = suggestions.map(s =>
+      `<span class="chip" style="font-size:11px;">${escapeHtml(s.label || s.project_type)}${s.field_count ? ` <span style="color:var(--text-muted);">${s.field_count}</span>` : ''}</span>`
+    ).join(' ');
+    const word = suggestions.length === 1 ? 'stream' : 'streams';
+    el.innerHTML = `
+      <div style="background:rgba(232,43,35,.06);border:1px solid rgba(232,43,35,.3);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent-text);font-weight:600;">${icon('sparkles', { size: 12 })} AI inferred ${suggestions.length} project type${suggestions.length === 1 ? '' : 's'} from this note</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">Create the Project Build ${word} and prefill the criteria the notes mentioned.</div>
+          </div>
+          <button id="ld-ss-dismiss" class="btn ghost" type="button" style="padding:3px 10px;font-size:11px;">✕ Dismiss</button>
+        </div>
+        <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">${chips}</div>
+        <button id="ld-ss-create" class="btn" type="button" style="padding:5px 12px;font-size:11px;">+ Create ${word}</button>
+      </div>
+    `;
+    el.querySelector('#ld-ss-dismiss')?.addEventListener('click', () => {
+      el.style.display = 'none'; el.innerHTML = '';
+    });
+    el.querySelector('#ld-ss-create')?.addEventListener('click', async () => {
+      const btn = el.querySelector('#ld-ss-create');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
+      const companyName = ($('[data-ld="company"]')?.value || '').trim();
+      const scope_criteria = {};
+      suggestions.forEach(s => { scope_criteria[s.project_type] = s.fields || {}; });
+      try {
+        const res = await jsonFetch(`/api/scope/${encodeURIComponent(leadId)}/add-streams`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: companyName,
+            project_types: suggestions.map(s => s.project_type),
+            scope_criteria,
+            source_call_id: 'note-suggestion',
+          }),
+        });
+        const n = (res.prefilled || []).length;
+        toast(`Added ${suggestions.length} ${word}${n ? ` · prefilled ${n} field${n === 1 ? '' : 's'}` : ''}`, 'success');
+        el.style.display = 'none'; el.innerHTML = '';
+      } catch (e) {
+        btn.disabled = false; btn.innerHTML = `+ Create ${word}`;
+        toast(`Create failed: ${e.body?.error || e.message}`, 'error');
+      }
+    });
+  }
+
   // v1.0.0f (Tier 3c): AI contact suggestions from notes.
   // Server returns `contact_suggestions: [{name, title, email, role}]`
   // on the call-add response - names the AI spotted in the transcript
@@ -9478,6 +9541,7 @@
       }
       // v1.0.0f: render contact suggestions panel if AI spotted new people.
       renderContactSuggestions(leadId, data.contact_suggestions || []);
+      renderScopeSuggestions(leadId, data.scope_suggested_types || []);
       await loadLeadCalls(leadId);
     } catch (e) {
       toast(`Save failed: ${e.body?.error || e.message}`, 'error');
@@ -10131,6 +10195,7 @@
         }
         // v1.0.0f: contact suggestions panel (same path).
         renderContactSuggestions(drawerState.id, callRes?.contact_suggestions || []);
+        renderScopeSuggestions(drawerState.id, callRes?.scope_suggested_types || []);
       }
       const msg = `Saved ${summary.join(' + ')}`;
       $('#ld-status').textContent = msg;

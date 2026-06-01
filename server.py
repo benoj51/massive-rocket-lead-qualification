@@ -1150,10 +1150,14 @@ def api_calls_add(lead_id: str):
     # values. Tracks which fields came from AI so the UI can flag them
     # for review.
     scope_prefill_applied: list[dict] = []
+    scope_suggested_types: list[dict] = []
     if extracted and isinstance(extracted.get("scope_criteria"), dict):
         try:
             scope_prefill_applied = _apply_scope_prefill(
                 lead_id, extracted["scope_criteria"], record["id"]
+            )
+            scope_suggested_types = _suggested_project_types_from_scope(
+                lead_id, extracted["scope_criteria"]
             )
         except Exception as e:
             log.warning("Scope prefill failed for %s: %s", lead_id, e)
@@ -1331,6 +1335,10 @@ def api_calls_add(lead_id: str):
         # was auto-filled. UI uses this to show a "✨ AI pre-filled N
         # criteria" toast + visual hint on the Project Build view.
         "scope_prefill": scope_prefill_applied,
+        # v1.0.0dz: project types the AI inferred from the notes that
+        # aren't yet streams on the project. UI offers a one-click
+        # "Create these streams" banner that also prefills their criteria.
+        "scope_suggested_types": scope_suggested_types,
         # v1.0.0f: new contacts the AI noticed in the notes that aren't
         # already in the lead's contact list. UI offers a one-click
         # "Add these" panel.
@@ -1407,6 +1415,35 @@ def _apply_scope_prefill(lead_id: str, scope_criteria: dict, source_call_id: str
                         count=len(applied),
                         fields=[a["key"] for a in applied])
     return applied
+
+
+def _suggested_project_types_from_scope(lead_id: str, scope_criteria: dict) -> list[dict]:
+    """v1.0.0dz: project types the AI inferred from the notes that aren't
+    yet streams on the lead's project, so the AE can one-click create them.
+    A type is 'inferred' when its scope_criteria block carries at least one
+    concrete (non-null) value. The extracted fields ride along so the create
+    action can prefill the new streams immediately."""
+    if not isinstance(scope_criteria, dict):
+        return []
+    types_meta = scope_module.project_types()
+    project = project_store.load(lead_id)
+    existing = {s.project_type for s in project.streams} if project else set()
+    out: list[dict] = []
+    for pt, fields in scope_criteria.items():
+        if pt in existing or pt not in types_meta or not isinstance(fields, dict):
+            continue
+        concrete = {k: v for k, v in fields.items()
+                    if v is not None and str(v).strip()
+                    and str(v).strip().lower() != "null"}
+        if not concrete:
+            continue
+        out.append({
+            "project_type": pt,
+            "label": types_meta[pt].get("label", pt),
+            "field_count": len(concrete),
+            "fields": concrete,
+        })
+    return out
 
 
 @app.route("/api/calls/<lead_id>/<call_id>", methods=["PATCH"])
@@ -1832,6 +1869,54 @@ def api_scope_upsert(lead_id: str):
         })
     except scope_module.ScopeError as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/scope/<lead_id>/add-streams", methods=["POST"])
+def api_scope_add_streams(lead_id: str):
+    """v1.0.0dz: additively add project-type streams (never drops existing
+    ones, unlike the upsert). Optionally prefills the new streams from the
+    AI-extracted scope_criteria passed in the body, so accepting the AI's
+    inferred project types lands their note-extracted values immediately."""
+    body = request.get_json(silent=True) or {}
+    add_types = [pt for pt in (body.get("project_types") or [])
+                 if pt in scope_module.PROJECT_TYPES]
+    company_name = (body.get("company_name") or "").strip()
+    scope_criteria = body.get("scope_criteria") or {}
+    source_call_id = (body.get("source_call_id") or "manual").strip() or "manual"
+    if not add_types:
+        return jsonify({"error": "project_types required"}), 400
+    project = project_store.load(lead_id)
+    if project is None:
+        if not company_name:
+            return jsonify({"error": "company_name required for a new project"}), 400
+        project = scope_module.new_project(lead_id, company_name, add_types)
+    else:
+        existing = {s.project_type for s in project.streams}
+        library = scope_module.criteria_library()
+        for pt in add_types:
+            if pt in existing:
+                continue
+            crit = [scope_module.CriterionAnswer(key=c["key"])
+                    for c in library.get(pt, [])]
+            project.streams.append(scope_module.ProjectStream(
+                project_type=pt, criteria=crit))
+        project.touch()
+    project_store.save(project)
+    # Prefill the freshly-added streams from the passed extraction.
+    prefilled: list[dict] = []
+    if isinstance(scope_criteria, dict) and scope_criteria:
+        try:
+            prefilled = _apply_scope_prefill(lead_id, scope_criteria, source_call_id)
+        except Exception as e:
+            log.warning("Add-streams prefill failed for %s: %s", lead_id, e)
+    audit.log_event("scope_streams_added", actor=_actor(), lead_id=lead_id,
+                    project_types=add_types, prefilled=len(prefilled))
+    reloaded = project_store.load(lead_id)
+    return jsonify({
+        "project": scope_module.to_dict(reloaded),
+        "summary": scope_module.project_summary(reloaded),
+        "prefilled": prefilled,
+    })
 
 
 @app.route("/api/scope/<lead_id>/transition", methods=["POST"])
