@@ -113,6 +113,30 @@ def list_for(lead_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
     return rows
 
 
+def all_news(*, per_lead_limit: int = 20) -> list[dict[str, Any]]:
+    """Aggregate scored news across every account that has any. Each item
+    already carries its own `lead_id`, so the caller can resolve names.
+    Items are newest-first within each account before the per-lead cap;
+    the caller does the final cross-account sort. Backs the dedicated
+    news feed (/api/news/feed)."""
+    d = _store_dir()
+    if not d.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    with _LOCK:
+        for f in d.glob("*.json"):
+            try:
+                rows = json.loads(f.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(rows, list):
+                continue
+            rows.sort(key=lambda r: r.get("published_at")
+                        or r.get("scored_at") or "", reverse=True)
+            out.extend(rows[:per_lead_limit] if per_lead_limit else rows)
+    return out
+
+
 def upsert_many(lead_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     """Add/update scored items. Dedup by `id`. Returns counts +
     the new+updated rows so the caller can know which to notify on."""

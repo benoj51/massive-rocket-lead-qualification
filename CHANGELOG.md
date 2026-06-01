@@ -5,6 +5,39 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dx] - 2026-05-29 - Dedicated Account News view
+
+Ben flagged there was no place to view news on an account. The feature existed
+(AI-scored Google News per account) but only as a card buried in each lead
+drawer's hero, so there was no single place to scan it. This adds a dedicated
+News view that rolls every watched account's news into one feed.
+
+### Backend
+
+- `account_news_store.all_news(per_lead_limit=20)`: aggregates scored items
+  across every account that has any (each item already carries its `lead_id`).
+- `GET /api/news/feed`: returns the aggregated feed, newest-first, with account
+  names resolved via the pipeline lookup (same pattern as /api/watchlist) and a
+  per-account rollup for filter chips. `?user=<owner>` scopes the feed to that
+  user's watched accounts; without it, every account with news is shown. Read
+  only (the Google News fetch stays on /api/admin/watchlist/sweep).
+
+### Frontend
+
+- New "News" entry under the Insights nav dropdown, opening a `view-news`
+  section.
+- The feed lists each item with its account (click to open that lead), source,
+  age, MR relevance score (0-10, colour-coded), why-relevant, and the action
+  hint. Account filter chips appear when more than one account has news. A
+  "Scan for news" button runs the sweep and reloads.
+- The per-lead news card in the lead drawer is unchanged; this is the roll-up.
+
+### Tests
+
+`test_news_feed.py` (new): `all_news` aggregates across leads and tags each item
+with its lead_id; the endpoint aggregates + names + sorts newest-first, and
+scopes correctly to a user's watchlist. JS blocks parse (node --check).
+
 ## [1.0.0dw] - 2026-05-29 - Atomic store writes: kill the truncate-on-crash data-loss vector
 
 The deferred data-integrity item from the v1.0.0dv review. ~25 JSON stores

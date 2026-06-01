@@ -6124,6 +6124,73 @@ def api_watchlist_sweep():
     return jsonify(summary)
 
 
+# v1.0.0dx: dedicated cross-account news feed -----------------------------
+@app.route("/api/news/feed", methods=["GET"])
+def api_news_feed():
+    """Aggregated, AI-scored news across accounts, for the dedicated News
+    view. Scopes to a user's watched accounts when `user` is given;
+    otherwise returns news for every account that has any. Read-only (no
+    Google News fetch — that happens via /api/admin/watchlist/sweep).
+
+    Query:
+      user  - optional MR owner; scope to that user's watchlist
+      limit - optional cap on returned items (default 80, max 300)
+    """
+    user = (request.args.get("user") or "").strip()
+    try:
+        limit = int(request.args.get("limit") or 80)
+    except (TypeError, ValueError):
+        limit = 80
+    limit = max(1, min(limit, 300))
+
+    watched_ids: set | None = None
+    if user:
+        watched_ids = {w.get("lead_id")
+                       for w in account_watchlist_store.list_for(user)
+                       if w.get("lead_id")}
+
+    items = account_news_store.all_news(per_lead_limit=20)
+    if watched_ids is not None:
+        items = [it for it in items if it.get("lead_id") in watched_ids]
+
+    # Resolve account names via the pipeline lookup (best-effort), same
+    # pattern as /api/watchlist.
+    name_by_id: dict = {}
+    try:
+        for r in NotionSync().list_pipeline(limit=500):
+            if r.get("id") and r.get("company"):
+                name_by_id[r["id"]] = r["company"]
+    except Exception as e:
+        log.warning("News feed: pipeline name enrich failed: %s", e)
+    for it in items:
+        lid = it.get("lead_id")
+        it["account"] = name_by_id.get(lid) or lid
+
+    # Cross-account sort: newest first.
+    items.sort(key=lambda r: (r.get("published_at")
+                              or r.get("scored_at") or ""), reverse=True)
+
+    # Per-account rollup for the filter chips.
+    accounts: dict = {}
+    for it in items:
+        lid = it.get("lead_id") or ""
+        a = accounts.setdefault(lid, {
+            "lead_id": lid, "account": it.get("account") or lid,
+            "count": 0, "top_score": 0,
+        })
+        a["count"] += 1
+        a["top_score"] = max(a["top_score"], int(it.get("relevance_score") or 0))
+    account_list = sorted(accounts.values(),
+                          key=lambda a: (-a["count"], a["account"]))
+
+    return jsonify({
+        "items": items[:limit],
+        "accounts": account_list,
+        "count": len(items),
+        "scoped_to_user": bool(user),
+    })
+
+
 # v1.0.0t: Dashboard endpoint ----------------------------------------------
 
 # v1.0.0aw: per-MR-owner engagement leaderboard ---------------------------

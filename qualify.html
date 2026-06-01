@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Massive Rocket Lead Qualification · v1.0.0dw</title>
+<title>Massive Rocket Lead Qualification · v1.0.0dx</title>
 <!-- v1.0.0cj: Inter (Google Fonts) - the single most visible
      change in this design pass. Every character on every surface
      stops being system-ui. Preload + display=swap so first paint
@@ -1686,6 +1686,7 @@
       <button class="nav-dropdown-trigger" id="nav-insights-group" type="button">Insights</button>
       <div class="nav-dropdown-menu">
         <button id="nav-dashboard"  type="button">Dashboard</button>
+        <button id="nav-news"       type="button">News</button>
       </div>
     </div>
     <!-- v1.0.0bq: settings nav. Lives between Insights and the
@@ -2372,6 +2373,27 @@
       <div class="muted" style="font-size:10px;margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
         Touches = partner notes + lead-side calls inside the window. Cadence compliance = active partner contacts within their cadence ÷ total active. New leads = leads with last_edited inside the window (best-effort proxy until we add a first_seen field).
       </div>
+    </div>
+  </section>
+
+  <!-- ACCOUNT NEWS VIEW ======================================= -->
+  <!-- v1.0.0dx: dedicated cross-account news feed. The per-lead news
+       card lives in the lead drawer; this view rolls every watched
+       account's AI-scored news into one place so the team has somewhere
+       to scan it without opening each lead. -->
+  <section id="view-news" class="view">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h2 style="margin:0;">Account News</h2>
+          <p class="muted" style="margin:4px 0 0;">AI-scored material news across your watched accounts. Watch an account from its lead drawer to add it here; scores are MR relevance out of 10.</p>
+        </div>
+        <div class="btn-row" style="flex-shrink:0;">
+          <button id="news-sweep" class="btn ghost" type="button" style="padding:6px 12px;font-size:12px;">↻ Scan for news</button>
+        </div>
+      </div>
+      <div id="news-account-filter" style="margin:16px 0 8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+      <div id="news-feed-list" style="margin-top:8px;"><div class="muted" style="font-size:12px;">Loading…</div></div>
     </div>
   </section>
 
@@ -8942,6 +8964,81 @@
       </div>`;
   }
 
+  // v1.0.0dx: dedicated cross-account News feed. Same per-account
+  // scoring as the lead-drawer card, rolled up into one scannable view.
+  let _newsFeedState = { items: [], accounts: [], filterLeadId: null };
+
+  async function loadNewsFeed() {
+    const list = $('#news-feed-list');
+    if (list) list.innerHTML = '<div class="muted" style="font-size:12px;">Loading…</div>';
+    const user = (
+      (typeof homeState !== 'undefined' && homeState?.profile?.name) ||
+      (typeof _readSavedProfile === 'function' && _readSavedProfile()?.name) ||
+      ''
+    ).trim();
+    try {
+      const qs = user ? `?user=${encodeURIComponent(user)}` : '';
+      const data = await jsonFetch(`/api/news/feed${qs}`);
+      _newsFeedState.items = data.items || [];
+      _newsFeedState.accounts = data.accounts || [];
+      _newsFeedState.filterLeadId = null;
+      _renderNewsFeed();
+    } catch (e) {
+      if (list) list.innerHTML = `<div class="muted" style="color:var(--red);font-size:12px;padding:10px;">Failed to load news: ${escapeHtml(e.body?.error || e.message)}</div>`;
+    }
+  }
+
+  function _renderNewsFeed() {
+    const list = $('#news-feed-list');
+    const filterWrap = $('#news-account-filter');
+    if (!list) return;
+    const { items, accounts, filterLeadId } = _newsFeedState;
+    // Account filter chips (only when more than one account has news).
+    if (filterWrap) {
+      if (accounts.length > 1) {
+        const chip = (label, lid, active) =>
+          `<button class="chip${active ? ' active' : ''}" type="button" data-news-acct="${lid == null ? '' : escapeAttr(lid)}" style="font-size:11px;">${escapeHtml(label)}</button>`;
+        filterWrap.innerHTML =
+          chip(`All (${items.length})`, null, !filterLeadId) +
+          accounts.map(a => chip(`${a.account} (${a.count})`, a.lead_id, filterLeadId === a.lead_id)).join('');
+        filterWrap.querySelectorAll('[data-news-acct]').forEach(b =>
+          b.addEventListener('click', () => {
+            _newsFeedState.filterLeadId = b.dataset.newsAcct || null;
+            _renderNewsFeed();
+          }));
+      } else {
+        filterWrap.innerHTML = '';
+      }
+    }
+    const shown = filterLeadId ? items.filter(n => n.lead_id === filterLeadId) : items;
+    if (!shown.length) {
+      list.innerHTML = `<div class="muted" style="font-size:12px;padding:18px;text-align:center;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;">No scored news yet. Watch accounts from their lead drawer, then click "Scan for news" above.</div>`;
+      return;
+    }
+    const colourFor = (s) => s >= 8 ? 'var(--green)' : s >= 6 ? 'var(--yellow)' : 'var(--text-muted)';
+    list.innerHTML = shown.map(n => `
+      <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap;">
+              <button class="btn ghost" type="button" data-news-open="${escapeAttr(n.lead_id || '')}" style="padding:2px 8px;font-size:10px;" title="Open this account">${escapeHtml(n.account || '?')}</button>
+              <span class="muted" style="font-size:10px;">${escapeHtml(n.source || '')}${n.published_at ? ' · ' + escapeHtml(_fmtAgoShort(n.published_at)) : ''}</span>
+            </div>
+            <a href="${escapeAttr(n.link || '#')}" target="_blank" rel="noopener" style="font-size:13px;font-weight:500;color:var(--text);text-decoration:none;">${escapeHtml(n.title || '')}</a>
+            ${n.why_relevant ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px;font-style:italic;">Why: ${escapeHtml(n.why_relevant)}</div>` : ''}
+            ${n.mr_action_hint ? `<div style="font-size:11px;color:var(--accent-text);margin-top:3px;">→ ${escapeHtml(n.mr_action_hint)}</div>` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;font-family:var(--mono);font-size:14px;font-weight:600;color:${colourFor(n.relevance_score || 0)};" title="MR relevance ${n.relevance_score || 0}/10">${n.relevance_score || 0}</div>
+        </div>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-news-open]').forEach(b =>
+      b.addEventListener('click', () => {
+        const lid = b.dataset.newsOpen;
+        if (lid) openLeadDrawer(lid);
+      }));
+  }
+
   // v1.0.0bj: load + render the "Recent news" card. Lists persisted
   // scored items for this lead + a Refresh button that triggers a
   // fresh Google News fetch + AI relevance scoring.
@@ -13467,6 +13564,22 @@
     $('#nav-forecast').addEventListener('click', () => { switchView('forecast'); loadForecast(); });
     // v1.0.0t: Dashboard view wiring.
     $('#nav-dashboard').addEventListener('click', () => { switchView('dashboard'); loadDashboard(); });
+    // v1.0.0dx: dedicated News view wiring.
+    $('#nav-news')?.addEventListener('click', () => { switchView('news'); loadNewsFeed(); });
+    $('#news-sweep')?.addEventListener('click', async () => {
+      const btn = $('#news-sweep');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Scanning…';
+      try {
+        await jsonFetch('/api/admin/watchlist/sweep', { method: 'POST' });
+        await loadNewsFeed();
+        toast('News scan complete', 'success');
+      } catch (e) {
+        toast(`Scan failed: ${e.body?.error || e.message}`, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = orig;
+      }
+    });
     $('#db-refresh').addEventListener('click', loadDashboard);
     // v1.0.0ct: weekly report refresh button
     const wrBtn = $('#db-weekly-refresh');
