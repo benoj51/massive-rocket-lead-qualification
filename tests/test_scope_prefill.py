@@ -40,6 +40,27 @@ class ExtractNormaliserScopeCriteriaTests(unittest.TestCase):
         self.assertIn("sdk_platform", prompt)
         self.assertIn("migrating_campaigns", prompt)
 
+    def test_scope_criteria_keys_align_with_library(self):
+        """v1.0.0dy regression: the prompt's data_work / crm_execute keys
+        had drifted from the criteria library, so _apply_scope_prefill
+        (which matches by exact key) silently dropped every extracted value
+        for those streams. Every key the prompt emits must be a real library
+        key, and the old mismatched keys must be gone."""
+        import ai_summary
+        import scope
+        prompt = ai_summary._EXTRACT_SYSTEM_PROMPT
+        lib = scope.DEFAULT_CRITERIA_LIBRARY
+        for key in ("data_sources_count", "cdp_in_place", "data_warehouse"):
+            self.assertIn(key, {c["key"] for c in lib["data_work"]})
+            self.assertIn(key, prompt)
+        for key in ("monthly_campaign_volume", "qa_required",
+                    "languages_supported"):
+            self.assertIn(key, {c["key"] for c in lib["crm_execute"]})
+            self.assertIn(key, prompt)
+        for orphan in ("sources_to_connect", "cdp_target",
+                       "warehouse_target", "channels_executed"):
+            self.assertNotIn(orphan, prompt)
+
 
 class ApplyScopePrefillTests(unittest.TestCase):
     """server._apply_scope_prefill writes AI-extracted criteria into
@@ -135,6 +156,34 @@ class ApplyScopePrefillTests(unittest.TestCase):
         # Only crm_build applies
         applied_pts = {a["project_type"] for a in applied}
         self.assertEqual(applied_pts, {"crm_build"})
+
+    def test_data_work_and_crm_execute_prefill(self):
+        """v1.0.0dy: data_work + crm_execute keys were out of sync with the
+        criteria library, so their note-extracted values were silently
+        dropped. With aligned keys, all six values now land (before the
+        fix data_work landed 0 and crm_execute landed 1)."""
+        self._seed_project("dw1", project_types=("data_work", "crm_execute"))
+        applied = self.server._apply_scope_prefill("dw1", {
+            "data_work": {
+                "data_sources_count": "5",
+                "cdp_in_place": "Segment",
+                "data_warehouse": "Snowflake",
+            },
+            "crm_execute": {
+                "monthly_campaign_volume": "40",
+                "qa_required": "Heavy",
+                "languages_supported": "3",
+            },
+        }, source_call_id="call-dw")
+        self.assertEqual(len(applied), 6)
+        import project_store
+        reloaded = project_store.load("dw1")
+        dw = next(s for s in reloaded.streams if s.project_type == "data_work")
+        sources = next(c for c in dw.criteria if c.key == "data_sources_count")
+        self.assertEqual(sources.value, "5")
+        ce = next(s for s in reloaded.streams if s.project_type == "crm_execute")
+        qa = next(c for c in ce.criteria if c.key == "qa_required")
+        self.assertEqual(qa.value, "Heavy")
 
     def test_returns_empty_when_no_project(self):
         applied = self.server._apply_scope_prefill("no-project-lead", {

@@ -461,8 +461,8 @@ Schema:
   "scope_criteria": {
     "crm_strategy": {"engagement_length": "<months, or null>", "lifecycle_maturity": "<1-5, or null>", "stakeholder_count": "<count, or null>", "roadmap_horizon": "<months, or null>"},
     "crm_build": {"migrating_campaigns": "<count, or null>", "new_campaigns": "<count, or null>", "templates_count": "<count, or null>", "html_templates_count": "<count, or null>", "channels": "<comma-separated, or null>", "execute_for_them": "<yes|no|null>", "crm_stakeholder": "<name + title, or null>", "economic_buyer": "<name + title, or null>"},
-    "crm_execute": {"monthly_campaign_volume": "<count/month, or null>", "channels_executed": "<comma-separated, or null>"},
-    "data_work": {"sources_to_connect": "<count, or null>", "cdp_target": "<vendor or null>", "warehouse_target": "<vendor or null>"},
+    "crm_execute": {"monthly_campaign_volume": "<count/month, or null>", "qa_required": "<Light|Standard|Heavy, or null>", "languages_supported": "<count of languages/locales, or null>"},
+    "data_work": {"use_cases_count": "<count, or null>", "data_sources_count": "<count, or null>", "destinations_count": "<count, or null>", "data_warehouse": "<Snowflake|BigQuery|Databricks|Redshift|None, or null>", "cdp_in_place": "<Segment|Hightouch|mParticle|Census|None, or null>"},
     "engineering": {"integrations_count": "<count, or null>", "apis_to_build": "<count, or null>", "sdk_platform": "<Braze|Iterable|mParticle|Segment|Firebase|... or null>", "sdk_websites_count": "<count, or null>", "sdk_ios_apps_count": "<count, or null>", "sdk_android_apps_count": "<count, or null>", "sdk_hybrid_apps_count": "<count, or null>", "sdk_complexity": "<1-5, or null>"}
   },
   "contacts_mentioned": [
@@ -557,7 +557,8 @@ SCOPE_CRITERIA rubric:
 - Omit project_types where the notes don't mention anything matching that stream
   (e.g. don't return a "crm_execute" block if the call is about Engineering).
 - For sdk_platform, use the vendor name as it appears (Braze, Iterable, mParticle,
-  etc.). For channels / channels_executed, comma-separate (e.g. "email, push, sms").
+  etc.). For channels, comma-separate (e.g. "email, push, sms"). All scope_criteria
+  keys must match the Project Build criteria library exactly so they prefill.
 - Counts can be strings ("30") — the platform parses them back.
 - Set field to null (not omitted) when the topic was discussed but no concrete
   number was given, to signal "discussed but unknown". Omit the WHOLE project_type

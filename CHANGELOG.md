@@ -5,6 +5,50 @@ All notable changes to the Massive Rocket Lead Qualification Platform.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0dy] - 2026-05-29 - Fix: Data Work / CRM Execute scope prefill silently dropped
+
+A review of the notes-to-price flow found that the AI scope extraction prefilled
+some streams but not others. `_apply_scope_prefill` matches the AI's extracted
+keys to the Project Build criteria library by exact key and skips anything that
+does not match (server.py:1385). The extraction prompt and `scope.py` had
+drifted:
+
+- **data_work**: the prompt emitted `sources_to_connect`, `cdp_target`,
+  `warehouse_target`; the library keys are `data_sources_count`, `cdp_in_place`,
+  `data_warehouse`. None matched, so every data-work value pulled from the notes
+  was silently dropped and never prefilled.
+- **crm_execute**: the prompt emitted `channels_executed`, which is not a
+  library key, so only `monthly_campaign_volume` survived.
+
+`crm_strategy`, `crm_build` and `engineering` keys were already aligned.
+
+### Fix
+
+Aligned the `scope_criteria` schema in `_EXTRACT_SYSTEM_PROMPT` to the library
+keys, and enriched the data_work block (use_cases_count, data_sources_count,
+destinations_count, data_warehouse, cdp_in_place) and crm_execute block
+(monthly_campaign_volume, qa_required, languages_supported). Added a note to the
+rubric that scope_criteria keys must match the criteria library exactly. These
+values feed `scope.role_drivers_for_project`, which turns the counts into
+pricing effort multipliers, so data-work deals now prefill and price off the
+notes like the other streams.
+
+### Tests
+
+`test_scope_prefill.py`: a guard test asserting every key the prompt emits for
+data_work / crm_execute is a real library key (and the four orphan keys are
+gone), plus a functional test proving all six data_work + crm_execute values now
+land via `_apply_scope_prefill` (before the fix data_work landed 0, crm_execute
+landed 1).
+
+### Not in this version (flagged in the review, await go-ahead)
+
+- Surface the AI's inferred project types so the AE can one-click create the
+  streams (today the type inference exists in the extraction but is only applied
+  to streams the AE already added).
+- Rescale `role_drivers_for_project` so counts above 10 keep moving the price
+  (the `min(value/10, 1.0)` normalisation currently saturates at 10).
+
 ## [1.0.0dx] - 2026-05-29 - Dedicated Account News view
 
 Ben flagged there was no place to view news on an account. The feature existed
